@@ -3,7 +3,6 @@
 从 Docling 解析结果中提取页面级别的结构化数据。
 """
 
-import hashlib
 import re
 from collections import defaultdict
 from typing import Any
@@ -207,8 +206,15 @@ class PageExtractor:
         # 提取表格数据
         table_data = self._extract_table_data(item)
 
-        # 生成表格 Markdown
-        table_md = self._table_to_markdown(table_data)
+        # 生成表格 Markdown - 优先使用 Docling 内置方法
+        table_md = ""
+        if hasattr(item, 'export_to_markdown'):
+            try:
+                table_md = item.export_to_markdown()
+            except Exception:
+                table_md = self._table_to_markdown(table_data)
+        else:
+            table_md = self._table_to_markdown(table_data)
 
         page_contents[page_num].append({
             "type": "table",
@@ -220,7 +226,15 @@ class PageExtractor:
         })
 
     def _extract_table_data(self, item: Any) -> dict[str, Any]:
-        """提取表格结构化数据"""
+        """提取表格结构化数据
+
+        根据 Docling TableCell 的正确属性名称：
+        - start_row_offset_idx / end_row_offset_idx: 行位置
+        - start_col_offset_idx / end_col_offset_idx: 列位置
+        - text: 单元格文本
+        - row_span / col_span: 跨行/跨列
+        - row_header / column_header: 是否为标题单元格
+        """
         cells = []
         row_headers = []
         col_headers = []
@@ -230,13 +244,23 @@ class PageExtractor:
         # 尝试从 Docling 表格对象提取数据
         if hasattr(item, 'data') and item.data:
             data = item.data
+
+            # 优先使用 num_rows 和 num_cols 属性
+            if hasattr(data, 'num_rows'):
+                max_row = data.num_rows
+            if hasattr(data, 'num_cols'):
+                max_col = data.num_cols
+
             if hasattr(data, 'table_cells'):
                 for cell in data.table_cells:
-                    row = getattr(cell, 'row_index', 0)
-                    col = getattr(cell, 'col_index', 0)
+                    # 使用正确的 Docling TableCell 属性名称
+                    row = getattr(cell, 'start_row_offset_idx', 0)
+                    col = getattr(cell, 'start_col_offset_idx', 0)
                     content = getattr(cell, 'text', '')
                     row_span = getattr(cell, 'row_span', 1)
                     col_span = getattr(cell, 'col_span', 1)
+                    is_row_header = getattr(cell, 'row_header', False)
+                    is_col_header = getattr(cell, 'column_header', False)
 
                     cells.append(TableCell(
                         row=row,
@@ -246,17 +270,29 @@ class PageExtractor:
                         col_span=col_span,
                     ))
 
-                    max_row = max(max_row, row + row_span)
-                    max_col = max(max_col, col + col_span)
+                    # 如果没有从 data 获取到尺寸，从单元格计算
+                    if max_row == 0:
+                        max_row = max(max_row, row + row_span)
+                    if max_col == 0:
+                        max_col = max(max_col, col + col_span)
 
                     # 检测标题行/列
-                    if row == 0:
+                    if is_col_header or row == 0:
                         col_headers.append(content)
-                    if col == 0 and row > 0:
+                    if is_row_header or (col == 0 and row > 0):
                         row_headers.append(content)
 
+        # 获取表格标题
         caption = None
-        if hasattr(item, 'caption') and item.caption:
+        if hasattr(item, 'captions') and item.captions:
+            # captions 是一个列表
+            caption_texts = []
+            for cap in item.captions:
+                if hasattr(cap, 'text'):
+                    caption_texts.append(cap.text)
+            if caption_texts:
+                caption = " ".join(caption_texts)
+        elif hasattr(item, 'caption') and item.caption:
             caption = item.caption
 
         return {
