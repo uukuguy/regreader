@@ -1,7 +1,64 @@
 [project]
 name = "grid-code"
 version = "0.1.0"
-description = "Add your description here"
+description = "GridCode - 电力系统安规智能检索 Agent"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # 文档解析
+    "docling>=2.22.0",
+
+    # 数据模型和验证
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+
+    # 向量数据库
+    "lancedb>=0.20.0",
+
+    # MCP Server
+    "mcp>=1.6.0",
+
+    # CLI
+    "typer>=0.15.0",
+    "rich>=13.9.0",
+
+    # 日志
+    "loguru>=0.7.0",
+
+    # Agent 框架
+    "anthropic>=0.52.0",  # Claude Agent SDK
+    "pydantic-ai>=0.0.17",  # Pydantic AI
+    "langgraph>=0.2.0",  # LangGraph
+    "langchain-anthropic>=0.3.0",  # LangChain Anthropic
+
+    # 向量嵌入
+    "sentence-transformers>=3.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+gridcode = "grid_code.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grid_code"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
