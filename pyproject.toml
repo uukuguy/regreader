@@ -7,33 +7,27 @@ requires-python = ">=3.12"
 dependencies = [
     # 文档解析
     "docling>=2.22.0",
-
     # 数据模型和验证
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
-
     # 向量数据库
     "lancedb>=0.20.0",
-
     # MCP Server
     "mcp>=1.6.0",
-
     # CLI
     "typer>=0.15.0",
     "rich>=13.9.0",
-
     # 日志
     "loguru>=0.7.0",
-
     # Agent 框架
-    "anthropic>=0.52.0",  # Anthropic API (for other agents)
-    "claude-agent-sdk>=0.1.0",  # Claude Agent SDK (https://platform.claude.com/docs/en/agent-sdk)
-    "pydantic-ai>=0.0.17",  # Pydantic AI
-    "langgraph>=0.2.0",  # LangGraph
-    "langchain-anthropic>=0.3.0",  # LangChain Anthropic
-
+    "anthropic>=0.52.0", # Anthropic API (for other agents)
+    "claude-agent-sdk>=0.1.0", # Claude Agent SDK (https://platform.claude.com/docs/en/agent-sdk)
+    "pydantic-ai>=0.0.17", # Pydantic AI
+    "langgraph>=0.2.0", # LangGraph
+    "langchain-anthropic>=0.3.0", # LangChain Anthropic
     # 向量嵌入
     "sentence-transformers>=3.3.0",
+    "rapidocr-onnxruntime>=1.4.4",
 ]
 
 [project.optional-dependencies]
@@ -83,3 +77,7 @@ select = ["E", "F", "I", "N", "W", "UP"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[[tool.uv.index]]
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
+default = true

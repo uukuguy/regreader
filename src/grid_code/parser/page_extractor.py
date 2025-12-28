@@ -232,8 +232,8 @@ class PageExtractor:
             data = item.data
             if hasattr(data, 'table_cells'):
                 for cell in data.table_cells:
-                    row = getattr(cell, 'row', 0)
-                    col = getattr(cell, 'col', 0)
+                    row = getattr(cell, 'row_index', 0)
+                    col = getattr(cell, 'col_index', 0)
                     content = getattr(cell, 'text', '')
                     row_span = getattr(cell, 'row_span', 1)
                     col_span = getattr(cell, 'col_span', 1)
