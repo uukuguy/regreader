@@ -79,6 +79,26 @@ class GridCodeSettings(BaseSettings):
         description="默认使用的 LLM 模型",
     )
 
+    # 索引后端配置
+    keyword_index_backend: str = Field(
+        default="fts5",
+        description="关键词索引后端: fts5, tantivy, whoosh",
+    )
+    vector_index_backend: str = Field(
+        default="lancedb",
+        description="向量索引后端: lancedb, qdrant",
+    )
+
+    # Qdrant 配置
+    qdrant_url: str | None = Field(
+        default=None,
+        description="Qdrant 服务器 URL（服务器模式）",
+    )
+    qdrant_api_key: str | None = Field(
+        default=None,
+        description="Qdrant API Key（服务器模式）",
+    )
+
     # 检索配置
     search_top_k: int = Field(
         default=10,

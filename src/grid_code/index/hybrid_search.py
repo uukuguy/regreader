@@ -1,37 +1,76 @@
 """混合检索接口
 
-结合 FTS5 关键词检索和 LanceDB 语义检索。
+结合关键词检索和语义检索，支持多种后端实现。
 """
 
 from loguru import logger
 
 from grid_code.config import get_settings
-from grid_code.index.fts_index import FTSIndex
-from grid_code.index.vector_index import VectorIndex
+from grid_code.index.base import BaseKeywordIndex, BaseVectorIndex
 from grid_code.storage.models import SearchResult
 
 
 class HybridSearch:
-    """混合检索器"""
+    """混合检索器
+
+    支持可插拔的关键词索引和向量索引后端。
+    """
 
     def __init__(
         self,
-        fts_index: FTSIndex | None = None,
-        vector_index: VectorIndex | None = None,
+        keyword_index: BaseKeywordIndex | None = None,
+        vector_index: BaseVectorIndex | None = None,
     ):
         """
         初始化混合检索器
 
         Args:
-            fts_index: FTS 索引实例
-            vector_index: 向量索引实例
+            keyword_index: 关键词索引实例（BaseKeywordIndex 子类）
+            vector_index: 向量索引实例（BaseVectorIndex 子类）
         """
-        self.fts_index = fts_index or FTSIndex()
-        self.vector_index = vector_index or VectorIndex()
-
         settings = get_settings()
+
+        # 延迟导入，避免循环依赖
+        if keyword_index is None:
+            keyword_index = self._create_default_keyword_index(settings)
+        if vector_index is None:
+            vector_index = self._create_default_vector_index(settings)
+
+        self.keyword_index = keyword_index
+        self.vector_index = vector_index
+
         self.fts_weight = settings.fts_weight
         self.vector_weight = settings.vector_weight
+
+        logger.info(
+            f"混合检索器初始化完成: 关键词={self.keyword_index.name}, "
+            f"向量={self.vector_index.name}"
+        )
+
+    def _create_default_keyword_index(self, settings) -> BaseKeywordIndex:
+        """根据配置创建默认关键词索引"""
+        backend = getattr(settings, "keyword_index_backend", "fts5")
+
+        if backend == "tantivy":
+            from grid_code.index.keyword import TantivyIndex
+            return TantivyIndex()
+        elif backend == "whoosh":
+            from grid_code.index.keyword import WhooshIndex
+            return WhooshIndex()
+        else:  # 默认使用 fts5
+            from grid_code.index.keyword import FTS5Index
+            return FTS5Index()
+
+    def _create_default_vector_index(self, settings) -> BaseVectorIndex:
+        """根据配置创建默认向量索引"""
+        backend = getattr(settings, "vector_index_backend", "lancedb")
+
+        if backend == "qdrant":
+            from grid_code.index.vector import QdrantIndex
+            return QdrantIndex()
+        else:  # 默认使用 lancedb
+            from grid_code.index.vector import LanceDBIndex
+            return LanceDBIndex()
 
     def search(
         self,
@@ -53,23 +92,25 @@ class HybridSearch:
             合并后的 SearchResult 列表
         """
         # 分别执行两种检索
-        fts_results = self.fts_index.search(
+        keyword_results = self.keyword_index.search(
             query, reg_id=reg_id, chapter_scope=chapter_scope, limit=limit
         )
         vector_results = self.vector_index.search(
             query, reg_id=reg_id, chapter_scope=chapter_scope, limit=limit
         )
 
-        logger.debug(f"FTS 检索到 {len(fts_results)} 条，向量检索到 {len(vector_results)} 条")
+        logger.debug(
+            f"关键词检索到 {len(keyword_results)} 条，向量检索到 {len(vector_results)} 条"
+        )
 
         # 合并结果
-        merged = self._merge_results(fts_results, vector_results, limit)
+        merged = self._merge_results(keyword_results, vector_results, limit)
 
         return merged
 
     def _merge_results(
         self,
-        fts_results: list[SearchResult],
+        keyword_results: list[SearchResult],
         vector_results: list[SearchResult],
         limit: int,
     ) -> list[SearchResult]:
@@ -84,8 +125,8 @@ class HybridSearch:
 
         k = 60  # RRF 参数
 
-        # 处理 FTS 结果
-        for rank, result in enumerate(fts_results):
+        # 处理关键词检索结果
+        for rank, result in enumerate(keyword_results):
             key = (result.reg_id, result.page_num, result.block_id)
             rrf_score = self.fts_weight / (k + rank + 1)
 
@@ -94,7 +135,7 @@ class HybridSearch:
                 score_map[key] = 0
             score_map[key] += rrf_score
 
-        # 处理向量结果
+        # 处理向量检索结果
         for rank, result in enumerate(vector_results):
             key = (result.reg_id, result.page_num, result.block_id)
             rrf_score = self.vector_weight / (k + rank + 1)
@@ -125,7 +166,7 @@ class HybridSearch:
 
     def close(self):
         """关闭索引连接"""
-        self.fts_index.close()
+        self.keyword_index.close()
         self.vector_index.close()
 
     def __enter__(self):

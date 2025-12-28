@@ -1,5 +1,105 @@
 # GridCode 工作日志
 
+## 2025-12-28 索引层架构改进
+
+### 会话概述
+对索引层进行架构改进，引入抽象基类使关键词检索器和语义检索器可插拔，新增多种索引后端实现。
+
+### 架构改进内容
+
+#### 抽象基类定义
+- `src/grid_code/index/base.py` - 新增
+  - `BaseKeywordIndex` - 关键词索引抽象基类
+  - `BaseVectorIndex` - 向量索引抽象基类
+
+#### 关键词索引实现 (3种)
+- `src/grid_code/index/keyword/__init__.py` - 模块入口
+- `src/grid_code/index/keyword/fts5.py` - SQLite FTS5 实现（默认）
+- `src/grid_code/index/keyword/tantivy.py` - Tantivy 实现（高性能 Rust 引擎）
+- `src/grid_code/index/keyword/whoosh.py` - Whoosh 实现（纯 Python，支持中文分词）
+
+#### 向量索引实现 (2种)
+- `src/grid_code/index/vector/__init__.py` - 模块入口
+- `src/grid_code/index/vector/lancedb.py` - LanceDB 实现（默认）
+- `src/grid_code/index/vector/qdrant.py` - Qdrant 实现（支持本地/服务器模式）
+
+#### 混合检索器更新
+- `src/grid_code/index/hybrid_search.py` - 更新
+  - 使用抽象类型 `BaseKeywordIndex` 和 `BaseVectorIndex`
+  - 添加工厂方法根据配置创建索引实例
+  - 支持通过配置切换后端
+
+#### 配置更新
+- `src/grid_code/config.py` - 新增配置项
+  - `keyword_index_backend`: 关键词索引后端 (fts5/tantivy/whoosh)
+  - `vector_index_backend`: 向量索引后端 (lancedb/qdrant)
+  - `qdrant_url`: Qdrant 服务器 URL
+  - `qdrant_api_key`: Qdrant API Key
+
+#### 依赖更新
+- `pyproject.toml` - 新增可选依赖组
+  - `tantivy`: tantivy>=0.22.0
+  - `whoosh`: whoosh>=2.7.4, jieba>=0.42.0
+  - `qdrant`: qdrant-client>=1.12.0
+  - `all-indexes`: 安装所有可选索引后端
+
+### 向后兼容性
+保留旧的导入路径，通过重定向实现向后兼容：
+- `grid_code.index.fts_index.FTSIndex` → `grid_code.index.keyword.fts5.FTS5Index`
+- `grid_code.index.vector_index.VectorIndex` → `grid_code.index.vector.lancedb.LanceDBIndex`
+
+### 新项目结构
+```
+src/grid_code/index/
+├── __init__.py          # 导出所有索引类
+├── base.py              # 抽象基类定义
+├── hybrid_search.py     # 混合检索器
+├── fts_index.py         # 兼容性重定向
+├── vector_index.py      # 兼容性重定向
+├── keyword/
+│   ├── __init__.py
+│   ├── fts5.py          # SQLite FTS5
+│   ├── tantivy.py       # Tantivy
+│   └── whoosh.py        # Whoosh
+└── vector/
+    ├── __init__.py
+    ├── lancedb.py       # LanceDB
+    └── qdrant.py        # Qdrant
+```
+
+### 使用示例
+
+```python
+# 使用默认后端
+from grid_code.index import HybridSearch
+search = HybridSearch()
+
+# 使用特定后端
+from grid_code.index import TantivyIndex, QdrantIndex, HybridSearch
+search = HybridSearch(
+    keyword_index=TantivyIndex(),
+    vector_index=QdrantIndex(url="http://localhost:6333")
+)
+
+# 通过配置切换
+export GRIDCODE_KEYWORD_INDEX_BACKEND=tantivy
+export GRIDCODE_VECTOR_INDEX_BACKEND=qdrant
+```
+
+### 安装可选依赖
+
+```bash
+# 安装单个后端
+pip install grid-code[tantivy]
+pip install grid-code[whoosh]
+pip install grid-code[qdrant]
+
+# 安装所有索引后端
+pip install grid-code[all-indexes]
+```
+
+---
+
 ## 2025-12-28 核心架构实现完成
 
 ### 会话概述
