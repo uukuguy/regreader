@@ -29,8 +29,9 @@ Inspired by how Claude Code searches codebases, GridCode treats regulations as "
 │                    Tool Layer (MCP Server)                  │
 │        get_toc()  |  smart_search()  |  read_page_range()   │
 ├─────────────────────────────────────────────────────────────┤
-│                    Index Layer                              │
-│            SQLite FTS5 (keyword) + LanceDB (semantic)       │
+│                    Index Layer (Pluggable)                  │
+│  Keyword: FTS5 / Tantivy / Whoosh                           │
+│  Vector:  LanceDB / Qdrant                                  │
 ├─────────────────────────────────────────────────────────────┤
 │                    Storage Layer                            │
 │         Docling JSON (structure) + Markdown (reading)       │
@@ -115,19 +116,54 @@ User: "How to handle 110kV bus voltage loss?"
 | Component | Choice | Rationale |
 |-----------|--------|-----------|
 | Document Parser | Docling | Table structure recognition, provenance (page_no) tracking |
-| Keyword Index | SQLite FTS5 | Zero-deployment, built into Python |
-| Vector Index | LanceDB | Lightweight, hybrid search support |
+| Keyword Index | SQLite FTS5 (default) | Zero-deployment, built into Python |
+| Keyword Index | Tantivy (optional) | High-performance Rust engine |
+| Keyword Index | Whoosh (optional) | Pure Python, Chinese tokenization support |
+| Vector Index | LanceDB (default) | Lightweight, hybrid search support |
+| Vector Index | Qdrant (optional) | Production-grade, distributed support |
 | MCP Server | FastMCP | Official SDK, SSE transport |
 | Agent Framework | Claude SDK / Pydantic AI / LangGraph | Flexibility for different deployment contexts |
 
+## Installation
+
+```bash
+# Basic installation
+pip install grid-code
+
+# With optional index backends
+pip install grid-code[tantivy]     # High-performance keyword search
+pip install grid-code[whoosh]      # Chinese tokenization support
+pip install grid-code[qdrant]      # Production vector database
+
+# Install all index backends
+pip install grid-code[all-indexes]
+```
+
+## Configuration
+
+Configure index backends via environment variables:
+
+```bash
+# Select keyword index backend (fts5/tantivy/whoosh)
+export GRIDCODE_KEYWORD_INDEX_BACKEND=fts5
+
+# Select vector index backend (lancedb/qdrant)
+export GRIDCODE_VECTOR_INDEX_BACKEND=lancedb
+
+# Qdrant server configuration (if using qdrant)
+export GRIDCODE_QDRANT_URL=http://localhost:6333
+```
+
 ## Project Status
 
-Currently in design phase. Implementation roadmap:
+Core implementation complete. Remaining work:
 
-- [ ] Phase 1: Docling integration, page-level storage
-- [ ] Phase 2: FTS5 + LanceDB indexing
-- [ ] Phase 3: MCP Server with SSE transport
-- [ ] Phase 4-6: Three agent implementations
+- [x] Phase 1: Docling integration, page-level storage
+- [x] Phase 2: FTS5 + LanceDB indexing (with pluggable backends)
+- [x] Phase 3: MCP Server with SSE transport
+- [x] Phase 4-6: Three agent implementations
+- [ ] End-to-end testing with real regulation documents
+- [ ] Performance benchmarking across index backends
 
 ## License
 

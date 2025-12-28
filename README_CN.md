@@ -29,8 +29,9 @@ GridCode 是一个面向电力系统安全规程（安规）的智能检索与�
 │                      工具层 (MCP Server)                     │
 │        get_toc()  |  smart_search()  |  read_page_range()   │
 ├─────────────────────────────────────────────────────────────┤
-│                      索引层 (Index)                          │
-│            SQLite FTS5 (关键词) + LanceDB (语义)             │
+│                      索引层 (可插拔架构)                      │
+│  关键词: FTS5 / Tantivy / Whoosh                             │
+│  向量:   LanceDB / Qdrant                                    │
 ├─────────────────────────────────────────────────────────────┤
 │                      存储层 (Storage)                        │
 │           Docling JSON (结构化) + Markdown (阅读)            │
@@ -115,19 +116,54 @@ PageDocument
 | 组件 | 选型 | 理由 |
 |------|------|------|
 | 文档解析 | Docling | 表格结构识别，provenance (page_no) 追踪 |
-| 关键词索引 | SQLite FTS5 | 零部署成本，Python 内置 |
-| 向量索引 | LanceDB | 轻量级，支持混合检索 |
+| 关键词索引 | SQLite FTS5 (默认) | 零部署成本，Python 内置 |
+| 关键词索引 | Tantivy (可选) | 高性能 Rust 引擎 |
+| 关键词索引 | Whoosh (可选) | 纯 Python，支持中文分词 |
+| 向量索引 | LanceDB (默认) | 轻量级，支持混合检索 |
+| 向量索引 | Qdrant (可选) | 生产级，支持分布式 |
 | MCP Server | FastMCP | 官方 SDK，SSE 传输 |
 | Agent 框架 | Claude SDK / Pydantic AI / LangGraph | 适应不同部署场景 |
 
+## 安装
+
+```bash
+# 基础安装
+pip install grid-code
+
+# 安装可选索引后端
+pip install grid-code[tantivy]     # 高性能关键词搜索
+pip install grid-code[whoosh]      # 中文分词支持
+pip install grid-code[qdrant]      # 生产级向量数据库
+
+# 安装所有索引后端
+pip install grid-code[all-indexes]
+```
+
+## 配置
+
+通过环境变量配置索引后端：
+
+```bash
+# 选择关键词索引后端 (fts5/tantivy/whoosh)
+export GRIDCODE_KEYWORD_INDEX_BACKEND=fts5
+
+# 选择向量索引后端 (lancedb/qdrant)
+export GRIDCODE_VECTOR_INDEX_BACKEND=lancedb
+
+# Qdrant 服务器配置 (使用 qdrant 时)
+export GRIDCODE_QDRANT_URL=http://localhost:6333
+```
+
 ## 项目状态
 
-当前处于设计阶段。实施路线：
+核心实现已完成。剩余工作：
 
-- [ ] Phase 1: Docling 集成，页面级存储
-- [ ] Phase 2: FTS5 + LanceDB 索引
-- [ ] Phase 3: MCP Server（SSE 传输）
-- [ ] Phase 4-6: 三种 Agent 实现
+- [x] Phase 1: Docling 集成，页面级存储
+- [x] Phase 2: FTS5 + LanceDB 索引（可插拔后端架构）
+- [x] Phase 3: MCP Server（SSE 传输）
+- [x] Phase 4-6: 三种 Agent 实现
+- [ ] 使用真实规程文档进行端到端测试
+- [ ] 各索引后端性能对比测试
 
 ## 开源协议
 

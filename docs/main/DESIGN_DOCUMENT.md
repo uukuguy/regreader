@@ -21,7 +21,12 @@
 │     get_toc() | smart_search() | read_page_range()          │
 ├─────────────────────────────────────────────────────────────┤
 │                    索引层 (Hybrid Index)                     │
-│          SQLite FTS5 (关键词) + LanceDB (语义)               │
+│  ┌─────────────────────────┬─────────────────────────┐      │
+│  │ 关键词索引 (可选后端)     │ 向量索引 (可选后端)      │      │
+│  │ • FTS5 (默认)           │ • LanceDB (默认)        │      │
+│  │ • Tantivy               │ • Qdrant                │      │
+│  │ • Whoosh                │                         │      │
+│  └─────────────────────────┴─────────────────────────┘      │
 ├─────────────────────────────────────────────────────────────┤
 │                    存储层 (Page Store)                       │
 │     Docling JSON (结构化) + Page-Level Markdown (阅读)       │
@@ -219,10 +224,19 @@ grid-code/
 │       │   ├── __init__.py
 │       │   ├── page_store.py       # 页面存储（JSON/Markdown）
 │       │   └── models.py           # Pydantic 数据模型
-│       ├── index/                  # 索引层
+│       ├── index/                  # 索引层（可插拔架构）
 │       │   ├── __init__.py
-│       │   ├── fts_index.py        # SQLite FTS5 关键词索引
-│       │   └── vector_index.py     # LanceDB 语义索引
+│       │   ├── base.py             # 抽象基类定义
+│       │   ├── hybrid_search.py    # 混合检索器
+│       │   ├── keyword/            # 关键词索引实现
+│       │   │   ├── __init__.py
+│       │   │   ├── fts5.py         # SQLite FTS5 (默认)
+│       │   │   ├── tantivy.py      # Tantivy (可选)
+│       │   │   └── whoosh.py       # Whoosh (可选)
+│       │   └── vector/             # 向量索引实现
+│       │       ├── __init__.py
+│       │       ├── lancedb.py      # LanceDB (默认)
+│       │       └── qdrant.py       # Qdrant (可选)
 │       ├── mcp/                    # MCP Server (共享工具层)
 │       │   ├── __init__.py
 │       │   ├── server.py           # FastMCP 服务实现
@@ -230,6 +244,7 @@ grid-code/
 │       ├── agents/                 # 推理层 (三实现)
 │       │   ├── __init__.py
 │       │   ├── base.py             # Agent 抽象基类
+│       │   ├── prompts.py          # System Prompt 定义
 │       │   ├── claude_agent.py     # 实现 A: Claude Agent SDK
 │       │   ├── pydantic_agent.py   # 实现 B: Pydantic AI
 │       │   └── langgraph_agent.py  # 实现 C: LangGraph
@@ -248,8 +263,11 @@ grid-code/
 | 组件 | 技术选型 | 理由 |
 |------|----------|------|
 | 文档解析 | Docling | 表格结构识别强，保留 provenance (page_no) |
-| 关键词索引 | SQLite FTS5 | 零部署成本，内置 Python |
-| 语义索引 | LanceDB | 轻量级向量库，支持混合检索 |
+| 关键词索引 | SQLite FTS5 (默认) | 零部署成本，内置 Python |
+| 关键词索引 (可选) | Tantivy | 高性能 Rust 引擎 |
+| 关键词索引 (可选) | Whoosh | 纯 Python，支持中文分词 |
+| 语义索引 | LanceDB (默认) | 轻量级向量库，支持混合检索 |
+| 语义索引 (可选) | Qdrant | 生产级向量数据库，支持分布式 |
 | MCP Server | FastMCP | 官方推荐，易于集成 |
 | 传输协议 | SSE / Streamable-HTTP | 作为独立服务部署 |
 | Agent 框架 A | Claude Agent SDK | Claude 最佳体验，原生 MCP 支持 |
@@ -258,47 +276,67 @@ grid-code/
 | 数据模型 | Pydantic | 类型安全，易于序列化 |
 | CLI | Typer | 现代 Python CLI 框架 |
 
+### 7.1 索引后端对比
+
+#### 关键词索引
+
+| 后端 | 特点 | 适用场景 |
+|------|------|----------|
+| **FTS5** (默认) | 零部署、Python 内置、BM25 排名 | 开发测试、小规模部署 |
+| **Tantivy** | Rust 高性能、支持增量索引 | 大规模文档、性能敏感 |
+| **Whoosh** | 纯 Python、支持中文分词 (jieba) | 需要细粒度中文分词 |
+
+#### 向量索引
+
+| 后端 | 特点 | 适用场景 |
+|------|------|----------|
+| **LanceDB** (默认) | 轻量嵌入式、零部署 | 开发测试、单机部署 |
+| **Qdrant** | 生产级、支持分布式、丰富的过滤 | 生产环境、大规模数据 |
+
 ### Docling 支持的输入格式
 - PDF, DOCX, PPTX, XLSX, HTML, Images
 
 ## 8. 实施阶段
 
-### Phase 1: 基础设施 (Parser & Storage)
-- [ ] 集成 Docling，实现 DOCX/PDF → JSON/Markdown 转换
-- [ ] 构建数据模型（PageDocument, ContentBlock, TableMeta, Annotation）
-- [ ] 实现页面级存储
+### Phase 1: 基础设施 (Parser & Storage) ✅ 已完成
+- [x] 集成 Docling，实现 DOCX/PDF → JSON/Markdown 转换
+- [x] 构建数据模型（PageDocument, ContentBlock, TableMeta, Annotation）
+- [x] 实现页面级存储
 - [ ] 验证 Docling 对安规表格的解析效果（一页多表场景）
 
-### Phase 2: 索引层
-- [ ] 构建 SQLite FTS5 全文索引
-- [ ] 实现 LanceDB 语义索引
-- [ ] 实现混合检索接口
+### Phase 2: 索引层 ✅ 已完成
+- [x] 构建 SQLite FTS5 全文索引
+- [x] 实现 LanceDB 语义索引
+- [x] 实现混合检索接口
+- [x] 可插拔索引架构（抽象基类）
+- [x] 新增 Tantivy、Whoosh 关键词索引后端
+- [x] 新增 Qdrant 向量索引后端
 
-### Phase 3: MCP Server
-- [ ] 实现 get_toc 工具
-- [ ] 实现 smart_search 工具
-- [ ] 实现 read_page_range 工具（含跨页拼接逻辑）
-- [ ] 实现 SSE 传输协议支持
+### Phase 3: MCP Server ✅ 已完成
+- [x] 实现 get_toc 工具
+- [x] 实现 smart_search 工具
+- [x] 实现 read_page_range 工具（含跨页拼接逻辑）
+- [x] 实现 SSE 传输协议支持
 
-### Phase 4: Agent 实现 A (Claude Agent SDK)
-- [ ] 定义 Agent 抽象基类
-- [ ] 集成 Claude Agent SDK
-- [ ] 实现 MCP 工具调用
-- [ ] 编写 System Prompt
+### Phase 4: Agent 实现 A (Claude Agent SDK) ✅ 已完成
+- [x] 定义 Agent 抽象基类
+- [x] 集成 Claude Agent SDK
+- [x] 实现 MCP 工具调用
+- [x] 编写 System Prompt
 - [ ] 端到端测试
 
-### Phase 5: Agent 实现 B (Pydantic AI)
-- [ ] 实现 Pydantic AI Agent
-- [ ] 配置多模型支持（Claude/GPT/Qwen）
-- [ ] 实现 MCP 工具调用
-- [ ] 复用 System Prompt
+### Phase 5: Agent 实现 B (Pydantic AI) ✅ 已完成
+- [x] 实现 Pydantic AI Agent
+- [x] 配置多模型支持（Claude/GPT/Qwen）
+- [x] 实现 MCP 工具调用
+- [x] 复用 System Prompt
 - [ ] 对比测试
 
-### Phase 6: Agent 实现 C (LangGraph)
-- [ ] 实现 LangGraph Agent
-- [ ] 配置多模型支持
-- [ ] 实现 MCP 工具调用适配
-- [ ] 复用 System Prompt
+### Phase 6: Agent 实现 C (LangGraph) ✅ 已完成
+- [x] 实现 LangGraph Agent
+- [x] 配置多模型支持
+- [x] 实现 MCP 工具调用适配
+- [x] 复用 System Prompt
 - [ ] 三框架对比测试
 
 ## 9. 关键设计决策
@@ -414,11 +452,17 @@ gridcode search --reg-id angui_2024 "变压器过热"
 | 页面提取 | `parser/page_extractor.py` | 从 DoclingDocument 提取页面数据 |
 | 数据模型 | `storage/models.py` | PageDocument, ContentBlock, TableMeta 等 |
 | 页面存储 | `storage/page_store.py` | 页面的持久化和读取 |
-| 关键词索引 | `index/fts_index.py` | SQLite FTS5 封装 |
-| 语义索引 | `index/vector_index.py` | LanceDB 封装 |
+| 索引基类 | `index/base.py` | BaseKeywordIndex, BaseVectorIndex 抽象类 |
+| 混合检索 | `index/hybrid_search.py` | RRF 融合，可插拔后端 |
+| FTS5 索引 | `index/keyword/fts5.py` | SQLite FTS5 关键词索引 |
+| Tantivy 索引 | `index/keyword/tantivy.py` | Tantivy 关键词索引 (可选) |
+| Whoosh 索引 | `index/keyword/whoosh.py` | Whoosh 关键词索引 (可选) |
+| LanceDB 索引 | `index/vector/lancedb.py` | LanceDB 向量索引 |
+| Qdrant 索引 | `index/vector/qdrant.py` | Qdrant 向量索引 (可选) |
 | MCP 工具 | `mcp/tools.py` | get_toc, smart_search, read_page_range |
 | MCP 服务 | `mcp/server.py` | FastMCP 服务入口 |
 | Agent 基类 | `agents/base.py` | Agent 抽象接口 |
+| System Prompt | `agents/prompts.py` | 共享的 System Prompt 定义 |
 | Claude Agent | `agents/claude_agent.py` | Claude Agent SDK 实现 |
 | Pydantic Agent | `agents/pydantic_agent.py` | Pydantic AI 实现 |
 | LangGraph Agent | `agents/langgraph_agent.py` | LangGraph 实现 |

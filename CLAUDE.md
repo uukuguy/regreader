@@ -15,7 +15,10 @@ GridCode 是电力系统安规智能检索 Agent，采用 Page-Based Agentic Sea
 src/grid_code/
 ├── parser/           # Docling 解析层
 ├── storage/          # 页面存储 + Pydantic 模型
-├── index/            # FTS5 + LanceDB 索引
+├── index/            # 可插拔索引架构
+│   ├── base.py       # 抽象基类
+│   ├── keyword/      # 关键词索引 (FTS5/Tantivy/Whoosh)
+│   └── vector/       # 向量索引 (LanceDB/Qdrant)
 ├── mcp/              # FastMCP Server
 ├── agents/           # 三种 Agent 实现
 ├── config.py
@@ -28,8 +31,11 @@ src/grid_code/
 |------|------|----------|
 | Python | 3.12+ | 使用现代类型提示语法 |
 | 文档解析 | Docling | - |
-| 关键词索引 | SQLite FTS5 | 内置 |
-| 向量索引 | LanceDB | - |
+| 关键词索引 | SQLite FTS5 (默认) | 内置 |
+| 关键词索引 | Tantivy (可选) | pip install grid-code[tantivy] |
+| 关键词索引 | Whoosh (可选) | pip install grid-code[whoosh] |
+| 向量索引 | LanceDB (默认) | - |
+| 向量索引 | Qdrant (可选) | pip install grid-code[qdrant] |
 | MCP Server | FastMCP | SSE 传输 |
 | 数据模型 | Pydantic v2 | BaseModel |
 | CLI | Typer | - |
@@ -79,11 +85,20 @@ read_page_range(reg_id: str, start_page: int, end_page: int) -> PageContent
 - 所有 MCP 工具返回必须包含 `source` 字段（reg_id + page_num）
 - 表格跨页时必须设置 `continues_to_next: true`
 - Agent 实现必须继承 `agents/base.py` 中的抽象基类
+- 索引实现必须继承 `index/base.py` 中的抽象基类
 
 ### 禁止事项
 - 禁止在索引层直接操作原始 PDF/DOCX 文件
 - 禁止硬编码规程 ID，必须从配置读取
 - 禁止在 MCP 工具中进行复杂推理（推理属于 Agent 层）
+
+### 索引层扩展规范
+新增索引后端时：
+1. 继承 `BaseKeywordIndex` 或 `BaseVectorIndex`
+2. 实现所有抽象方法
+3. 在 `keyword/__init__.py` 或 `vector/__init__.py` 中导出
+4. 在 `hybrid_search.py` 的工厂方法中注册
+5. 在 `pyproject.toml` 中添加可选依赖
 
 ## 测试规范
 
