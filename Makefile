@@ -33,6 +33,7 @@ help: ## Show this help message
 	@echo "  make test                 # Run all tests"
 	@echo "  make serve                # Start MCP server (SSE mode)"
 	@echo "  make chat REG_ID=angui    # Start chat with specific regulation"
+	@echo "  make inspect PAGE_NUM=25  # Inspect page 25 data across indexes"
 
 #----------------------------------------------------------------------
 # Installation
@@ -137,6 +138,18 @@ ingest: ## Ingest a document (usage: make ingest FILE=/path/to/doc.docx REG_ID=a
 
 version: ## Show GridCode version
 	$(UV) run gridcode version
+
+PAGE_NUM ?= 1
+OUTPUT ?=
+inspect: ## Inspect page data across indexes (usage: make inspect REG_ID=angui PAGE_NUM=25)
+	@if [ -z "$(OUTPUT)" ]; then \
+		$(UV) run gridcode inspect $(REG_ID) $(PAGE_NUM); \
+	else \
+		$(UV) run gridcode inspect $(REG_ID) $(PAGE_NUM) --output $(OUTPUT); \
+	fi
+
+inspect-vectors: ## Inspect page data with vector display
+	$(UV) run gridcode inspect $(REG_ID) $(PAGE_NUM) --show-vectors
 
 #----------------------------------------------------------------------
 # Build & Distribution

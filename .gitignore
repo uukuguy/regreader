@@ -16,3 +16,9 @@ wheels/
 
 # Data directory
 data/
+
+# Output directories
+outputs/
+
+# macOS files
+.DS_Store

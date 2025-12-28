@@ -234,6 +234,10 @@ Core implementation complete. Remaining work:
 - [ ] End-to-end testing with real regulation documents
 - [ ] Performance benchmarking across index backends
 
+## References
+
+[Docling Documentation - Examples](https://docling-project.github.io/docling/examples/)
+
 ## License
 
 MIT

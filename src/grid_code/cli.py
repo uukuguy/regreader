@@ -264,6 +264,44 @@ def delete(
 
 
 @app.command()
+def inspect(
+    reg_id: str = typer.Argument(..., help="规程标识"),
+    page_num: int = typer.Argument(..., help="页码"),
+    output: Path | None = typer.Option("outputs/inspections", "--output", "-o", help="JSON 输出文件路径"),
+    show_vectors: bool = typer.Option(False, "--show-vectors", help="显示向量数据（默认隐藏）"),
+):
+    """检查指定页面在不同数据源中的原始数据"""
+    from grid_code.exceptions import PageNotFoundError, RegulationNotFoundError
+    from grid_code.services.inspect import InspectService
+    from grid_code.services.inspect_display import InspectDisplay
+
+    service = InspectService()
+    display = InspectDisplay()
+
+    try:
+        with console.status(f"检查 {reg_id} P{page_num} 的数据..."):
+            result, analysis = service.inspect_page(reg_id, page_num, show_vectors)
+
+        # 显示结果
+        display.display_result(result, analysis)
+
+        # 保存 JSON
+        saved_path = service.save_json(result, analysis, output)
+        display.display_save_message(str(saved_path))
+
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        console.print("[yellow]提示: 使用 'grid-code list' 查看已入库的规程[/yellow]")
+        raise typer.Exit(1)
+    except PageNotFoundError:
+        console.print(f"[red]错误: 页面 {page_num} 不存在[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]错误: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
 def version():
     """显示版本信息"""
     from grid_code import __version__

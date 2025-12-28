@@ -16,7 +16,7 @@ def main():
 
     # input_doc_path = Path("tests/data/pdf/2206.01062.pdf")
     input_doc_path = sys.argv[1]
-    output_dir = Path("scratch")
+    output_dir = Path("outputs/tables")
 
     doc_converter = DocumentConverter()
 
