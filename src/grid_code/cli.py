@@ -78,21 +78,28 @@ def ingest(
         with console.status("解析文档..."):
             result = parser.parse(doc_file)
 
-        with console.status("提取页面..."):
-            extractor = PageExtractor(current_reg_id)
-            pages = extractor.extract_pages(result)
+        extractor = PageExtractor(current_reg_id)
+
+        # 第一阶段：提取文档结构
+        with console.status("提取章节结构..."):
+            doc_structure = extractor.extract_document_structure(result)
+        console.print(f"[green]✓ 提取章节结构: {len(doc_structure.all_nodes)} 个章节[/green]")
+
+        # 第二阶段：提取页面内容
+        with console.status("提取页面内容..."):
+            pages = extractor.extract_pages(result, doc_structure)
             toc = extractor.extract_toc(result)
 
         console.print(f"提取完成: {len(pages)} 页")
 
         with console.status("保存页面..."):
-            page_store.save_pages(pages, toc, doc_file.name)
+            page_store.save_pages(pages, toc, doc_structure, doc_file.name)
 
         with console.status("构建 FTS 索引..."):
-            fts_index.index_pages(pages)
+            fts_index.index_pages(pages, doc_structure)
 
         with console.status("构建向量索引..."):
-            vector_index.index_pages(pages)
+            vector_index.index_pages(pages, doc_structure)
 
         console.print(f"[green]✓ 规程 {current_reg_id} 入库完成[/green]")
 
@@ -156,12 +163,26 @@ def search(
     reg_id: str = typer.Option(None, "--reg-id", "-r", help="限定规程"),
     chapter: str = typer.Option(None, "--chapter", "-c", help="限定章节"),
     limit: int = typer.Option(10, "--limit", "-l", help="结果数量"),
+    block_types: str = typer.Option(None, "--types", "-T", help="限定块类型（逗号分隔，如 text,table）"),
+    section_number: str = typer.Option(None, "--section", "-s", help="精确匹配章节号（如 2.1.4.1.6）"),
 ):
     """测试检索功能"""
     from grid_code.index import HybridSearch
 
+    # 解析块类型参数
+    block_type_list = None
+    if block_types:
+        block_type_list = [t.strip() for t in block_types.split(",")]
+
     hybrid_search = HybridSearch()
-    results = hybrid_search.search(query, reg_id=reg_id, chapter_scope=chapter, limit=limit)
+    results = hybrid_search.search(
+        query,
+        reg_id=reg_id,
+        chapter_scope=chapter,
+        limit=limit,
+        block_types=block_type_list,
+        section_number=section_number,
+    )
 
     if not results:
         console.print("[yellow]未找到相关结果[/yellow]")
@@ -176,6 +197,72 @@ def search(
         console.print(f"   相关度: {result.score:.4f}")
         console.print(f"   {result.snippet[:200]}...")
         console.print()
+
+
+@app.command("read-chapter")
+def read_chapter(
+    reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
+    section: str = typer.Option(..., "--section", "-s", help="章节编号，如 '2.1.4.1.6'"),
+    no_children: bool = typer.Option(False, "--no-children", help="不包含子章节内容"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="输出到文件"),
+):
+    """读取指定章节的完整内容"""
+    from rich.markdown import Markdown
+
+    from grid_code.exceptions import ChapterNotFoundError, RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        result = tools.read_chapter_content(
+            reg_id,
+            section,
+            include_children=not no_children,
+        )
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+    except ChapterNotFoundError:
+        console.print(f"[red]错误: 章节 {section} 不存在[/red]")
+        raise typer.Exit(1)
+
+    if "error" in result:
+        console.print(f"[red]错误: {result['error']}[/red]")
+        raise typer.Exit(1)
+
+    # 输出到文件
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        content = f"# {result['section_number']} {result['title']}\n\n"
+        content += f"**路径**: {' > '.join(result['full_path'])}\n"
+        content += f"**页码**: P{result['page_range'][0]}-{result['page_range'][1]}\n"
+        content += f"**来源**: {result['source']}\n\n"
+        content += "---\n\n"
+        content += result['content_markdown']
+        output.write_text(content, encoding="utf-8")
+        console.print(f"[green]✓ 已保存到 {output}[/green]")
+        return
+
+    # 输出到控制台
+    console.print(f"\n[bold]{result['section_number']} {result['title']}[/bold]")
+    console.print(f"[dim]路径: {' > '.join(result['full_path'])}[/dim]")
+    console.print(f"[dim]页码: P{result['page_range'][0]}-{result['page_range'][1]}[/dim]")
+    console.print(f"[dim]内容块: {result['block_count']} 个[/dim]")
+
+    if result['children']:
+        console.print(f"\n[bold]子章节 ({len(result['children'])} 个):[/bold]")
+        for child in result['children']:
+            console.print(f"  • {child['section_number']} {child['title']} (P{child['page_num']})")
+
+    console.print(f"\n[dim]{'包含' if result['children_included'] else '不包含'}子章节内容[/dim]")
+    console.print("\n" + "─" * 60 + "\n")
+
+    # 显示 Markdown 内容
+    if result['content_markdown']:
+        console.print(Markdown(result['content_markdown']))
+    else:
+        console.print("[yellow]该章节暂无内容[/yellow]")
 
 
 @app.command()

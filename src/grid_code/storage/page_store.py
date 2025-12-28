@@ -12,6 +12,7 @@ from loguru import logger
 from grid_code.config import get_settings
 from grid_code.exceptions import PageNotFoundError, RegulationNotFoundError, StorageError
 from grid_code.storage.models import (
+    DocumentStructure,
     PageContent,
     PageDocument,
     RegulationInfo,
@@ -49,10 +50,15 @@ class PageStore:
         """获取规程信息文件路径"""
         return self._get_reg_dir(reg_id) / "info.json"
 
+    def _get_structure_path(self, reg_id: str) -> Path:
+        """获取文档结构文件路径"""
+        return self._get_reg_dir(reg_id) / "structure.json"
+
     def save_pages(
         self,
         pages: list[PageDocument],
         toc: TocTree | None = None,
+        doc_structure: DocumentStructure | None = None,
         source_file: str = "",
     ) -> RegulationInfo:
         """
@@ -61,6 +67,7 @@ class PageStore:
         Args:
             pages: PageDocument 列表
             toc: 目录树（可选）
+            doc_structure: 文档结构（可选）
             source_file: 源文件名
 
         Returns:
@@ -90,6 +97,13 @@ class PageStore:
                 toc_path = self._get_toc_path(reg_id)
                 with open(toc_path, "w", encoding="utf-8") as f:
                     json.dump(toc.model_dump(), f, ensure_ascii=False, indent=2)
+
+            # 保存文档结构
+            if doc_structure:
+                structure_path = self._get_structure_path(reg_id)
+                with open(structure_path, "w", encoding="utf-8") as f:
+                    json.dump(doc_structure.model_dump(), f, ensure_ascii=False, indent=2)
+                logger.info(f"文档结构已保存: {len(doc_structure.all_nodes)} 个章节节点")
 
             # 保存规程信息
             info = RegulationInfo(
@@ -292,6 +306,40 @@ class PageStore:
         with open(info_path, encoding="utf-8") as f:
             data = json.load(f)
             return RegulationInfo.model_validate(data)
+
+    def load_document_structure(self, reg_id: str) -> DocumentStructure | None:
+        """
+        加载文档结构
+
+        Args:
+            reg_id: 规程标识
+
+        Returns:
+            DocumentStructure，如果不存在返回 None
+        """
+        structure_path = self._get_structure_path(reg_id)
+        if not structure_path.exists():
+            return None
+
+        with open(structure_path, encoding="utf-8") as f:
+            data = json.load(f)
+            return DocumentStructure.model_validate(data)
+
+    def save_document_structure(self, doc_structure: DocumentStructure) -> None:
+        """
+        单独保存文档结构
+
+        Args:
+            doc_structure: 文档结构
+        """
+        reg_dir = self._get_reg_dir(doc_structure.reg_id)
+        reg_dir.mkdir(parents=True, exist_ok=True)
+
+        structure_path = self._get_structure_path(doc_structure.reg_id)
+        with open(structure_path, "w", encoding="utf-8") as f:
+            json.dump(doc_structure.model_dump(), f, ensure_ascii=False, indent=2)
+
+        logger.info(f"文档结构已保存: {len(doc_structure.all_nodes)} 个章节节点")
 
     def list_regulations(self) -> list[RegulationInfo]:
         """

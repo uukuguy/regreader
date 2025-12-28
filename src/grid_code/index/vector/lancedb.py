@@ -10,7 +10,7 @@ from loguru import logger
 
 from grid_code.config import get_settings
 from grid_code.index.base import BaseVectorIndex
-from grid_code.storage.models import PageDocument, SearchResult
+from grid_code.storage.models import DocumentStructure, PageDocument, SearchResult
 
 
 class LanceDBIndex(BaseVectorIndex):
@@ -86,14 +86,33 @@ class LanceDBIndex(BaseVectorIndex):
         embeddings = self.embedder.encode(texts, normalize_embeddings=True)
         return embeddings.tolist()
 
-    def index_page(self, page: PageDocument) -> None:
-        """索引单个页面"""
+    def index_page(
+        self,
+        page: PageDocument,
+        doc_structure: DocumentStructure | None = None
+    ) -> None:
+        """索引单个页面
+
+        Args:
+            page: PageDocument 对象
+            doc_structure: 文档结构（可选，用于获取 section_number）
+        """
         records = []
 
         for block in page.content_blocks:
             content = block.content_markdown.strip()
             if not content or len(content) < 10:
                 continue
+
+            # 获取章节编号
+            section_number = ""
+            if block.chapter_node_id and doc_structure:
+                node = doc_structure.all_nodes.get(block.chapter_node_id)
+                if node:
+                    section_number = node.section_number
+
+            # 使用块级章节路径，如果没有则使用页面级
+            chapter_path = block.chapter_path if block.chapter_path else page.chapter_path
 
             vector = self._embed_text(content)
 
@@ -102,8 +121,11 @@ class LanceDBIndex(BaseVectorIndex):
                 "reg_id": page.reg_id,
                 "page_num": page.page_num,
                 "block_id": block.block_id,
+                "block_type": block.block_type,
+                "chapter_node_id": block.chapter_node_id or "",
+                "section_number": section_number,
                 "content": content[:500],
-                "chapter_path": " > ".join(page.chapter_path),
+                "chapter_path": " > ".join(chapter_path),
             })
 
         if not records:
@@ -115,8 +137,17 @@ class LanceDBIndex(BaseVectorIndex):
         else:
             table.add(records)
 
-    def index_pages(self, pages: list[PageDocument]) -> None:
-        """批量索引页面"""
+    def index_pages(
+        self,
+        pages: list[PageDocument],
+        doc_structure: DocumentStructure | None = None
+    ) -> None:
+        """批量索引页面
+
+        Args:
+            pages: PageDocument 列表
+            doc_structure: 文档结构（可选）
+        """
         logger.info(f"[LanceDB] 开始向量索引 {len(pages)} 页...")
 
         all_records = []
@@ -129,13 +160,26 @@ class LanceDBIndex(BaseVectorIndex):
                 if not content or len(content) < 10:
                     continue
 
+                # 获取章节编号
+                section_number = ""
+                if block.chapter_node_id and doc_structure:
+                    node = doc_structure.all_nodes.get(block.chapter_node_id)
+                    if node:
+                        section_number = node.section_number
+
+                # 使用块级章节路径，如果没有则使用页面级
+                chapter_path = block.chapter_path if block.chapter_path else page.chapter_path
+
                 all_texts.append(content)
                 text_to_record.append({
                     "reg_id": page.reg_id,
                     "page_num": page.page_num,
                     "block_id": block.block_id,
+                    "block_type": block.block_type,
+                    "chapter_node_id": block.chapter_node_id or "",
+                    "section_number": section_number,
                     "content": content[:500],
-                    "chapter_path": " > ".join(page.chapter_path),
+                    "chapter_path": " > ".join(chapter_path),
                 })
 
         if not all_texts:
@@ -163,8 +207,22 @@ class LanceDBIndex(BaseVectorIndex):
         reg_id: str | None = None,
         chapter_scope: str | None = None,
         limit: int = 10,
+        block_types: list[str] | None = None,
+        section_number: str | None = None,
     ) -> list[SearchResult]:
-        """语义搜索"""
+        """语义搜索
+
+        Args:
+            query: 搜索查询
+            reg_id: 限定规程（可选）
+            chapter_scope: 限定章节范围（可选）
+            limit: 返回结果数量限制
+            block_types: 限定块类型列表（可选）
+            section_number: 精确匹配章节号（可选）
+
+        Returns:
+            SearchResult 列表
+        """
         table = self._get_table()
         if table is None:
             logger.warning("向量索引表不存在")
@@ -188,6 +246,18 @@ class LanceDBIndex(BaseVectorIndex):
                 continue
             if chapter_scope and chapter_scope not in row["chapter_path"]:
                 continue
+
+            # 块类型过滤
+            if block_types:
+                row_block_type = row.get("block_type", "")
+                if row_block_type not in block_types:
+                    continue
+
+            # 章节号精确匹配
+            if section_number:
+                row_section = row.get("section_number", "")
+                if row_section != section_number:
+                    continue
 
             chapter_path = row["chapter_path"].split(" > ") if row["chapter_path"] else []
 

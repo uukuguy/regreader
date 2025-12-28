@@ -60,6 +60,8 @@ def create_mcp_server(name: str = "gridcode") -> FastMCP:
         reg_id: str,
         chapter_scope: str | None = None,
         limit: int = 10,
+        block_types: list[str] | None = None,
+        section_number: str | None = None,
     ) -> list[dict]:
         """在安规中执行混合检索（关键词+语义）。
 
@@ -71,6 +73,8 @@ def create_mcp_server(name: str = "gridcode") -> FastMCP:
             reg_id: 规程标识，如 'angui_2024'
             chapter_scope: 限定章节范围（可选），如 "第六章" 或 "事故处理"
             limit: 返回结果数量限制，默认 10
+            block_types: 限定块类型列表（可选），如 ["text", "table", "section_content"]
+            section_number: 精确匹配章节号（可选），如 "2.1.4.1.6"
 
         Returns:
             搜索结果列表，每个结果包含:
@@ -79,9 +83,12 @@ def create_mcp_server(name: str = "gridcode") -> FastMCP:
             - snippet: 匹配内容片段
             - score: 相关性分数
             - source: 来源引用（如 "angui_2024 P85"）
+            - block_id: 块标识
         """
         try:
-            return tools.smart_search(query, reg_id, chapter_scope, limit)
+            return tools.smart_search(
+                query, reg_id, chapter_scope, limit, block_types, section_number
+            )
         except GridCodeError as e:
             return [{"error": str(e)}]
 
@@ -129,6 +136,70 @@ def create_mcp_server(name: str = "gridcode") -> FastMCP:
             - indexed_at: 入库时间
         """
         return tools.list_regulations()
+
+    @mcp.tool()
+    def get_chapter_structure(reg_id: str) -> dict:
+        """获取规程的完整章节结构。
+
+        返回文档的全局章节结构树，包括各级章节编号、标题、页码等信息。
+        适用于需要精确定位到某个章节的场景。
+
+        Args:
+            reg_id: 规程标识，如 'angui_2024'
+
+        Returns:
+            章节结构信息，包含:
+            - reg_id: 规程标识
+            - total_chapters: 章节总数
+            - root_nodes: 顶级章节列表，每个节点包含:
+                - node_id: 节点ID
+                - section_number: 章节编号（如 "2.1.4.1.6"）
+                - title: 章节标题
+                - level: 层级
+                - page_num: 首页页码
+                - children_count: 子章节数量
+                - has_direct_content: 是否有直接内容
+        """
+        try:
+            return tools.get_chapter_structure(reg_id)
+        except GridCodeError as e:
+            return {"error": str(e)}
+
+    @mcp.tool()
+    def read_chapter_content(
+        reg_id: str,
+        section_number: str,
+        include_children: bool = True,
+    ) -> dict:
+        """读取指定章节的完整内容。
+
+        获取某个章节编号下的所有内容，自动处理跨页情况。
+        适用于需要阅读整个章节而非搜索片段的场景。
+
+        先通过 get_chapter_structure 或 get_toc 获取章节编号，
+        再使用此工具读取章节完整内容。
+
+        Args:
+            reg_id: 规程标识，如 'angui_2024'
+            section_number: 章节编号，如 "2.1.4.1.6"
+            include_children: 是否包含子章节内容，默认 True
+
+        Returns:
+            章节内容，包含:
+            - section_number: 章节编号
+            - title: 章节标题
+            - full_path: 完整章节路径
+            - content_markdown: 该章节的完整 Markdown 内容
+            - page_range: [起始页, 结束页]
+            - block_count: 内容块数量
+            - children: 子章节列表
+            - children_included: 是否包含了子章节内容
+            - source: 来源引用
+        """
+        try:
+            return tools.read_chapter_content(reg_id, section_number, include_children)
+        except GridCodeError as e:
+            return {"error": str(e)}
 
     return mcp
 

@@ -12,7 +12,9 @@ from loguru import logger
 
 from grid_code.storage.models import (
     Annotation,
+    ChapterNode,
     ContentBlock,
+    DocumentStructure,
     PageDocument,
     TableCell,
     TableMeta,
@@ -33,13 +35,204 @@ class PageExtractor:
         """
         self.reg_id = reg_id
         self._current_chapter_path: list[str] = []
+        self._current_chapter_node: ChapterNode | None = None
 
-    def extract_pages(self, result: ConversionResult) -> list[PageDocument]:
+    def extract_document_structure(self, result: ConversionResult) -> DocumentStructure:
         """
-        从 Docling 结果提取所有页面
+        第一阶段：提取全局章节结构
+
+        遍历文档所有文本项，识别章节标题，构建层级关系。
 
         Args:
             result: Docling 解析结果
+
+        Returns:
+            DocumentStructure 文档结构
+        """
+        doc = result.document
+        all_nodes: dict[str, ChapterNode] = {}
+        root_node_ids: list[str] = []
+        node_stack: list[tuple[int, str]] = []  # (level, node_id)
+
+        for item in doc.texts:
+            # 获取页码
+            page_num = 1
+            if item.prov:
+                for prov in item.prov:
+                    if hasattr(prov, 'page_no') and prov.page_no:
+                        page_num = prov.page_no
+                        break
+
+            # 解析章节信息
+            is_section, section_info = self._parse_section_info(item.text)
+            if not is_section or section_info is None:
+                continue
+
+            # 创建 ChapterNode
+            node_id = self._generate_id("chapter")
+            node = ChapterNode(
+                node_id=node_id,
+                section_number=section_info["number"],
+                title=section_info["title"],
+                level=section_info["level"],
+                page_num=page_num,
+                has_direct_content=bool(section_info["direct_content"]),
+                direct_content=section_info["direct_content"] if section_info["direct_content"] else None,
+            )
+
+            # 维护层级关系
+            while node_stack and node_stack[-1][0] >= node.level:
+                node_stack.pop()
+
+            if node_stack:
+                parent_id = node_stack[-1][1]
+                node.parent_id = parent_id
+                all_nodes[parent_id].children_ids.append(node_id)
+            else:
+                root_node_ids.append(node_id)
+
+            all_nodes[node_id] = node
+            node_stack.append((node.level, node_id))
+
+        logger.info(f"提取章节结构: {len(all_nodes)} 个章节节点, {len(root_node_ids)} 个顶级节点")
+
+        return DocumentStructure(
+            reg_id=self.reg_id,
+            all_nodes=all_nodes,
+            root_node_ids=root_node_ids,
+        )
+
+    def _parse_section_info(self, text: str) -> tuple[bool, dict[str, Any] | None]:
+        """
+        解析章节信息
+
+        Args:
+            text: 文本内容
+
+        Returns:
+            (is_section, section_info) 元组
+            section_info 包含:
+                - number: 章节编号 (如 "2.1.4.1.6")
+                - title: 章节标题（纯文本，不含编号）
+                - level: 章节层级 (1-6)
+                - direct_content: 章节号后的直接内容（如有）
+        """
+        text = text.strip()
+        if not text:
+            return False, None
+
+        # 章节编号模式
+        patterns = [
+            # 数字编号: "2.1.4 标题..." 或 "2.1.4. 标题..."
+            (r'^(\d+(?:\.\d+)*)\.?\s+(.*)$', 'numeric'),
+            # 中文章: "第一章 总则" 或 "第1章 总则"
+            (r'^(第[一二三四五六七八九十百千\d]+章)\s*(.*)$', 'chapter'),
+            # 中文节: "第一节 概述"
+            (r'^(第[一二三四五六七八九十百千\d]+节)\s*(.*)$', 'section'),
+        ]
+
+        for pattern, pattern_type in patterns:
+            match = re.match(pattern, text, re.DOTALL)
+            if match:
+                section_num = match.group(1)
+                remaining = match.group(2).strip()
+
+                # 计算层级
+                if pattern_type == 'numeric':
+                    level = section_num.count('.') + 1
+                elif pattern_type == 'chapter':
+                    level = 1
+                elif pattern_type == 'section':
+                    level = 2
+                else:
+                    level = 2
+
+                # 分离标题和直接内容
+                # 规则：
+                # 1. 如果以动词/介词开头（根据、按照、当、在、为），认为是直接内容无标题
+                # 2. 如果超过50字符且没有明确标题分隔，截取前部分作为标题
+                title = ""
+                direct_content = remaining
+
+                # 检查是否以常见的直接内容开头词开始
+                direct_content_starters = [
+                    '根据', '按照', '当', '在', '为', '是', '有', '对于',
+                    '如果', '若', '应', '需', '可', '不', '与', '和', '或',
+                    '包括', '其中', '主要', '具体', '详见', '参见', '见',
+                ]
+                starts_with_content = any(
+                    remaining.startswith(starter) for starter in direct_content_starters
+                )
+
+                if not starts_with_content and remaining:
+                    # 尝试提取标题
+                    # 标题通常以名词结尾，在第一个逗号、句号或超过30字符处结束
+                    comma_pos = remaining.find('，')
+                    period_pos = remaining.find('。')
+                    newline_pos = remaining.find('\n')
+
+                    # 找到最早的分隔点
+                    split_positions = [
+                        pos for pos in [comma_pos, period_pos, newline_pos, 30]
+                        if pos > 0
+                    ]
+
+                    if split_positions:
+                        split_pos = min(split_positions)
+                        potential_title = remaining[:split_pos].strip()
+
+                        # 如果潜在标题长度合理（3-30字符），使用它
+                        if 2 <= len(potential_title) <= 30:
+                            title = potential_title
+                            direct_content = remaining[split_pos:].lstrip('，。\n').strip()
+                        else:
+                            # 标题太长，认为没有明确标题
+                            title = ""
+                            direct_content = remaining
+                    elif len(remaining) <= 30:
+                        # 短文本直接作为标题
+                        title = remaining
+                        direct_content = ""
+
+                return True, {
+                    "number": section_num,
+                    "title": title,
+                    "level": level,
+                    "direct_content": direct_content,
+                }
+
+        return False, None
+
+    def _find_chapter_node_by_text(
+        self,
+        doc_structure: DocumentStructure,
+        text: str,
+        page_num: int
+    ) -> ChapterNode | None:
+        """根据文本和页码查找对应的章节节点"""
+        is_section, section_info = self._parse_section_info(text)
+        if not is_section or section_info is None:
+            return None
+
+        # 在 DocumentStructure 中查找匹配的节点
+        for node in doc_structure.all_nodes.values():
+            if (node.section_number == section_info["number"] and
+                    node.page_num == page_num):
+                return node
+
+        return None
+
+    def extract_pages(
+        self,
+        result: ConversionResult,
+        doc_structure: DocumentStructure | None = None
+    ) -> list[PageDocument]:
+        """
+        第二阶段：提取页面内容并关联章节结构
+
+        Args:
+            result: Docling 解析结果
+            doc_structure: 文档结构（可选，如提供则为每个块添加章节关联）
 
         Returns:
             PageDocument 列表
@@ -66,14 +259,40 @@ class PageExtractor:
             # 按在页面中的顺序排序
             blocks.sort(key=lambda x: x.get("order", 0))
 
-            # 构建内容块
+            # 本页的章节节点列表
+            page_chapter_nodes: list[ChapterNode] = []
+
+            # 第一遍：收集本页所有章节节点（但不更新 _current_chapter_node）
+            if doc_structure:
+                for block_data in blocks:
+                    if block_data.get("type") == "heading" and block_data.get("heading_level"):
+                        node = self._find_chapter_node_by_text(
+                            doc_structure, block_data["text"], page_num
+                        )
+                        if node and node not in page_chapter_nodes:
+                            page_chapter_nodes.append(node)
+
+            # 构建内容块（在此过程中更新章节状态）
             content_blocks = []
             annotations = []
             for j, block_data in enumerate(blocks):
                 if block_data.get("is_annotation"):
                     annotations.append(self._create_annotation(block_data))
-                else:
-                    content_blocks.append(self._create_content_block(block_data, j))
+                    continue
+
+                # 如果是标题，先更新章节状态
+                if block_data.get("type") == "heading" and block_data.get("heading_level"):
+                    self._update_chapter_path(block_data["text"], block_data["heading_level"])
+                    if doc_structure:
+                        node = self._find_chapter_node_by_text(
+                            doc_structure, block_data["text"], page_num
+                        )
+                        if node:
+                            self._current_chapter_node = node
+
+                # 创建内容块
+                block = self._create_content_block(block_data, j, doc_structure)
+                content_blocks.append(block)
 
             # 生成页面 Markdown
             content_markdown = self._generate_page_markdown(content_blocks, annotations)
@@ -82,11 +301,20 @@ class PageExtractor:
             continues_from_prev = self._check_continues_from_prev(blocks)
             continues_to_next = self._check_continues_to_next(blocks)
 
+            # 确定页面章节路径
+            # 优先使用 DocumentStructure 获取完整路径
+            page_chapter_path = self._current_chapter_path.copy()
+            if doc_structure and self._current_chapter_node:
+                page_chapter_path = doc_structure.get_chapter_path(
+                    self._current_chapter_node.node_id
+                )
+
             page = PageDocument(
                 reg_id=self.reg_id,
                 page_num=page_num,
-                chapter_path=self._current_chapter_path.copy(),
+                chapter_path=page_chapter_path,
                 content_blocks=content_blocks,
+                chapter_nodes=page_chapter_nodes,
                 content_markdown=content_markdown,
                 continues_from_prev=continues_from_prev,
                 continues_to_next=continues_to_next,
@@ -110,31 +338,52 @@ class PageExtractor:
         doc = result.document
         doc_title = getattr(doc, 'title', None) or self.reg_id
 
-        # 收集标题信息
+        # 获取文档总页数
+        total_pages = 1
+        all_page_nums = set()
+        for item in doc.texts:
+            if item.prov:
+                for prov in item.prov:
+                    if hasattr(prov, 'page_no') and prov.page_no:
+                        all_page_nums.add(prov.page_no)
+        if all_page_nums:
+            total_pages = max(all_page_nums)
+
+        # 收集标题信息（同时使用 Docling 标签和智能检测）
         headings: list[dict[str, Any]] = []
         for item in doc.texts:
-            if hasattr(item, 'label') and 'heading' in str(item.label).lower():
-                page_num = 1
-                if item.prov:
-                    for prov in item.prov:
-                        if hasattr(prov, 'page_no') and prov.page_no:
-                            page_num = prov.page_no
-                            break
+            page_num = 1
+            if item.prov:
+                for prov in item.prov:
+                    if hasattr(prov, 'page_no') and prov.page_no:
+                        page_num = prov.page_no
+                        break
 
-                # 解析标题级别
+            # 首先检查 Docling 标签
+            is_heading = hasattr(item, 'label') and 'heading' in str(item.label).lower()
+            level = None
+
+            if is_heading:
+                # Docling 识别为标题
                 level = self._parse_heading_level(item.label, item.text)
+            else:
+                # 使用智能检测
+                level = self._detect_heading_from_text(item.text)
+
+            if level is not None:
+                # 截取标题文字（最多100字符用于显示）
+                title_text = item.text.strip()
+                if len(title_text) > 100:
+                    title_text = title_text[:100] + "..."
 
                 headings.append({
-                    "title": item.text.strip(),
+                    "title": title_text,
                     "level": level,
                     "page_num": page_num,
                 })
 
         # 构建层级目录
         toc_items = self._build_toc_hierarchy(headings)
-
-        # 获取总页数
-        total_pages = max((h["page_num"] for h in headings), default=1)
 
         return TocTree(
             reg_id=self.reg_id,
@@ -163,17 +412,23 @@ class PageExtractor:
         heading_level = None
         is_annotation = False
 
+        # 首先检查 Docling 标签
         if hasattr(item, 'label'):
             label = str(item.label).lower()
             if 'heading' in label:
                 block_type = "heading"
                 heading_level = self._parse_heading_level(item.label, item.text)
-                # 更新章节路径
-                self._update_chapter_path(item.text, heading_level)
             elif 'list' in label:
                 block_type = "list"
             elif 'footnote' in label or self._is_annotation_text(item.text):
                 is_annotation = True
+
+        # 如果 Docling 未识别为标题，使用智能识别
+        if block_type == "text" and not is_annotation:
+            detected_level = self._detect_heading_from_text(item.text)
+            if detected_level is not None:
+                block_type = "heading"
+                heading_level = detected_level
 
         page_contents[page_num].append({
             "type": block_type,
@@ -342,10 +597,33 @@ class PageExtractor:
 
         return "\n".join(lines)
 
-    def _create_content_block(self, block_data: dict[str, Any], order: int) -> ContentBlock:
-        """创建 ContentBlock 对象"""
+    def _create_content_block(
+        self,
+        block_data: dict[str, Any],
+        order: int,
+        doc_structure: DocumentStructure | None = None
+    ) -> ContentBlock:
+        """创建 ContentBlock 对象
+
+        Args:
+            block_data: 块数据
+            order: 在页面中的顺序
+            doc_structure: 文档结构（可选）
+
+        Returns:
+            ContentBlock 对象
+        """
         block_type = block_data["type"]
         text = block_data["text"]
+
+        # 处理章节号+内容混合块
+        # 如果是标题类型，检查是否有直接内容需要分离
+        if block_type == "heading" and self._current_chapter_node:
+            if self._current_chapter_node.has_direct_content and self._current_chapter_node.direct_content:
+                # 将块类型改为 section_content
+                block_type = "section_content"
+                # 使用直接内容（不含章节号和标题）
+                text = self._current_chapter_node.direct_content
 
         table_meta = None
         if block_type == "table" and "table_data" in block_data:
@@ -361,11 +639,21 @@ class PageExtractor:
                 cells=td.get("cells", []),
             )
 
+        # 获取块级章节信息
+        chapter_path: list[str] = []
+        chapter_node_id: str | None = None
+
+        if doc_structure and self._current_chapter_node:
+            chapter_path = doc_structure.get_chapter_path(self._current_chapter_node.node_id)
+            chapter_node_id = self._current_chapter_node.node_id
+
         return ContentBlock(
             block_id=self._generate_id(block_type),
             block_type=block_type,
             order_in_page=order,
             content_markdown=text,
+            chapter_path=chapter_path,
+            chapter_node_id=chapter_node_id,
             table_meta=table_meta,
             heading_level=block_data.get("heading_level"),
         )
@@ -429,6 +717,80 @@ class PageExtractor:
             return 3
 
         return 2  # 默认级别
+
+    def _detect_heading_from_text(self, text: str) -> int | None:
+        """从文本内容智能检测是否为标题及其级别
+
+        当 Docling 未识别为标题时，通过文本模式进行检测。
+
+        Args:
+            text: 文本内容
+
+        Returns:
+            标题级别（1-4），如果不是标题则返回 None
+        """
+        text = text.strip()
+
+        # 空文本或过长文本不是标题
+        if not text or len(text) > 200:
+            return None
+
+        # 1. 中文章节标记
+        # "第X章" -> 1级标题
+        if re.match(r'^第[一二三四五六七八九十百千\d]+章\s*[\s\u3000]*.{0,50}$', text):
+            return 1
+
+        # "第X节" -> 2级标题
+        if re.match(r'^第[一二三四五六七八九十百千\d]+节\s*[\s\u3000]*.{0,50}$', text):
+            return 2
+
+        # 2. 数字编号格式（多级）
+        # 匹配各种章节编号格式：
+        # - "2." -> 1级标题
+        # - "2.1" 或 "2.1." -> 2级标题
+        # - "2.1.1" 或 "2.1.1." -> 3级标题
+        # - "2.1.1.1" 或 "2.1.1.1." -> 4级标题
+        # 后面可跟标题文字或内容
+
+        # 匹配格式: 数字[.数字]* 后面可选点和空格
+        number_pattern = r'^(\d+(?:\.\d+)*)\.?\s+'
+        match = re.match(number_pattern, text)
+
+        if match:
+            numbering = match.group(1)
+
+            # 计算点的数量（级别）
+            # "2" -> 0个点 -> Level 1
+            # "2.1" -> 1个点 -> Level 2
+            # "2.1.1" -> 2个点 -> Level 3
+            # "2.1.1.1" -> 3个点 -> Level 4
+            dot_count = numbering.count('.')
+
+            # 只要有章节编号就识别为标题，不限制后面文字的长度
+            # 根据点的数量确定级别
+            if dot_count == 0:  # "2" 或 "2. 标题"
+                return 1
+            elif dot_count == 1:  # "2.1" 或 "2.1. 标题"
+                return 2
+            elif dot_count == 2:  # "2.1.1" 或 "2.1.1. 标题"
+                return 3
+            elif dot_count >= 3:  # "2.1.1.1" 或更多层级
+                return 4
+
+        # 3. 纯数字编号开头 + 短文本（可能是标题）
+        # 如 "1 概述"、"2 系统结构"
+        if re.match(r'^\d{1,2}\s+[\u4e00-\u9fa5].{0,50}$', text):
+            return 2
+
+        # 4. 带括号的编号（如 "(一)"、"（1）"）
+        if re.match(r'^[（(][一二三四五六七八九十\d]+[)）]\s*.{0,50}$', text):
+            return 3
+
+        # 5. 字母编号（如 "A. 标题"、"a) 标题"）
+        if re.match(r'^[A-Za-z][.、)）]\s*.{0,50}$', text):
+            return 4
+
+        return None
 
     def _update_chapter_path(self, heading_text: str, level: int):
         """更新当前章节路径"""

@@ -1,7 +1,7 @@
 # GridCode Makefile
 # Power Grid Regulations Intelligent Retrieval Agent
 
-.PHONY: help install install-dev install-all test lint format check serve serve-stdio chat build clean
+.PHONY: help install install-dev install-all test test-heading lint format check serve serve-stdio chat build clean reindex read-chapter
 
 # Default target
 .DEFAULT_GOAL := help
@@ -34,6 +34,8 @@ help: ## Show this help message
 	@echo "  make serve                # Start MCP server (SSE mode)"
 	@echo "  make chat REG_ID=angui    # Start chat with specific regulation"
 	@echo "  make inspect PAGE_NUM=25  # Inspect page 25 data across indexes"
+	@echo "  make read-chapter SECTION=\"2.1.4\"  # Read chapter content"
+	@echo "  make reindex FILE=doc.pdf # Reindex document with new parser logic"
 
 #----------------------------------------------------------------------
 # Installation
@@ -88,6 +90,9 @@ test-cov: ## Run tests with coverage report
 test-fast: ## Run tests without slow markers
 	$(UV) run $(PYTEST) tests/ -v -m "not slow"
 
+test-heading: ## Run heading detection tests
+	$(UV) run $(PYTHON) tests/test_heading_detection.py
+
 #----------------------------------------------------------------------
 # MCP Server
 #----------------------------------------------------------------------
@@ -128,7 +133,7 @@ QUERY ?= 母线失压
 search: ## Search regulations (usage: make search QUERY="母线失压" REG_ID=angui)
 	$(UV) run gridcode search "$(QUERY)" --reg-id $(REG_ID)
 
-FILE ?=
+FILE ?= ./data/raw/angui_2024.pdf
 ingest: ## Ingest a document (usage: make ingest FILE=/path/to/doc.docx REG_ID=angui)
 	@if [ -z "$(FILE)" ]; then \
 		echo "Error: FILE is required. Usage: make ingest FILE=/path/to/doc.docx REG_ID=angui"; \
@@ -139,7 +144,7 @@ ingest: ## Ingest a document (usage: make ingest FILE=/path/to/doc.docx REG_ID=a
 version: ## Show GridCode version
 	$(UV) run gridcode version
 
-PAGE_NUM ?= 1
+PAGE_NUM ?= 7
 OUTPUT ?=
 inspect: ## Inspect page data across indexes (usage: make inspect REG_ID=angui PAGE_NUM=25)
 	@if [ -z "$(OUTPUT)" ]; then \
@@ -150,6 +155,41 @@ inspect: ## Inspect page data across indexes (usage: make inspect REG_ID=angui P
 
 inspect-vectors: ## Inspect page data with vector display
 	$(UV) run gridcode inspect $(REG_ID) $(PAGE_NUM) --show-vectors
+
+SECTION ?=
+NO_CHILDREN ?= false
+read-chapter: ## Read chapter content by section number (usage: make read-chapter REG_ID=angui SECTION="2.1.4.1.6")
+	@if [ -z "$(SECTION)" ]; then \
+		echo "$(YELLOW)Error: SECTION is required.$(NC)"; \
+		echo "Usage: make read-chapter REG_ID=angui SECTION=\"2.1.4.1.6\""; \
+		exit 1; \
+	fi
+	@if [ "$(NO_CHILDREN)" = "true" ]; then \
+		$(UV) run gridcode read-chapter --reg-id $(REG_ID) --section "$(SECTION)" --no-children; \
+	else \
+		$(UV) run gridcode read-chapter --reg-id $(REG_ID) --section "$(SECTION)"; \
+	fi
+
+BACKUP ?= true
+reindex: ## Reindex document with new parser (usage: make reindex FILE=/path/to/doc.pdf REG_ID=angui BACKUP=true)
+	@if [ -z "$(FILE)" ]; then \
+		echo "$(YELLOW)Error: FILE is required.$(NC)"; \
+		echo "Usage: make reindex FILE=/path/to/doc.pdf REG_ID=angui"; \
+		exit 1; \
+	fi
+	@if [ "$(BACKUP)" = "true" ]; then \
+		$(UV) run $(PYTHON) scripts/reindex_document.py $(FILE) --reg-id $(REG_ID) --backup; \
+	else \
+		$(UV) run $(PYTHON) scripts/reindex_document.py $(FILE) --reg-id $(REG_ID) --no-backup; \
+	fi
+
+verify-chapters: ## Verify chapter path extraction (usage: make verify-chapters REG_ID=angui PAGE_NUM=13)
+	@echo "$(BLUE)Verifying chapter paths for $(REG_ID) page $(PAGE_NUM)...$(NC)"
+	@$(UV) run $(PYTHON) scripts/verify_chapters.py $(REG_ID) $(PAGE_NUM)
+
+stats-headings: ## Show heading detection statistics (usage: make stats-headings REG_ID=angui)
+	@echo "$(BLUE)Analyzing heading detection for $(REG_ID)...$(NC)"
+	@$(UV) run $(PYTHON) scripts/stats_headings.py $(REG_ID)
 
 #----------------------------------------------------------------------
 # Build & Distribution
@@ -179,7 +219,16 @@ clean: ## Clean build artifacts and cache
 
 clean-data: ## Clean data directory (WARNING: removes all ingested documents)
 	@echo "$(YELLOW)WARNING: This will remove all ingested documents!$(NC)"
-	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] && rm -rf data/ || echo "Cancelled"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] && rm -rf data/storage || echo "Cancelled"
+
+clean-backups: ## Clean backup data directory
+	@if [ -d "data/backups" ]; then \
+		echo "$(YELLOW)Removing backup data...$(NC)"; \
+		rm -rf data/backups/; \
+		echo "$(GREEN)Backups cleaned$(NC)"; \
+	else \
+		echo "$(YELLOW)No backups found$(NC)"; \
+	fi
 
 clean-all: clean clean-data ## Clean everything including data
 

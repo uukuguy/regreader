@@ -22,3 +22,5 @@ outputs/
 
 # macOS files
 .DS_Store
+
+data/raw/

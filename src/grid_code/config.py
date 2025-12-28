@@ -21,15 +21,15 @@ class GridCodeSettings(BaseSettings):
 
     # 存储路径配置
     data_dir: Path = Field(
-        default=Path("./data"),
+        default=Path("./data/storage"),
         description="数据存储目录",
     )
     pages_dir: Path = Field(
-        default=Path("./data/pages"),
+        default=Path("./data/storage/pages"),
         description="页面 JSON 存储目录",
     )
     index_dir: Path = Field(
-        default=Path("./data/index"),
+        default=Path("./data/storage/index"),
         description="索引文件目录",
     )
 

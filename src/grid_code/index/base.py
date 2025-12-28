@@ -5,7 +5,7 @@
 
 from abc import ABC, abstractmethod
 
-from grid_code.storage.models import PageDocument, SearchResult
+from grid_code.storage.models import DocumentStructure, PageDocument, SearchResult
 
 
 class BaseKeywordIndex(ABC):
@@ -21,22 +21,32 @@ class BaseKeywordIndex(ABC):
         pass
 
     @abstractmethod
-    def index_page(self, page: PageDocument) -> None:
+    def index_page(
+        self,
+        page: PageDocument,
+        doc_structure: DocumentStructure | None = None
+    ) -> None:
         """
         索引单个页面
 
         Args:
             page: PageDocument 对象
+            doc_structure: 文档结构（可选，用于获取 section_number）
         """
         pass
 
     @abstractmethod
-    def index_pages(self, pages: list[PageDocument]) -> None:
+    def index_pages(
+        self,
+        pages: list[PageDocument],
+        doc_structure: DocumentStructure | None = None
+    ) -> None:
         """
         批量索引页面
 
         Args:
             pages: PageDocument 列表
+            doc_structure: 文档结构（可选）
         """
         pass
 
@@ -47,6 +57,8 @@ class BaseKeywordIndex(ABC):
         reg_id: str | None = None,
         chapter_scope: str | None = None,
         limit: int = 10,
+        block_types: list[str] | None = None,
+        section_number: str | None = None,
     ) -> list[SearchResult]:
         """
         执行关键词搜索
@@ -56,6 +68,8 @@ class BaseKeywordIndex(ABC):
             reg_id: 限定规程（可选）
             chapter_scope: 限定章节范围（可选）
             limit: 返回结果数量限制
+            block_types: 限定块类型列表（可选）
+            section_number: 精确匹配章节号（可选）
 
         Returns:
             SearchResult 列表
@@ -103,22 +117,32 @@ class BaseVectorIndex(ABC):
         pass
 
     @abstractmethod
-    def index_page(self, page: PageDocument) -> None:
+    def index_page(
+        self,
+        page: PageDocument,
+        doc_structure: DocumentStructure | None = None
+    ) -> None:
         """
         索引单个页面
 
         Args:
             page: PageDocument 对象
+            doc_structure: 文档结构（可选，用于获取 section_number）
         """
         pass
 
     @abstractmethod
-    def index_pages(self, pages: list[PageDocument]) -> None:
+    def index_pages(
+        self,
+        pages: list[PageDocument],
+        doc_structure: DocumentStructure | None = None
+    ) -> None:
         """
         批量索引页面
 
         Args:
             pages: PageDocument 列表
+            doc_structure: 文档结构（可选）
         """
         pass
 
@@ -129,6 +153,8 @@ class BaseVectorIndex(ABC):
         reg_id: str | None = None,
         chapter_scope: str | None = None,
         limit: int = 10,
+        block_types: list[str] | None = None,
+        section_number: str | None = None,
     ) -> list[SearchResult]:
         """
         执行语义搜索
@@ -138,6 +164,8 @@ class BaseVectorIndex(ABC):
             reg_id: 限定规程（可选）
             chapter_scope: 限定章节范围（可选）
             limit: 返回结果数量限制
+            block_types: 限定块类型列表（可选）
+            section_number: 精确匹配章节号（可选）
 
         Returns:
             SearchResult 列表

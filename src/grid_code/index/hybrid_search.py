@@ -78,6 +78,8 @@ class HybridSearch:
         reg_id: str | None = None,
         chapter_scope: str | None = None,
         limit: int = 10,
+        block_types: list[str] | None = None,
+        section_number: str | None = None,
     ) -> list[SearchResult]:
         """
         执行混合检索
@@ -87,16 +89,28 @@ class HybridSearch:
             reg_id: 限定规程（可选）
             chapter_scope: 限定章节范围（可选）
             limit: 返回结果数量限制
+            block_types: 限定块类型列表（可选）
+            section_number: 精确匹配章节号（可选）
 
         Returns:
             合并后的 SearchResult 列表
         """
         # 分别执行两种检索
         keyword_results = self.keyword_index.search(
-            query, reg_id=reg_id, chapter_scope=chapter_scope, limit=limit
+            query,
+            reg_id=reg_id,
+            chapter_scope=chapter_scope,
+            limit=limit,
+            block_types=block_types,
+            section_number=section_number,
         )
         vector_results = self.vector_index.search(
-            query, reg_id=reg_id, chapter_scope=chapter_scope, limit=limit
+            query,
+            reg_id=reg_id,
+            chapter_scope=chapter_scope,
+            limit=limit,
+            block_types=block_types,
+            section_number=section_number,
         )
 
         logger.debug(

@@ -49,3 +49,12 @@ class InvalidPageRangeError(GridCodeError):
         self.start_page = start_page
         self.end_page = end_page
         super().__init__(f"无效的页码范围: {start_page} - {end_page}")
+
+
+class ChapterNotFoundError(GridCodeError):
+    """章节不存在错误"""
+
+    def __init__(self, reg_id: str, section_number: str):
+        self.reg_id = reg_id
+        self.section_number = section_number
+        super().__init__(f"规程 '{reg_id}' 的章节 '{section_number}' 不存在")
