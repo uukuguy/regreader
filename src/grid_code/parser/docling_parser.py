@@ -36,7 +36,7 @@ class DoclingParserConfig:
         do_ocr: bool = True,
         ocr_options = RapidOcrOptions(),
         ocr_lang: list[str] | None = None,
-        force_full_page_ocr: bool = True,
+        force_full_page_ocr: bool = False,
         # 表格配置
         do_table_structure: bool = True,
         table_mode: str = "accurate",  # "accurate" or "fast"
@@ -178,7 +178,9 @@ class DoclingParser:
             logger.debug(f"表格模式: {self.config.table_mode}")
             logger.debug(f"加速设备: {self.config.accelerator_device}")
 
+            # FIXME:
             format_options = self._build_format_options()
+            # format_options = None
 
             self._converter = DocumentConverter(
                 allowed_formats=[
