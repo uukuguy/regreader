@@ -1,121 +1,124 @@
-# GridCode 项目开发指南
+# GridCode Development Guide
 
-## 项目概述
+## Project Overview
 
-GridCode 是电力系统安规智能检索 Agent，采用 Page-Based Agentic Search 架构。
+GridCode is an intelligent retrieval agent for power system safety regulations, using a Page-Based Agentic Search architecture.
 
-**核心设计原则**：
-- 以"页"为存储单位，非任意切片
-- LLM 动态"翻书"，而非一次性向量匹配
-- 三框架并行实现（Claude Agent SDK / Pydantic AI / LangGraph）
+**Core Design Principles**:
+- Store documents by page, not arbitrary chunks
+- LLM dynamically "flips through" pages, rather than one-shot vector matching
+- Three parallel framework implementations (Claude Agent SDK / Pydantic AI / LangGraph)
+- All agents access page data through MCP protocol (PageStore is controlled by MCP Server)
 
-## 项目结构
+## Project Structure
 
 ```
 src/grid_code/
-├── parser/           # Docling 解析层
-├── storage/          # 页面存储 + Pydantic 模型
-├── index/            # 可插拔索引架构
-│   ├── base.py       # 抽象基类
-│   ├── keyword/      # 关键词索引 (FTS5/Tantivy/Whoosh)
-│   └── vector/       # 向量索引 (LanceDB/Qdrant)
-├── mcp/              # FastMCP Server
-├── agents/           # 三种 Agent 实现
+├── parser/           # Docling parsing layer
+├── storage/          # Page storage + Pydantic models
+├── index/            # Pluggable index architecture
+│   ├── base.py       # Abstract base classes
+│   ├── keyword/      # Keyword indexes (FTS5/Tantivy/Whoosh)
+│   └── vector/       # Vector indexes (LanceDB/Qdrant)
+├── mcp/              # FastMCP Server + Client
+├── agents/           # Three agent implementations
 ├── config.py
 └── cli.py
 ```
 
-## 技术栈约束
+## Tech Stack Constraints
 
-| 组件 | 技术 | 版本要求 |
-|------|------|----------|
-| Python | 3.12+ | 使用现代类型提示语法 |
-| 文档解析 | Docling | - |
-| 关键词索引 | SQLite FTS5 (默认) | 内置 |
-| 关键词索引 | Tantivy (可选) | pip install grid-code[tantivy] |
-| 关键词索引 | Whoosh (可选) | pip install grid-code[whoosh] |
-| 向量索引 | LanceDB (默认) | - |
-| 向量索引 | Qdrant (可选) | pip install grid-code[qdrant] |
-| MCP Server | FastMCP | SSE 传输 |
-| 数据模型 | Pydantic v2 | BaseModel |
+| Component | Technology | Requirements |
+|-----------|------------|--------------|
+| Python | 3.12+ | Use modern type hint syntax |
+| Document Parser | Docling | - |
+| Keyword Index | SQLite FTS5 (default) | Built-in |
+| Keyword Index | Tantivy (optional) | pip install grid-code[tantivy] |
+| Keyword Index | Whoosh (optional) | pip install grid-code[whoosh] |
+| Vector Index | LanceDB (default) | - |
+| Vector Index | Qdrant (optional) | pip install grid-code[qdrant] |
+| MCP Server | FastMCP | SSE transport |
+| Data Models | Pydantic v2 | BaseModel |
 | CLI | Typer | - |
 
-## 代码规范
+## Code Standards
 
-### 类型注解
-- 所有函数必须有类型注解
-- 使用 `list[str]` 而非 `List[str]`（Python 3.12+ 语法）
-- 使用 `str | None` 而非 `Optional[str]`
+### Type Annotations
+- All functions must have type annotations
+- Use `list[str]` instead of `List[str]` (Python 3.12+ syntax)
+- Use `str | None` instead of `Optional[str]`
 
-### Pydantic 模型
-- 所有数据模型继承 `BaseModel`
-- 使用 `model_dump()` 而非已废弃的 `dict()`
-- 字段使用 `Field()` 添加描述
+### Pydantic Models
+- All data models inherit from `BaseModel`
+- Use `model_dump()` instead of deprecated `dict()`
+- Use `Field()` to add field descriptions
 
-### 异步
-- MCP Server 和 Agent 层使用 `async/await`
-- 索引层可同步（SQLite/LanceDB 操作快速）
+### Async
+- MCP Server and Agent layer use `async/await`
+- Index layer can be synchronous (SQLite/LanceDB operations are fast)
 
-### 错误处理
-- 使用自定义异常类，定义于 `src/grid_code/exceptions.py`
-- 日志使用 `loguru`
+### Error Handling
+- Use custom exception classes defined in `src/grid_code/exceptions.py`
+- Use `loguru` for logging
 
-## 关键数据模型
+## Key Data Models
 
 ```python
-# storage/models.py 中的核心模型
-PageDocument      # 页面文档（一页可含多个 ContentBlock）
-ContentBlock      # 内容块（text/table/heading/list）
-TableMeta         # 表格元数据（含跨页标记 is_truncated）
-Annotation        # 页面注释（注1、方案A 等）
+# Core models in storage/models.py
+PageDocument      # Page document (one page may contain multiple ContentBlocks)
+ContentBlock      # Content block (text/table/heading/list)
+TableMeta         # Table metadata (includes cross-page marker is_truncated)
+Annotation        # Page annotations (Note 1, Option A, etc.)
 ```
 
-## MCP 工具接口
+## MCP Tool Interface
 
 ```python
-# mcp/tools.py 中的三个核心工具
+# Three core tools in mcp/tools.py
 get_toc(reg_id: str) -> TocTree
 smart_search(query: str, reg_id: str, chapter_scope: str | None, limit: int) -> list[SearchResult]
 read_page_range(reg_id: str, start_page: int, end_page: int) -> PageContent
 ```
 
-## 开发约束
+## Development Constraints
 
-### 必须遵守
-- 所有 MCP 工具返回必须包含 `source` 字段（reg_id + page_num）
-- 表格跨页时必须设置 `continues_to_next: true`
-- Agent 实现必须继承 `agents/base.py` 中的抽象基类
-- 索引实现必须继承 `index/base.py` 中的抽象基类
+### Required
+- All MCP tool returns must include `source` field (reg_id + page_num)
+- Cross-page tables must set `continues_to_next: true`
+- Agent implementations must inherit from abstract base class in `agents/base.py`
+- Index implementations must inherit from abstract base class in `index/base.py`
+- All agents must access page data through MCP protocol
 
-### 禁止事项
-- 禁止在索引层直接操作原始 PDF/DOCX 文件
-- 禁止硬编码规程 ID，必须从配置读取
-- 禁止在 MCP 工具中进行复杂推理（推理属于 Agent 层）
+### Prohibited
+- Do not directly manipulate raw PDF/DOCX files in the index layer
+- Do not hardcode regulation IDs; read from configuration
+- Do not perform complex reasoning in MCP tools (reasoning belongs to Agent layer)
+- Agents must not bypass MCP Server to access PageStore directly
 
-### 索引层扩展规范
-新增索引后端时：
-1. 继承 `BaseKeywordIndex` 或 `BaseVectorIndex`
-2. 实现所有抽象方法
-3. 在 `keyword/__init__.py` 或 `vector/__init__.py` 中导出
-4. 在 `hybrid_search.py` 的工厂方法中注册
-5. 在 `pyproject.toml` 中添加可选依赖
+### Index Layer Extension Guidelines
+When adding a new index backend:
+1. Inherit from `BaseKeywordIndex` or `BaseVectorIndex`
+2. Implement all abstract methods
+3. Export in `keyword/__init__.py` or `vector/__init__.py`
+4. Register in the factory method in `hybrid_search.py`
+5. Add optional dependency in `pyproject.toml`
 
-## 测试规范
+## Testing Standards
 
-- 单元测试放置于 `tests/` 目录
-- 使用 `pytest` 框架
-- Mock 外部依赖（LLM API、文件系统）
+- Unit tests go in `tests/` directory
+- Use `pytest` framework
+- Mock external dependencies (LLM API, file system)
 
-## 文档路径
+## Documentation Paths
 
-| 文档 | 路径 |
-|------|------|
-| 设计方案 | `docs/main/DESIGN_DOCUMENT.md` |
-| 工作日志 | `docs/main/WORK_LOG.md` |
-| 初步设计 | `docs/PreliminaryDesign/` |
+| Document | Path |
+|----------|------|
+| Design Document | `docs/main/DESIGN_DOCUMENT.md` |
+| Work Log | `docs/main/WORK_LOG.md` |
+| Preliminary Design | `docs/PreliminaryDesign/` |
 
-## Git 分支策略
+## Git Branch Strategy
 
-- `main`: 稳定版本
-- `feature/*`: 功能开发
-- `fix/*`: 问题修复
+- `main`: Stable release
+- `feature/*`: Feature development
+- `fix/*`: Bug fixes

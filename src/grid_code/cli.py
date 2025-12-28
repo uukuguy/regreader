@@ -202,27 +202,32 @@ def chat(
         console.print(f"[bold]GridCode Agent ({agent.name})[/bold]")
         console.print("输入问题进行对话，输入 'exit' 退出\n")
 
-        while True:
-            try:
-                user_input = console.input("[bold green]你: [/bold green]")
-            except (KeyboardInterrupt, EOFError):
-                break
+        try:
+            while True:
+                try:
+                    user_input = console.input("[bold green]你: [/bold green]")
+                except (KeyboardInterrupt, EOFError):
+                    break
 
-            if user_input.lower() in ("exit", "quit", "q"):
-                break
+                if user_input.lower() in ("exit", "quit", "q"):
+                    break
 
-            if not user_input.strip():
-                continue
+                if not user_input.strip():
+                    continue
 
-            with console.status("思考中..."):
-                response = await agent.chat(user_input)
+                with console.status("思考中..."):
+                    response = await agent.chat(user_input)
 
-            console.print(f"\n[bold blue]GridCode:[/bold blue]")
-            console.print(response.content)
+                console.print(f"\n[bold blue]GridCode:[/bold blue]")
+                console.print(response.content)
 
-            if response.sources:
-                console.print(f"\n[dim]来源: {', '.join(response.sources)}[/dim]")
-            console.print()
+                if response.sources:
+                    console.print(f"\n[dim]来源: {', '.join(response.sources)}[/dim]")
+                console.print()
+        finally:
+            # 确保关闭 MCP 连接
+            if hasattr(agent, "close"):
+                await agent.close()
 
         console.print("[dim]再见![/dim]")
 

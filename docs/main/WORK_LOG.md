@@ -1,5 +1,107 @@
 # GridCode 工作日志
 
+## 2025-12-28 Agent 架构重构（MCP 协议统一）
+
+### 会话概述
+对三个 Agent 实现进行架构重构，统一使用 MCP 协议访问页面数据，实现真正的工具层解耦。
+
+### 核心架构改进
+
+#### 问题分析
+原有实现存在架构问题：
+- `claude_agent.py` 使用原始 Anthropic SDK 而非 Claude Agent SDK
+- `langgraph_agent.py` 和 `pydantic_agent.py` 直接调用 `GridCodeTools` Python 类
+- Agent 层绕过 MCP Server 直接访问数据，违反分层原则
+
+#### 解决方案
+**设计原则**：页面存储由 MCP Server 内部控制，所有 Agent 必须通过 MCP 协议访问数据
+
+### 修改文件列表
+
+#### 新增文件
+- `src/grid_code/mcp/client.py` - MCP 客户端封装
+  - `GridCodeMCPClient` 类提供统一的 MCP 调用接口
+  - 使用 stdio transport 连接 MCP Server
+  - 提供 `connect()`, `disconnect()`, `list_tools()`, `call_tool()` 方法
+- `.env.example` - 环境变量模板
+
+#### 重写文件
+- `src/grid_code/agents/claude_agent.py` - 完全重写
+  - 使用 Claude Agent SDK (`claude_agent_sdk` 包)
+  - 导入 `ClaudeAgentOptions`, `ClaudeSDKClient`, `AssistantMessage`, `ResultMessage` 等
+  - MCP Server 通过 `mcp_servers` 配置原生集成
+  - 工具命名: `mcp__gridcode__get_toc`, `mcp__gridcode__smart_search` 等
+
+- `src/grid_code/agents/langgraph_agent.py` - 完全重写
+  - 使用 `GridCodeMCPClient` 替代直接 Python 调用
+  - 实现多轮工具调用循环
+  - 通过 MCP 客户端动态获取工具 schema
+
+- `src/grid_code/agents/pydantic_agent.py` - 完全重写
+  - 使用 `GridCodeMCPClient` 通过依赖注入
+  - MCP 客户端通过 `RunContext[AgentDependencies]` 传递
+  - 工具函数内部调用 MCP 客户端
+
+#### 更新文件
+- `src/grid_code/mcp/__init__.py` - 导出 `GridCodeMCPClient`
+- `src/grid_code/cli.py` - 添加 Agent 资源清理 (finally block)
+- `pyproject.toml` - 添加 `claude-agent-sdk>=0.1.0` 依赖
+- `.gitignore` - 添加 `.env`, `.env.local`, `*.env`, `data/`
+
+### 架构对比
+
+#### 修改前
+```
+Agent 实现
+    └── 直接调用 GridCodeTools (Python 类)
+            └── PageStore
+```
+
+#### 修改后
+```
+Agent 实现
+    ├── ClaudeAgent (SDK 内置 MCP 支持)
+    │       └── stdio ──> GridCode MCP Server ──> PageStore
+    │
+    └── LangGraph / Pydantic AI Agent
+            └── GridCodeMCPClient
+                    └── stdio ──> GridCode MCP Server ──> PageStore
+```
+
+### MCP 客户端使用示例
+
+```python
+# LangGraph / Pydantic AI 中使用
+from grid_code.mcp import GridCodeMCPClient
+
+async def main():
+    client = GridCodeMCPClient()
+    await client.connect()
+
+    # 获取工具列表
+    tools = client.list_tools()
+
+    # 调用工具
+    result = await client.call_tool("smart_search", {
+        "query": "母线失压",
+        "reg_id": "angui_2024"
+    })
+
+    await client.disconnect()
+```
+
+### 安全改进
+- 添加 `.env` 到 `.gitignore` 防止 API Key 泄露
+- 创建 `.env.example` 作为环境变量模板
+- 代码中使用 `isinstance()` 替代 `hasattr()` 进行类型检查
+
+### 待完成事项
+- [ ] 端到端测试验证 MCP 通信
+- [ ] 三框架功能对比测试
+- [ ] 性能基准测试
+
+---
+
 ## 2025-12-28 索引层架构改进
 
 ### 会话概述

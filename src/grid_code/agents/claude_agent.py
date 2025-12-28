@@ -1,22 +1,50 @@
 """Claude Agent SDK 实现
 
-使用 Claude Agent SDK (Anthropic SDK) 实现 GridCode Agent。
+使用 Claude Agent SDK 实现 GridCode Agent。
+https://platform.claude.com/docs/en/agent-sdk/overview
 """
 
-import json
+import sys
 from typing import Any
 
-from anthropic import Anthropic
 from loguru import logger
 
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
 from grid_code.agents.prompts import SYSTEM_PROMPT
 from grid_code.config import get_settings
-from grid_code.mcp.tools import GridCodeTools
+
+# Claude Agent SDK imports
+try:
+    from claude_agent_sdk import (
+        ClaudeAgentOptions,
+        ClaudeSDKClient,
+        # Message types for isinstance checks
+        AssistantMessage,
+        ResultMessage,
+        # Content block types
+        TextBlock,
+        ToolUseBlock,
+    )
+    HAS_CLAUDE_SDK = True
+except ImportError:
+    HAS_CLAUDE_SDK = False
+    # Define placeholder types for type hints when SDK not installed
+    AssistantMessage = None  # type: ignore
+    ResultMessage = None  # type: ignore
+    TextBlock = None  # type: ignore
+    ToolUseBlock = None  # type: ignore
+    logger.warning("claude-agent-sdk not installed. Run: pip install claude-agent-sdk")
 
 
 class ClaudeAgent(BaseGridCodeAgent):
-    """基于 Claude Agent SDK 的 Agent 实现"""
+    """基于 Claude Agent SDK 的 Agent 实现
+
+    使用 Claude Agent SDK 的 ClaudeSDKClient 执行 agent loop，
+    通过 MCP Server 连接 GridCode 工具。
+
+    工具命名规则: mcp__{server_name}__{tool_name}
+    例如: mcp__gridcode__get_toc, mcp__gridcode__smart_search
+    """
 
     def __init__(
         self,
@@ -29,24 +57,36 @@ class ClaudeAgent(BaseGridCodeAgent):
 
         Args:
             reg_id: 默认规程标识
-            model: Claude 模型名称
-            api_key: Anthropic API Key
+            model: Claude 模型名称 (haiku, sonnet, opus)
+            api_key: Anthropic API Key (通过环境变量 ANTHROPIC_API_KEY 设置)
         """
         super().__init__(reg_id)
 
+        if not HAS_CLAUDE_SDK:
+            raise ImportError(
+                "Claude Agent SDK not installed. "
+                "Please run: pip install claude-agent-sdk"
+            )
+
         settings = get_settings()
         self._model = model or settings.default_model
-        self._api_key = api_key or settings.anthropic_api_key
 
-        if not self._api_key:
-            raise ValueError("未配置 Anthropic API Key")
+        # SDK 使用环境变量 ANTHROPIC_API_KEY，此处仅验证
+        api_key = api_key or settings.anthropic_api_key
+        if not api_key:
+            raise ValueError(
+                "未配置 Anthropic API Key。"
+                "请设置环境变量 ANTHROPIC_API_KEY"
+            )
 
-        self.client = Anthropic(api_key=self._api_key)
-        self.tools = GridCodeTools()
-        self.messages: list[dict] = []
+        # 使用 ClaudeSDKClient 支持多轮对话
+        self._client: ClaudeSDKClient | None = None
+        self._session_id: str = "gridcode-session"
 
-        # 定义工具 schema
-        self._tool_definitions = self._build_tool_definitions()
+        # Tool call records
+        self._tool_calls: list[dict] = []
+        self._sources: list[str] = []
+        self._assembled_text: str = ""
 
     @property
     def name(self) -> str:
@@ -56,104 +96,69 @@ class ClaudeAgent(BaseGridCodeAgent):
     def model(self) -> str:
         return self._model
 
-    def _build_tool_definitions(self) -> list[dict]:
-        """构建 Claude 工具定义"""
+    def _get_mcp_config(self) -> dict[str, Any]:
+        """获取 MCP 服务器配置
+
+        GridCode MCP Server 通过 stdio 模式运行。
+        工具将以 mcp__gridcode__<tool_name> 格式暴露。
+        """
+        return {
+            "gridcode": {
+                "type": "stdio",
+                "command": sys.executable,
+                "args": ["-m", "grid_code.cli", "serve", "--transport", "stdio"],
+            }
+        }
+
+    def _get_allowed_tools(self) -> list[str]:
+        """获取允许使用的工具列表
+
+        GridCode MCP Server 提供的工具:
+        - mcp__gridcode__get_toc: 获取目录
+        - mcp__gridcode__smart_search: 混合检索
+        - mcp__gridcode__read_page_range: 读取页面
+        - mcp__gridcode__list_regulations: 列出规程
+        """
         return [
-            {
-                "name": "get_toc",
-                "description": "获取安规的章节目录树及页码范围。在开始搜索前，应先调用此工具了解规程的整体结构。",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "reg_id": {
-                            "type": "string",
-                            "description": "规程标识，如 'angui_2024'",
-                        }
-                    },
-                    "required": ["reg_id"],
-                },
-            },
-            {
-                "name": "smart_search",
-                "description": "在安规中执行混合检索（关键词+语义）。返回最相关的内容片段。建议先通过 get_toc 确定章节范围。",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "搜索查询，如 '母线失压处理'",
-                        },
-                        "reg_id": {
-                            "type": "string",
-                            "description": "规程标识",
-                        },
-                        "chapter_scope": {
-                            "type": "string",
-                            "description": "限定章节范围（可选），如 '第六章'",
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "返回结果数量限制，默认 10",
-                            "default": 10,
-                        },
-                    },
-                    "required": ["query", "reg_id"],
-                },
-            },
-            {
-                "name": "read_page_range",
-                "description": "读取连续页面的完整 Markdown 内容。自动处理跨页表格拼接。单次最多读取 10 页。",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "reg_id": {
-                            "type": "string",
-                            "description": "规程标识",
-                        },
-                        "start_page": {
-                            "type": "integer",
-                            "description": "起始页码",
-                        },
-                        "end_page": {
-                            "type": "integer",
-                            "description": "结束页码",
-                        },
-                    },
-                    "required": ["reg_id", "start_page", "end_page"],
-                },
-            },
-            {
-                "name": "list_regulations",
-                "description": "列出所有已入库的规程。",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {},
-                },
-            },
+            "mcp__gridcode__get_toc",
+            "mcp__gridcode__smart_search",
+            "mcp__gridcode__read_page_range",
+            "mcp__gridcode__list_regulations",
         ]
 
-    def _execute_tool(self, name: str, arguments: dict) -> Any:
-        """执行工具调用"""
-        logger.debug(f"执行工具: {name}, 参数: {arguments}")
+    def _build_system_prompt(self) -> str:
+        """构建系统提示词
 
-        # 如果有默认 reg_id，自动填充
-        if self.reg_id and "reg_id" in arguments and not arguments.get("reg_id"):
-            arguments["reg_id"] = self.reg_id
+        如果指定了 reg_id，则添加上下文限定。
+        """
+        base_prompt = SYSTEM_PROMPT
 
-        if name == "get_toc":
-            return self.tools.get_toc(**arguments)
-        elif name == "smart_search":
-            return self.tools.smart_search(**arguments)
-        elif name == "read_page_range":
-            return self.tools.read_page_range(**arguments)
-        elif name == "list_regulations":
-            return self.tools.list_regulations()
-        else:
-            return {"error": f"未知工具: {name}"}
+        if self.reg_id:
+            context = (
+                f"\n\n# 当前规程上下文\n"
+                f"默认规程标识: {self.reg_id}\n"
+                f"调用工具时如未指定 reg_id，请使用此默认值。"
+            )
+            return base_prompt + context
+
+        return base_prompt
+
+    def _build_options(self) -> ClaudeAgentOptions:
+        """构建 Agent 选项"""
+        return ClaudeAgentOptions(
+            system_prompt=self._build_system_prompt(),
+            mcp_servers=self._get_mcp_config(),
+            allowed_tools=self._get_allowed_tools(),
+            model=self._model,
+            max_turns=20,  # 允许多轮工具调用
+            permission_mode="bypassPermissions",  # 自动执行工具
+        )
 
     async def chat(self, message: str) -> AgentResponse:
         """
         与 Agent 对话
+
+        使用 ClaudeSDKClient 作为上下文管理器，确保连接正确清理。
 
         Args:
             message: 用户消息
@@ -161,75 +166,100 @@ class ClaudeAgent(BaseGridCodeAgent):
         Returns:
             AgentResponse
         """
-        # 添加用户消息
-        self.messages.append({"role": "user", "content": message})
+        # Reset per-query tracking
+        self._tool_calls = []
+        self._sources = []
+        self._assembled_text = ""
 
-        tool_calls = []
-        sources = []
+        final_result = ""
 
-        # 循环处理工具调用
-        while True:
-            response = self.client.messages.create(
-                model=self._model,
-                max_tokens=4096,
-                system=SYSTEM_PROMPT,
-                tools=self._tool_definitions,
-                messages=self.messages,
+        try:
+            # 使用上下文管理器确保连接正确清理
+            async with ClaudeSDKClient(options=self._build_options()) as client:
+                # 发送查询
+                await client.query(message, session_id=self._session_id)
+
+                # 接收响应
+                async for event in client.receive_response():
+                    self._process_event(event)
+
+                    # 检查最终结果 (ResultMessage)
+                    if ResultMessage is not None and isinstance(event, ResultMessage):
+                        final_result = event.result or self._assembled_text
+                        break
+
+                # 如果没有通过 ResultMessage 获取，使用组装的文本
+                if not final_result:
+                    final_result = self._assembled_text
+
+        except Exception as e:
+            logger.error(f"Agent query failed: {e}")
+            return AgentResponse(
+                content=f"查询失败: {str(e)}",
+                sources=[],
+                tool_calls=self._tool_calls,
             )
 
-            # 检查是否需要工具调用
-            if response.stop_reason == "tool_use":
-                # 处理工具调用
-                assistant_content = response.content
-                self.messages.append({"role": "assistant", "content": assistant_content})
+        return AgentResponse(
+            content=final_result,
+            sources=list(set(self._sources)),  # 去重
+            tool_calls=self._tool_calls,
+        )
 
-                tool_results = []
-                for block in assistant_content:
-                    if block.type == "tool_use":
-                        tool_name = block.name
-                        tool_input = block.input
-                        tool_id = block.id
+    def _process_event(self, event: Any) -> None:
+        """处理 SDK 事件
 
-                        # 执行工具
-                        result = self._execute_tool(tool_name, tool_input)
-                        tool_calls.append({
-                            "name": tool_name,
-                            "input": tool_input,
-                            "output": result,
-                        })
+        使用 isinstance() 检查事件类型，符合 SDK 最佳实践。
+        """
+        # 处理 AssistantMessage
+        if AssistantMessage is not None and isinstance(event, AssistantMessage):
+            for block in event.content:
+                # TextBlock - 文本内容
+                if TextBlock is not None and isinstance(block, TextBlock):
+                    self._assembled_text += block.text
 
-                        # 收集来源信息
-                        if isinstance(result, dict) and "source" in result:
-                            sources.append(result["source"])
-                        elif isinstance(result, list):
-                            for item in result:
-                                if isinstance(item, dict) and "source" in item:
-                                    sources.append(item["source"])
+                # ToolUseBlock - 工具调用
+                elif ToolUseBlock is not None and isinstance(block, ToolUseBlock):
+                    tool_call = {
+                        "name": block.name,
+                        "input": block.input,
+                    }
+                    self._tool_calls.append(tool_call)
+                    logger.debug(f"Tool call: {block.name}")
 
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tool_id,
-                            "content": json.dumps(result, ensure_ascii=False),
-                        })
+        # 从工具结果中提取来源（通过 hasattr 因为 ToolResultBlock 结构可能变化）
+        if hasattr(event, "type") and getattr(event, "type", None) == "tool_result":
+            content = getattr(event, "content", None)
+            if content:
+                self._extract_sources(content)
 
-                # 添加工具结果
-                self.messages.append({"role": "user", "content": tool_results})
-
-            else:
-                # 生成最终回答
-                final_content = ""
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        final_content += block.text
-
-                self.messages.append({"role": "assistant", "content": final_content})
-
-                return AgentResponse(
-                    content=final_content,
-                    sources=list(set(sources)),  # 去重
-                    tool_calls=tool_calls,
-                )
+    def _extract_sources(self, result: Any) -> None:
+        """从工具结果中提取来源信息"""
+        if isinstance(result, dict):
+            if "source" in result:
+                self._sources.append(result["source"])
+            # 递归检查嵌套内容
+            for value in result.values():
+                self._extract_sources(value)
+        elif isinstance(result, list):
+            for item in result:
+                self._extract_sources(item)
+        elif isinstance(result, str):
+            # 尝试解析 JSON 字符串
+            try:
+                import json
+                parsed = json.loads(result)
+                self._extract_sources(parsed)
+            except (json.JSONDecodeError, TypeError):
+                pass
 
     async def reset(self):
-        """重置对话历史"""
-        self.messages = []
+        """重置对话历史
+
+        由于使用上下文管理器，客户端连接会自动清理。
+        此方法仅重置内部状态。
+        """
+        self._tool_calls = []
+        self._sources = []
+        self._assembled_text = ""
+        logger.debug("Agent session reset")

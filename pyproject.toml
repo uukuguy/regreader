@@ -26,7 +26,8 @@ dependencies = [
     "loguru>=0.7.0",
 
     # Agent 框架
-    "anthropic>=0.52.0",  # Claude Agent SDK
+    "anthropic>=0.52.0",  # Anthropic API (for other agents)
+    "claude-agent-sdk>=0.1.0",  # Claude Agent SDK (https://platform.claude.com/docs/en/agent-sdk)
     "pydantic-ai>=0.0.17",  # Pydantic AI
     "langgraph>=0.2.0",  # LangGraph
     "langchain-anthropic>=0.3.0",  # LangChain Anthropic

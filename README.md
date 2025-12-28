@@ -51,6 +51,8 @@ Inspired by how Claude Code searches codebases, GridCode treats regulations as "
    - **Pydantic AI**: Type-safe, model-agnostic, production-ready
    - **LangGraph**: Complex workflow orchestration
 
+5. **Unified MCP Access**: All agents access page data through MCP protocol—the PageStore is controlled internally by the MCP Server, ensuring consistent data access patterns.
+
 ## Data Model
 
 Each page is stored as a `PageDocument` containing ordered `ContentBlock`s (text, tables, headings). This handles the common case of multiple tables per page:
@@ -152,6 +154,73 @@ export GRIDCODE_VECTOR_INDEX_BACKEND=lancedb
 
 # Qdrant server configuration (if using qdrant)
 export GRIDCODE_QDRANT_URL=http://localhost:6333
+```
+
+## Agent Setup
+
+GridCode provides three agent implementations. Each agent communicates with the MCP Server through MCP protocol:
+
+### Claude Agent SDK (Recommended for Claude models)
+
+Uses the official Claude Agent SDK with native MCP support:
+
+```bash
+# Set API key
+export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
+
+# Start chat with Claude Agent
+gridcode chat --agent claude --reg-id angui_2024
+```
+
+### Pydantic AI Agent (Multi-model support)
+
+Type-safe agent supporting multiple LLM providers:
+
+```bash
+# For Anthropic models
+export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
+
+# For OpenAI models
+export GRIDCODE_OPENAI_API_KEY="your-api-key"
+
+# Start chat
+gridcode chat --agent pydantic --reg-id angui_2024
+```
+
+### LangGraph Agent (Complex workflows)
+
+For advanced workflow orchestration:
+
+```bash
+export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
+
+gridcode chat --agent langgraph --reg-id angui_2024
+```
+
+### Architecture Note
+
+All agents access page data through MCP protocol:
+
+```
+┌─────────────────────────────────────────────────┐
+│                 Agent Layer                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌──────────┐ │
+│  │ ClaudeAgent │  │ LangGraph   │  │ Pydantic │ │
+│  │ (SDK MCP)   │  │ Agent       │  │ AI Agent │ │
+│  └──────┬──────┘  └──────┬──────┘  └────┬─────┘ │
+│         │                │               │       │
+│         │         ┌──────┴───────────────┘       │
+│         │         │                              │
+│         │         ▼                              │
+│         │  GridCodeMCPClient                     │
+└─────────┼─────────┬──────────────────────────────┘
+          │         │
+          │  stdio  │  stdio
+          ▼         ▼
+┌─────────────────────────────────────────────────┐
+│              GridCode MCP Server                 │
+│   get_toc | smart_search | read_page_range      │
+└─────────────────────────────────────────────────┘
 ```
 
 ## Project Status
