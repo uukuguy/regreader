@@ -113,6 +113,20 @@ class GridCodeSettings(BaseSettings):
         description="语义检索权重（0-1）",
     )
 
+    # 表格索引配置
+    table_fts_db_name: str = Field(
+        default="tables.db",
+        description="表格 FTS5 数据库文件名",
+    )
+    table_lancedb_name: str = Field(
+        default="table_vectors",
+        description="表格 LanceDB 数据库目录名",
+    )
+    table_search_mode: str = Field(
+        default="hybrid",
+        description="表格搜索默认模式: keyword, semantic, hybrid",
+    )
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # 确保目录存在
@@ -133,6 +147,16 @@ class GridCodeSettings(BaseSettings):
     def lancedb_path(self) -> Path:
         """LanceDB 数据库完整路径"""
         return self.index_dir / self.lancedb_name
+
+    @property
+    def table_fts_db_path(self) -> Path:
+        """表格 FTS5 数据库完整路径"""
+        return self.index_dir / self.table_fts_db_name
+
+    @property
+    def table_lancedb_path(self) -> Path:
+        """表格 LanceDB 数据库完整路径"""
+        return self.index_dir / self.table_lancedb_name
 
 
 # 全局配置实例（延迟初始化）

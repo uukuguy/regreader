@@ -12,6 +12,12 @@ from .keyword import FTS5Index, TantivyIndex, WhooshIndex
 # 向量索引实现
 from .vector import LanceDBIndex, QdrantIndex
 
+# 表格专用索引
+from .table_fts5 import TableFTS5Index
+from .table_lancedb import TableLanceDBIndex
+from .table_search import TableHybridSearch
+from .table_indexer import TableIndexer
+
 # 向后兼容：保留旧的导入名称
 FTSIndex = FTS5Index
 VectorIndex = LanceDBIndex
@@ -29,6 +35,11 @@ __all__ = [
     # 向量索引
     "LanceDBIndex",
     "QdrantIndex",
+    # 表格专用索引
+    "TableFTS5Index",
+    "TableLanceDBIndex",
+    "TableHybridSearch",
+    "TableIndexer",
     # 向后兼容
     "FTSIndex",
     "VectorIndex",

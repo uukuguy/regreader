@@ -4,7 +4,7 @@
 .PHONY: help install install-dev install-all test test-heading lint format check serve serve-stdio chat build clean reindex read-chapter \
 	toc read-pages chapter-structure page-info lookup-annotation search-tables resolve-reference \
 	search-annotations get-table get-block-context find-similar compare-sections \
-	build-table-registry table-registry-stats list-cross-page-tables
+	build-table-registry table-registry-stats list-cross-page-tables build-table-index
 
 # Default target
 .DEFAULT_GOAL := help
@@ -40,7 +40,8 @@ help: ## Show this help message
 	@echo "$(GREEN)MCP Tools Testing:$(NC)"
 	@echo "  make toc                      # Get regulation TOC"
 	@echo "  make read-pages START_PAGE=85 END_PAGE=87"
-	@echo "  make search-tables TABLE_QUERY=\"母线失压\""
+	@echo "  make search-tables TABLE_QUERY=\"母线失压\" TABLE_SEARCH_MODE=keyword"
+	@echo "  make build-table-index        # Build table FTS5 + vector index"
 	@echo "  make lookup-annotation ANNOTATION_ID=\"注1\" PAGE_NUM=85"
 	@echo "  make resolve-reference REFERENCE=\"见第六章\""
 	@echo "  make find-similar SIMILAR_QUERY=\"母线失压处理\""
@@ -210,9 +211,10 @@ lookup-annotation: ## Lookup annotation (usage: make lookup-annotation REG_ID=an
 		$(UV) run gridcode lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)"; \
 	fi
 
-TABLE_QUERY ?= 母线失压
-search-tables: ## Search tables (usage: make search-tables REG_ID=angui TABLE_QUERY="母线失压")
-	$(UV) run gridcode search-tables "$(TABLE_QUERY)" --reg-id $(REG_ID)
+TABLE_QUERY ?= 灵宝直流安控系统
+TABLE_SEARCH_MODE ?= hybrid
+search-tables: ## Search tables (usage: make search-tables REG_ID=angui TABLE_QUERY="母线失压" TABLE_SEARCH_MODE=hybrid)
+	$(UV) run gridcode search-tables "$(TABLE_QUERY)" --reg-id $(REG_ID) --mode $(TABLE_SEARCH_MODE)
 
 REFERENCE ?= 见第六章
 resolve-reference: ## Resolve cross-reference (usage: make resolve-reference REG_ID=angui REFERENCE="见第六章")
@@ -251,6 +253,14 @@ get-table: ## Get full table by ID (usage: make get-table REG_ID=angui TABLE_ID=
 build-table-registry: ## Build table registry for a regulation (usage: make build-table-registry REG_ID=angui_2024)
 	@echo "$(BLUE)Building table registry for $(REG_ID)...$(NC)"
 	@$(UV) run $(PYTHON) -c "from grid_code.storage import PageStore; from grid_code.parser import TableRegistryBuilder; ps = PageStore(); info = ps.load_info('$(REG_ID)'); pages = [ps.load_page('$(REG_ID)', i) for i in range(1, info.total_pages + 1)]; builder = TableRegistryBuilder('$(REG_ID)'); registry = builder.build(pages); ps.save_table_registry(registry); print(f'Done: {registry.total_tables} tables, {registry.cross_page_tables} cross-page')"
+
+REBUILD_INDEX ?= false
+build-table-index: ## Build table search index (FTS5 + vector) (usage: make build-table-index REG_ID=angui_2024 REBUILD_INDEX=true)
+	@if [ "$(REBUILD_INDEX)" = "true" ]; then \
+		$(UV) run gridcode build-table-index $(REG_ID) --rebuild; \
+	else \
+		$(UV) run gridcode build-table-index $(REG_ID); \
+	fi
 
 table-registry-stats: ## Show table registry statistics (usage: make table-registry-stats REG_ID=angui_2024)
 	@$(UV) run $(PYTHON) -c "from grid_code.storage import PageStore; ps = PageStore(); reg = ps.load_table_registry('$(REG_ID)'); print(f'Total tables: {reg.total_tables}') if reg else print('No table registry found'); print(f'Cross-page tables: {reg.cross_page_tables}') if reg else None; print(f'Segment mappings: {len(reg.segment_to_table)}') if reg else None"

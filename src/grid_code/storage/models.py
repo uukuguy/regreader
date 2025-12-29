@@ -35,6 +35,16 @@ class TableMeta(BaseModel):
     col_count: int = Field(description="列数")
     cells: list[TableCell] = Field(default_factory=list, description="单元格数据")
 
+    # 跨页表格关联字段
+    master_table_id: str | None = Field(
+        default=None,
+        description="主表格ID（跨页表格的首段ID，单页表格为None）"
+    )
+    segment_index: int = Field(
+        default=0,
+        description="段落索引（在跨页表格中的位置，从0开始）"
+    )
+
 
 class Annotation(BaseModel):
     """页面注释（页脚注等）"""
@@ -369,3 +379,32 @@ class TableRegistry(BaseModel):
     page_to_tables: dict[int, list[str]] = Field(
         default_factory=dict, description="页码到表格ID列表映射"
     )
+
+
+class TableSearchResult(BaseModel):
+    """表格搜索结果"""
+
+    table_id: str = Field(description="表格标识")
+    caption: str | None = Field(default=None, description="表格标题")
+    reg_id: str = Field(description="规程标识")
+    page_start: int = Field(description="起始页码")
+    page_end: int = Field(description="结束页码")
+    chapter_path: list[str] = Field(default_factory=list, description="章节路径")
+    is_cross_page: bool = Field(default=False, description="是否跨页")
+    row_count: int = Field(default=0, description="行数")
+    col_count: int = Field(default=0, description="列数")
+    col_headers: list[str] = Field(default_factory=list, description="列标题")
+    snippet: str = Field(default="", description="匹配片段预览")
+    score: float = Field(default=0.0, description="相关性分数")
+    match_type: str = Field(default="content", description="匹配类型: caption, content, both")
+
+    @property
+    def pages(self) -> list[int]:
+        """所有相关页码"""
+        return list(range(self.page_start, self.page_end + 1))
+
+    @property
+    def source(self) -> str:
+        """来源引用"""
+        page_ref = f"P{self.page_start}" if self.page_start == self.page_end else f"P{self.page_start}-{self.page_end}"
+        return f"{self.reg_id} {page_ref}" + (f" {self.caption}" if self.caption else "")

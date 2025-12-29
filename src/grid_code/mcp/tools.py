@@ -7,6 +7,9 @@
 """
 
 import re
+from typing import Literal
+
+from loguru import logger
 
 from grid_code.exceptions import (
     AnnotationNotFoundError,
@@ -17,6 +20,7 @@ from grid_code.exceptions import (
     TableNotFoundError,
 )
 from grid_code.index import HybridSearch
+from grid_code.index.table_search import TableHybridSearch
 from grid_code.storage import PageStore
 from grid_code.storage.models import (
     ActiveChapter,
@@ -35,6 +39,7 @@ class GridCodeTools:
         self,
         page_store: PageStore | None = None,
         hybrid_search: HybridSearch | None = None,
+        table_search: TableHybridSearch | None = None,
     ):
         """
         初始化工具集
@@ -42,9 +47,18 @@ class GridCodeTools:
         Args:
             page_store: 页面存储实例
             hybrid_search: 混合检索实例
+            table_search: 表格混合检索实例
         """
         self.page_store = page_store or PageStore()
         self.hybrid_search = hybrid_search or HybridSearch()
+        self._table_search = table_search
+
+    @property
+    def table_search(self) -> TableHybridSearch:
+        """获取表格混合检索实例（延迟加载）"""
+        if self._table_search is None:
+            self._table_search = TableHybridSearch()
+        return self._table_search
 
     def get_toc(self, reg_id: str) -> dict:
         """
@@ -560,31 +574,41 @@ class GridCodeTools:
         query: str,
         reg_id: str,
         chapter_scope: str | None = None,
-        search_cells: bool = True,
+        search_mode: Literal["keyword", "semantic", "hybrid"] = "hybrid",
         limit: int = 10,
     ) -> list[dict]:
         """
-        搜索表格（按标题或单元格内容）
+        搜索表格（支持精确关键词和模糊语义搜索）
 
         Args:
-            query: 搜索查询，如 "母线失压" 或 "表6-2"
+            query: 搜索查询
+                - 表格标题: "表6-2", "母线故障处置"
+                - 内容关键词: "母线失压", "复奉直流"
+                - 章节范围: "西南分区"
             reg_id: 规程标识
             chapter_scope: 限定章节范围（可选）
-            search_cells: 是否搜索单元格内容（默认True）
+            search_mode: 搜索模式
+                - "keyword": 仅关键词精确匹配
+                - "semantic": 仅语义相似度搜索
+                - "hybrid": 混合搜索（默认）
             limit: 返回结果数量限制
 
         Returns:
-            匹配的表格列表，每个包含:
+            搜索结果列表，每个包含:
             - table_id: 表格标识
             - caption: 表格标题
-            - page_num: 所在页码
+            - reg_id: 规程标识
+            - page_start: 起始页码
+            - page_end: 结束页码
+            - pages: 所有相关页码列表
+            - chapter_path: 章节路径
+            - is_cross_page: 是否跨页
             - row_count: 行数
             - col_count: 列数
             - col_headers: 列标题
-            - is_truncated: 是否跨页
-            - match_type: 匹配类型（'caption', 'cell', 'both'）
-            - matched_cells: 匹配的单元格信息（如搜索单元格）
-            - chapter_path: 所属章节路径
+            - snippet: 匹配片段预览
+            - score: 相关性分数
+            - match_type: 匹配类型
             - source: 来源引用
 
         Raises:
@@ -593,73 +617,100 @@ class GridCodeTools:
         if not self.page_store.exists(reg_id):
             raise RegulationNotFoundError(reg_id)
 
+        # 尝试使用表格索引搜索
+        if self.table_search.has_index(reg_id):
+            results = self.table_search.search(
+                query=query,
+                reg_id=reg_id,
+                chapter_scope=chapter_scope,
+                search_mode=search_mode,
+                limit=limit,
+            )
+
+            return [
+                {
+                    "table_id": r.table_id,
+                    "caption": r.caption,
+                    "reg_id": r.reg_id,
+                    "page_start": r.page_start,
+                    "page_end": r.page_end,
+                    "pages": r.pages,
+                    "chapter_path": r.chapter_path,
+                    "is_cross_page": r.is_cross_page,
+                    "row_count": r.row_count,
+                    "col_count": r.col_count,
+                    "col_headers": r.col_headers,
+                    "snippet": r.snippet,
+                    "score": r.score,
+                    "match_type": r.match_type,
+                    "source": r.source,
+                }
+                for r in results
+            ]
+
+        # 降级：使用原始遍历方法
+        logger.warning(f"[search_tables] 规程 {reg_id} 没有表格索引，使用降级遍历搜索")
+        return self._search_tables_fallback(query, reg_id, chapter_scope, limit)
+
+    def _search_tables_fallback(
+        self,
+        query: str,
+        reg_id: str,
+        chapter_scope: str | None,
+        limit: int,
+    ) -> list[dict]:
+        """降级的表格搜索（遍历所有页面）"""
         results = []
         query_lower = query.lower()
 
-        # 获取规程信息并遍历所有页面
         info = self.page_store.load_info(reg_id)
 
         for page_num in range(1, info.total_pages + 1):
             page = self.page_store.load_page(reg_id, page_num)
 
-            # 如果指定了 chapter_scope，检查页面是否在该章节范围内
             if chapter_scope:
                 chapter_path_str = " ".join(page.chapter_path)
                 if chapter_scope not in chapter_path_str:
                     continue
 
-            # 遍历页面中的表格块
             for block in page.content_blocks:
                 if block.block_type != "table" or not block.table_meta:
                     continue
 
                 table_meta = block.table_meta
                 match_type = None
-                matched_cells = []
 
-                # 检查标题匹配
-                caption_match = False
-                if table_meta.caption and query_lower in table_meta.caption.lower():
-                    caption_match = True
+                caption_match = table_meta.caption and query_lower in table_meta.caption.lower()
+                cell_match = any(query_lower in cell.content.lower() for cell in table_meta.cells)
 
-                # 检查单元格内容匹配
-                cell_match = False
-                if search_cells:
-                    for cell in table_meta.cells:
-                        if query_lower in cell.content.lower():
-                            cell_match = True
-                            matched_cells.append({
-                                "row": cell.row,
-                                "col": cell.col,
-                                "content": cell.content[:100],  # 截断长内容
-                            })
-
-                # 确定匹配类型
                 if caption_match and cell_match:
                     match_type = "both"
                 elif caption_match:
                     match_type = "caption"
                 elif cell_match:
-                    match_type = "cell"
+                    match_type = "content"
 
                 if match_type:
                     results.append({
                         "table_id": table_meta.table_id,
                         "caption": table_meta.caption,
-                        "page_num": page_num,
+                        "reg_id": reg_id,
+                        "page_start": page_num,
+                        "page_end": page_num,
+                        "pages": [page_num],
+                        "chapter_path": block.chapter_path,
+                        "is_cross_page": table_meta.is_truncated,
                         "row_count": table_meta.row_count,
                         "col_count": table_meta.col_count,
                         "col_headers": table_meta.col_headers,
-                        "is_truncated": table_meta.is_truncated,
+                        "snippet": block.content_markdown[:200],
+                        "score": 1.0 if match_type == "caption" else 0.8,
                         "match_type": match_type,
-                        "matched_cells": matched_cells[:5],  # 最多返回5个匹配单元格
-                        "chapter_path": block.chapter_path,
                         "source": f"{reg_id} P{page_num}"
                         + (f" {table_meta.caption}" if table_meta.caption else ""),
                     })
 
-        # 按匹配类型排序：caption > both > cell
-        priority = {"caption": 0, "both": 1, "cell": 2}
+        priority = {"caption": 0, "both": 1, "content": 2}
         results.sort(key=lambda x: priority.get(x["match_type"], 3))
 
         return results[:limit]

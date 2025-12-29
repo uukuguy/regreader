@@ -781,10 +781,10 @@ def search_tables(
     query: str = typer.Argument(..., help="搜索查询，如 '母线失压' 或 '表6-2'"),
     reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
     chapter: str | None = typer.Option(None, "--chapter", "-c", help="限定章节范围"),
-    no_cells: bool = typer.Option(False, "--no-cells", help="不搜索单元格内容"),
+    mode: str = typer.Option("hybrid", "--mode", "-m", help="搜索模式: keyword, semantic, hybrid"),
     limit: int = typer.Option(10, "--limit", "-l", help="结果数量"),
 ):
-    """搜索表格（按标题或单元格内容）"""
+    """搜索表格（支持精确关键词和模糊语义搜索）"""
     from grid_code.exceptions import RegulationNotFoundError
     from grid_code.mcp.tools import GridCodeTools
 
@@ -795,7 +795,7 @@ def search_tables(
             query=query,
             reg_id=reg_id,
             chapter_scope=chapter,
-            search_cells=not no_cells,
+            search_mode=mode,
             limit=limit,
         )
     except RegulationNotFoundError:
@@ -811,10 +811,22 @@ def search_tables(
     for i, table in enumerate(results, 1):
         console.print(f"[bold cyan]{i}. {table['caption'] or '(无标题)'}[/bold cyan]")
         console.print(f"   表格ID: {table['table_id']}")
-        console.print(f"   位置: {table['source']} | {table['row_count']}行 x {table['col_count']}列")
-        console.print(f"   匹配类型: {table['match_type']} | 跨页: {'是' if table['is_truncated'] else '否'}")
-        if table.get("matched_cells"):
-            console.print(f"   匹配单元格: {len(table['matched_cells'])} 个")
+
+        # 显示页码信息
+        pages = table.get('pages', [table.get('page_start', 0)])
+        if len(pages) == 1:
+            page_str = f"P{pages[0]}"
+        else:
+            page_str = f"P{pages[0]}-{pages[-1]}"
+        console.print(f"   位置: {reg_id} {page_str} | {table['row_count']}行 x {table['col_count']}列")
+
+        console.print(f"   匹配类型: {table['match_type']} | 跨页: {'是' if table.get('is_cross_page') else '否'}")
+        console.print(f"   相关性: {table.get('score', 0):.4f}")
+
+        if table.get("snippet"):
+            snippet = table["snippet"][:100].replace("\n", " ")
+            console.print(f"   预览: {snippet}...")
+
         if table.get("chapter_path"):
             console.print(f"   章节: {' > '.join(table['chapter_path'])}")
         console.print()
@@ -1120,6 +1132,49 @@ def compare_sections(
 
     if result.get("common_keywords"):
         console.print(f"\n[bold]共同关键词:[/bold] {', '.join(result['common_keywords'][:10])}")
+
+
+@app.command("build-table-index")
+def build_table_index(
+    reg_id: str = typer.Argument(..., help="规程标识"),
+    rebuild: bool = typer.Option(False, "--rebuild", "-r", help="重建索引（删除旧索引）"),
+):
+    """为指定规程构建表格索引（FTS5 + 向量索引）"""
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    from grid_code.exceptions import RegulationNotFoundError
+    from grid_code.index.table_indexer import TableIndexer
+
+    indexer = TableIndexer()
+
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task(f"构建表格索引: {reg_id}...", total=None)
+            stats = indexer.build_index(reg_id, rebuild=rebuild)
+            progress.update(task, completed=True)
+
+        console.print(f"\n[bold green]表格索引构建完成[/bold green]\n")
+        console.print(f"  规程 ID: {reg_id}")
+        console.print(f"  表格总数: {stats['total_tables']}")
+        console.print(f"  FTS5 索引: {stats['indexed_fts']} 条")
+        console.print(f"  向量索引: {stats['indexed_vector']} 条")
+        if rebuild:
+            console.print(f"  模式: 重建")
+
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+    except FileNotFoundError as e:
+        console.print(f"[red]错误: 表格注册表不存在[/red]")
+        console.print(f"[yellow]提示: 请先使用 read-pages 或 parse 命令处理文档[/yellow]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]错误: {e}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
