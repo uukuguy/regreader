@@ -197,6 +197,10 @@ class PageStore:
         """
         合并多页内容，处理跨页表格
 
+        使用显式标记和启发式检测两种方式识别跨页表格：
+        1. 显式标记：使用 continues_from_prev/continues_to_next 标记
+        2. 启发式：当上页最后是表格、下页第一个也是表格且列数相同时合并
+
         Returns:
             (合并后的 Markdown, 是否包含合并的表格)
         """
@@ -205,44 +209,104 @@ class PageStore:
 
         parts = []
         has_merged_tables = False
-        pending_table: list[str] | None = None
+        pending_table: dict | None = None  # {lines: list[str], col_count: int}
+
+        def get_table_col_count(table_md: str) -> int:
+            """从表格 Markdown 获取列数"""
+            lines = [l for l in table_md.split("\n") if l.strip().startswith("|")]
+            if lines:
+                # 计算第一行的列数
+                return lines[0].count("|") - 1
+            return 0
+
+        def should_merge_tables(prev_block, next_block) -> bool:
+            """判断两个表格是否应该合并（启发式检测）"""
+            if not prev_block or not next_block:
+                return False
+            if prev_block.block_type != "table" or next_block.block_type != "table":
+                return False
+
+            # 比较列数
+            prev_cols = get_table_col_count(prev_block.content_markdown)
+            next_cols = get_table_col_count(next_block.content_markdown)
+
+            if prev_cols == 0 or next_cols == 0:
+                return False
+
+            # 列数相同则认为是跨页表格
+            return prev_cols == next_cols
 
         for i, page in enumerate(pages):
             # 添加页面分隔标记
             parts.append(f"\n<!-- Page {page.page_num} -->\n")
 
-            # 处理跨页表格
-            if page.continues_from_prev and pending_table is not None:
-                # 当前页从上一页延续，需要拼接表格
-                for block in page.content_blocks:
-                    if block.block_type == "table":
+            # 获取下一页信息（用于启发式检测）
+            next_page = pages[i + 1] if i + 1 < len(pages) else None
+            next_first_block = next_page.content_blocks[0] if next_page and next_page.content_blocks else None
+
+            # 检查是否需要从待处理表格中合并
+            if pending_table is not None:
+                first_block = page.content_blocks[0] if page.content_blocks else None
+                if first_block and first_block.block_type == "table":
+                    # 检查列数是否匹配
+                    first_cols = get_table_col_count(first_block.content_markdown)
+                    if first_cols == pending_table["col_count"]:
                         # 合并表格内容
-                        table_lines = block.content_markdown.split("\n")
+                        table_lines = first_block.content_markdown.split("\n")
                         # 跳过表头（前两行：标题行和分隔行）
                         data_lines = [
                             line for line in table_lines[2:]
                             if line.strip() and line.startswith("|")
                         ]
-                        pending_table.extend(data_lines)
+                        pending_table["lines"].extend(data_lines)
                         has_merged_tables = True
-                        break
+
+                        # 输出合并后的表格
+                        parts.append("\n".join(pending_table["lines"]))
+                        pending_table = None
+
+                        # 添加该页剩余内容
+                        for block in page.content_blocks[1:]:
+                            parts.append(block.content_markdown)
+
+                        # 检查最后一个块是否可能延续到下页
+                        if page.content_blocks:
+                            last_block = page.content_blocks[-1]
+                            if should_merge_tables(last_block, next_first_block):
+                                # 开始新的跨页表格收集
+                                pending_table = {
+                                    "lines": last_block.content_markdown.split("\n"),
+                                    "col_count": get_table_col_count(last_block.content_markdown),
+                                }
+                                # 移除刚添加的最后一个块（因为要延迟输出）
+                                parts.pop()
+                        continue
                 else:
-                    # 没有找到表格，刷新待处理表格
-                    parts.append("\n".join(pending_table))
-                    pending_table = None
-            else:
-                # 刷新之前的待处理表格
-                if pending_table is not None:
-                    parts.append("\n".join(pending_table))
+                    # 下一页第一个不是表格，刷新待处理表格
+                    parts.append("\n".join(pending_table["lines"]))
                     pending_table = None
 
             # 处理当前页内容
-            if page.continues_to_next:
-                # 当前页有跨页表格
-                for block in page.content_blocks:
-                    if block.block_type == "table" and block.table_meta and block.table_meta.is_truncated:
-                        # 开始收集跨页表格
-                        pending_table = block.content_markdown.split("\n")
+            # 检查最后一个块是否可能延续到下页（显式标记或启发式）
+            last_block = page.content_blocks[-1] if page.content_blocks else None
+            is_explicit_cross_page = (
+                page.continues_to_next and
+                last_block and
+                last_block.block_type == "table" and
+                last_block.table_meta and
+                last_block.table_meta.is_truncated
+            )
+            is_heuristic_cross_page = should_merge_tables(last_block, next_first_block)
+
+            if is_explicit_cross_page or is_heuristic_cross_page:
+                # 当前页最后的表格可能跨页
+                for j, block in enumerate(page.content_blocks):
+                    if j == len(page.content_blocks) - 1 and block.block_type == "table":
+                        # 最后一个表格，开始收集
+                        pending_table = {
+                            "lines": block.content_markdown.split("\n"),
+                            "col_count": get_table_col_count(block.content_markdown),
+                        }
                     else:
                         parts.append(block.content_markdown)
             else:
@@ -251,7 +315,7 @@ class PageStore:
 
         # 处理最后的待处理表格
         if pending_table is not None:
-            parts.append("\n".join(pending_table))
+            parts.append("\n".join(pending_table["lines"]))
 
         return "\n".join(parts), has_merged_tables
 
