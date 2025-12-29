@@ -388,6 +388,730 @@ def inspect(
         raise typer.Exit(1)
 
 
+# ==================== 基础工具 CLI 命令 ====================
+
+
+@app.command()
+def toc(
+    reg_id: str = typer.Argument(..., help="规程标识"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="JSON 输出文件路径"),
+    expand_all: bool = typer.Option(False, "--expand", "-e", help="展开所有层级"),
+    max_level: int = typer.Option(3, "--level", "-l", help="显示的最大层级深度"),
+):
+    """获取规程目录树（带章节结构）"""
+    import json
+
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich.tree import Tree
+
+    from grid_code.exceptions import RegulationNotFoundError
+    from grid_code.storage import PageStore
+
+    page_store = PageStore()
+
+    # 检查规程是否存在
+    if not page_store.exists(reg_id):
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+
+    # 加载章节结构
+    try:
+        doc_structure = page_store.load_document_structure(reg_id)
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+
+    # 读取第一页获取文档标题
+    first_page = page_store.load_page(reg_id, 1)
+    doc_title = reg_id
+    doc_subtitle = ""
+    for block in first_page.content_blocks[:3]:
+        if block.block_type == "text":
+            content = block.content_markdown.strip()
+            if not doc_title or doc_title == reg_id:
+                doc_title = content
+            elif not doc_subtitle:
+                doc_subtitle = content
+                break
+
+    if output:
+        # 导出JSON时使用章节结构
+        result = {
+            "reg_id": reg_id,
+            "title": doc_title,
+            "subtitle": doc_subtitle,
+            "total_chapters": len(doc_structure.all_nodes),
+            "chapters": [
+                {
+                    "section_number": node.section_number,
+                    "title": node.title,
+                    "level": node.level,
+                    "page_num": node.page_num,
+                    "children_count": len(node.children_ids),
+                }
+                for node in doc_structure.all_nodes.values()
+            ],
+        }
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+        console.print(f"[green]✓ 已保存到 {output}[/green]")
+        return
+
+    # 定义层级对应的颜色
+    level_colors = {
+        1: "bold green",      # 节 (如 1.1, 2.1)
+        2: "yellow",          # 条 (如 2.1.1)
+        3: "white",           # 款 (如 2.1.1.1)
+        4: "dim white",       # 项 (如 2.1.1.1.1)
+        5: "dim",             # 更深层级
+    }
+
+    def get_color(display_level: int) -> str:
+        """获取层级颜色"""
+        return level_colors.get(display_level, "dim")
+
+    def add_chapter_node(parent_tree: Tree, node_id: str, display_level: int = 1):
+        """递归添加章节节点到树"""
+        node = doc_structure.all_nodes.get(node_id)
+        if not node:
+            return
+
+        color = get_color(display_level)
+
+        # 构建节点标签：章节号 + 标题（截断）
+        section = node.section_number
+        title = node.title[:50] + "..." if len(node.title) > 50 else node.title
+
+        label = Text()
+        label.append(f"{section} ", style="bold " + color)
+        label.append(title, style=color)
+        label.append(f"  {node.page_num}", style="dim")
+
+        if node.children_ids and display_level < max_level:
+            # 有子节点且未达到最大层级
+            branch = parent_tree.add(label)
+            for child_id in node.children_ids:
+                add_chapter_node(branch, child_id, display_level + 1)
+        elif node.children_ids and display_level >= max_level and not expand_all:
+            # 有子节点但已达到最大层级，显示折叠提示
+            collapsed_label = Text()
+            collapsed_label.append(f"{section} ", style="bold " + color)
+            collapsed_label.append(title, style=color)
+            collapsed_label.append(f"  {node.page_num}", style="dim")
+            collapsed_label.append(f"  +{len(node.children_ids)}", style="dim yellow")
+            parent_tree.add(collapsed_label)
+        elif node.children_ids and expand_all:
+            # 展开所有层级
+            branch = parent_tree.add(label)
+            for child_id in node.children_ids:
+                add_chapter_node(branch, child_id, relative_depth + 1)
+        else:
+            # 叶子节点
+            parent_tree.add(label)
+
+    # 创建根节点（文档标题）
+    root_label = Text()
+    root_label.append(doc_title, style="bold blue")
+    if doc_subtitle:
+        root_label.append("\n   ", style="")
+        root_label.append(doc_subtitle, style="dim")
+
+    tree = Tree(root_label)
+
+    # 按章节编号前缀分组显示根节点
+    if doc_structure.root_node_ids:
+        # 将根节点按章节编号前缀分组（1.x, 2.x, 3.x...）
+        chapter_groups: dict[str, list[str]] = {}
+        for node_id in doc_structure.root_node_ids:
+            node = doc_structure.all_nodes.get(node_id)
+            if node:
+                # 提取章节编号前缀（如 "1.1" -> "1", "2.3.4" -> "2"）
+                prefix = node.section_number.split(".")[0] if node.section_number else "0"
+                if prefix not in chapter_groups:
+                    chapter_groups[prefix] = []
+                chapter_groups[prefix].append(node_id)
+
+        # 查找一级章节标题（从页面内容中读取，如 "1. 总则"）
+        chapter_titles: dict[str, str] = {}
+        # 收集所有章节分组的起始页
+        chapter_start_pages = set()
+        for prefix, node_ids in chapter_groups.items():
+            first_node = doc_structure.all_nodes.get(node_ids[0])
+            if first_node:
+                # 搜索起始页及前一页
+                chapter_start_pages.add(first_node.page_num)
+                if first_node.page_num > 1:
+                    chapter_start_pages.add(first_node.page_num - 1)
+
+        # 在相关页面中查找一级章节标题
+        for page_num in sorted(chapter_start_pages):
+            try:
+                page = page_store.load_page(reg_id, page_num)
+                for block in page.content_blocks:
+                    text = block.content_markdown.strip()
+                    # 匹配 "1. 标题" 或 "2. 标题" 格式
+                    import re
+                    match = re.match(r'^(\d{1,2})\.\s+(.+)$', text)
+                    if match:
+                        prefix = match.group(1)
+                        title = match.group(2).strip()
+                        if prefix not in chapter_titles:
+                            chapter_titles[prefix] = title
+            except Exception:
+                continue
+
+        # 按前缀排序显示，为每个前缀创建一级章节分组
+        for prefix in sorted(chapter_groups.keys(), key=lambda x: int(x) if x.isdigit() else 999):
+            node_ids = chapter_groups[prefix]
+
+            # 创建一级章节分组节点
+            chapter_title = chapter_titles.get(prefix, "")
+            group_label = Text()
+            group_label.append(f"{prefix}. ", style="bold cyan")
+            group_label.append(chapter_title if chapter_title else f"第{prefix}章", style="bold cyan")
+
+            # 获取该组第一个节点的页码
+            first_node = doc_structure.all_nodes.get(node_ids[0])
+            if first_node:
+                group_label.append("  ", style="")
+                group_label.append(f"{first_node.page_num}", style="dim cyan")
+
+            # 创建分组分支
+            group_branch = tree.add(group_label)
+
+            # 添加该组的所有章节节点
+            for node_id in node_ids:
+                add_chapter_node(group_branch, node_id, 1)
+
+        # 统计信息
+        total_count = len(doc_structure.all_nodes)
+        group_count = len(chapter_groups)
+        console.print()
+        console.print(Panel(
+            tree,
+            title=f"[bold blue]目录结构[/bold blue]",
+            subtitle=f"[dim]共 {group_count} 章 {total_count} 个章节节点 | 显示深度: {max_level}[/dim]",
+            border_style="blue",
+            padding=(1, 2),
+        ))
+        console.print()
+
+        # 图例
+        console.print("[dim]页码显示在章节标题后，+N 表示有 N 个子节点被折叠[/dim]")
+        console.print(f"[dim]提示: --level N 设置显示深度, --expand 展开全部[/dim]")
+    else:
+        console.print("[yellow]章节结构为空[/yellow]")
+
+
+@app.command("read-pages")
+def read_pages(
+    reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
+    start: int = typer.Option(..., "--start", "-s", help="起始页码"),
+    end: int = typer.Option(..., "--end", "-e", help="结束页码"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="输出到文件"),
+):
+    """读取指定页面范围的内容"""
+    from rich.markdown import Markdown
+
+    from grid_code.exceptions import InvalidPageRangeError, RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        result = tools.read_page_range(reg_id, start, end)
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+    except InvalidPageRangeError as e:
+        console.print(f"[red]错误: {e}[/red]")
+        raise typer.Exit(1)
+
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        content = f"# {reg_id} P{result['start_page']}-{result['end_page']}\n\n"
+        content += result["content_markdown"]
+        output.write_text(content, encoding="utf-8")
+        console.print(f"[green]✓ 已保存到 {output}[/green]")
+        return
+
+    console.print(f"\n[bold]{result['source']}[/bold]")
+    console.print(f"[dim]页数: {result['page_count']} | 跨页表格: {'是' if result['has_merged_tables'] else '否'}[/dim]")
+    console.print("\n" + "─" * 60 + "\n")
+    console.print(Markdown(result["content_markdown"]))
+
+
+@app.command("chapter-structure")
+def chapter_structure(
+    reg_id: str = typer.Argument(..., help="规程标识"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="JSON 输出文件路径"),
+):
+    """获取完整章节结构"""
+    import json
+
+    from grid_code.exceptions import RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        result = tools.get_chapter_structure(reg_id)
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+
+    if "message" in result:
+        console.print(f"[yellow]警告: {result['message']}[/yellow]")
+        return
+
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+        console.print(f"[green]✓ 已保存到 {output}[/green]")
+        return
+
+    table = Table(title=f"{reg_id} 章节结构 (共 {result['total_chapters']} 个节点)")
+    table.add_column("节点ID", style="dim")
+    table.add_column("章节号", style="cyan")
+    table.add_column("标题", style="green")
+    table.add_column("级别", justify="right")
+    table.add_column("页码", justify="right")
+    table.add_column("子节点数", justify="right")
+
+    for node in result["root_nodes"]:
+        table.add_row(
+            node["node_id"][:8],
+            node["section_number"],
+            node["title"][:30],
+            str(node["level"]),
+            str(node["page_num"]),
+            str(node["children_count"]),
+        )
+
+    console.print(table)
+
+
+@app.command("page-info")
+def page_info(
+    reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
+    page_num: int = typer.Option(..., "--page", "-p", help="页码"),
+):
+    """获取页面章节信息"""
+    from grid_code.exceptions import PageNotFoundError, RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        result = tools.get_page_chapter_info(reg_id, page_num)
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+    except PageNotFoundError:
+        console.print(f"[red]错误: 页面 {page_num} 不存在[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold]{reg_id} P{page_num} 章节信息[/bold]")
+    console.print(f"[dim]活跃章节: {result['total_chapters']} | 新章节: {result['new_chapters_count']} | 延续章节: {result['inherited_chapters_count']}[/dim]\n")
+
+    table = Table()
+    table.add_column("章节号", style="cyan")
+    table.add_column("标题", style="green")
+    table.add_column("级别", justify="right")
+    table.add_column("状态")
+
+    for ch in result["active_chapters"]:
+        status = "[dim]延续[/dim]" if ch["inherited"] else "[green]新开始[/green]"
+        table.add_row(
+            ch["section_number"],
+            ch["title"][:40],
+            str(ch["level"]),
+            status,
+        )
+
+    console.print(table)
+
+
+# ==================== Phase 1: 核心多跳工具 CLI 命令 ====================
+
+
+@app.command("lookup-annotation")
+def lookup_annotation(
+    reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
+    annotation_id: str = typer.Argument(..., help="注释标识，如 '注1', '方案A'"),
+    page_hint: int | None = typer.Option(None, "--page", "-p", help="页码提示，优先从该页附近搜索"),
+):
+    """查找注释内容（支持变体匹配：注1/注①/注一）"""
+    from rich.markdown import Markdown
+
+    from grid_code.exceptions import AnnotationNotFoundError, RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        result = tools.lookup_annotation(reg_id, annotation_id, page_hint)
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+    except AnnotationNotFoundError as e:
+        console.print(f"[red]错误: {e}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold cyan]{result['annotation_id']}[/bold cyan] [dim]({result['source']})[/dim]\n")
+    console.print(Markdown(result["content"]))
+
+    if result.get("related_blocks"):
+        console.print(f"\n[dim]关联块: {', '.join(result['related_blocks'])}[/dim]")
+
+
+@app.command("search-tables")
+def search_tables(
+    query: str = typer.Argument(..., help="搜索查询，如 '母线失压' 或 '表6-2'"),
+    reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
+    chapter: str | None = typer.Option(None, "--chapter", "-c", help="限定章节范围"),
+    no_cells: bool = typer.Option(False, "--no-cells", help="不搜索单元格内容"),
+    limit: int = typer.Option(10, "--limit", "-l", help="结果数量"),
+):
+    """搜索表格（按标题或单元格内容）"""
+    from grid_code.exceptions import RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        results = tools.search_tables(
+            query=query,
+            reg_id=reg_id,
+            chapter_scope=chapter,
+            search_cells=not no_cells,
+            limit=limit,
+        )
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+
+    if not results:
+        console.print("[yellow]未找到匹配的表格[/yellow]")
+        return
+
+    console.print(f"\n[bold]找到 {len(results)} 个表格:[/bold]\n")
+
+    for i, table in enumerate(results, 1):
+        console.print(f"[bold cyan]{i}. {table['caption'] or '(无标题)'}[/bold cyan]")
+        console.print(f"   表格ID: {table['table_id']}")
+        console.print(f"   位置: {table['source']} | {table['row_count']}行 x {table['col_count']}列")
+        console.print(f"   匹配类型: {table['match_type']} | 跨页: {'是' if table['is_truncated'] else '否'}")
+        if table.get("matched_cells"):
+            console.print(f"   匹配单元格: {len(table['matched_cells'])} 个")
+        if table.get("chapter_path"):
+            console.print(f"   章节: {' > '.join(table['chapter_path'])}")
+        console.print()
+
+
+@app.command("resolve-reference")
+def resolve_reference(
+    reference: str = typer.Argument(..., help="引用文本，如 '见第六章', '参见表6-2'"),
+    reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
+):
+    """解析交叉引用"""
+    from rich.markdown import Markdown
+
+    from grid_code.exceptions import ReferenceResolutionError, RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        result = tools.resolve_reference(reg_id, reference)
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+    except ReferenceResolutionError as e:
+        console.print(f"[red]错误: {e}[/red]")
+        raise typer.Exit(1)
+
+    if result.get("error"):
+        console.print(f"[yellow]解析失败: {result['error']}[/yellow]")
+        console.print(f"引用类型: {result['reference_type']}")
+        console.print(f"解析目标: {result['parsed_target']}")
+        return
+
+    console.print(f"\n[bold]引用解析结果[/bold]\n")
+    console.print(f"引用类型: [cyan]{result['reference_type']}[/cyan]")
+    console.print(f"解析目标: [cyan]{result['parsed_target']}[/cyan]")
+    console.print(f"来源: {result['source']}")
+
+    if result.get("target_location"):
+        console.print(f"\n[bold]目标位置:[/bold]")
+        for key, value in result["target_location"].items():
+            console.print(f"  {key}: {value}")
+
+    if result.get("preview"):
+        console.print(f"\n[bold]内容预览:[/bold]")
+        console.print(Markdown(result["preview"]))
+
+
+# ==================== Phase 2: 上下文工具 CLI 命令 ====================
+
+
+@app.command("search-annotations")
+def search_annotations(
+    reg_id: str = typer.Argument(..., help="规程标识"),
+    pattern: str | None = typer.Option(None, "--pattern", "-p", help="内容匹配模式"),
+    annotation_type: str | None = typer.Option(None, "--type", "-t", help="注释类型: note(注x) / plan(方案x)"),
+):
+    """搜索所有注释"""
+    from grid_code.exceptions import RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        results = tools.search_annotations(reg_id, pattern, annotation_type)
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+
+    if not results:
+        console.print("[yellow]未找到匹配的注释[/yellow]")
+        return
+
+    console.print(f"\n[bold]找到 {len(results)} 个注释:[/bold]\n")
+
+    table = Table()
+    table.add_column("页码", justify="right", style="cyan")
+    table.add_column("标识", style="green")
+    table.add_column("内容预览")
+
+    for ann in results:
+        table.add_row(
+            str(ann["page_num"]),
+            ann["annotation_id"],
+            ann["content"][:50] + "..." if len(ann["content"]) > 50 else ann["content"],
+        )
+
+    console.print(table)
+
+
+@app.command("get-table")
+def get_table(
+    table_id: str = typer.Argument(..., help="表格标识"),
+    reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
+    no_merge: bool = typer.Option(False, "--no-merge", help="不合并跨页表格"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="输出到文件"),
+):
+    """获取完整表格内容（按表格ID）"""
+    from rich.markdown import Markdown
+
+    from grid_code.exceptions import RegulationNotFoundError, TableNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        result = tools.get_table_by_id(reg_id, table_id, include_merged=not no_merge)
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+    except TableNotFoundError as e:
+        console.print(f"[red]错误: {e}[/red]")
+        raise typer.Exit(1)
+
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        content = f"# {result['caption'] or table_id}\n\n"
+        content += f"来源: {result['source']}\n\n"
+        content += result["markdown"]
+        output.write_text(content, encoding="utf-8")
+        console.print(f"[green]✓ 已保存到 {output}[/green]")
+        return
+
+    console.print(f"\n[bold]{result['caption'] or table_id}[/bold]")
+    console.print(f"[dim]来源: {result['source']}[/dim]")
+    console.print(f"[dim]大小: {result['row_count']}行 x {result['col_count']}列 | 页码范围: P{result['page_range'][0]}-{result['page_range'][1]}[/dim]")
+
+    if result.get("chapter_path"):
+        console.print(f"[dim]章节: {' > '.join(result['chapter_path'])}[/dim]")
+
+    console.print("\n" + "─" * 60 + "\n")
+    console.print(Markdown(result["markdown"]))
+
+    if result.get("annotations"):
+        console.print("\n[bold]相关注释:[/bold]")
+        for ann in result["annotations"]:
+            console.print(f"  • {ann['annotation_id']}: {ann['content'][:100]}...")
+
+
+@app.command("get-block-context")
+def get_block_context(
+    block_id: str = typer.Argument(..., help="内容块标识"),
+    reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
+    context: int = typer.Option(2, "--context", "-c", help="上下文块数量"),
+):
+    """获取内容块及其上下文"""
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+
+    from grid_code.exceptions import RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        result = tools.get_block_with_context(reg_id, block_id, context)
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+
+    if "error" in result:
+        console.print(f"[red]错误: {result['error']}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold]{result['source']}[/bold]")
+
+    # 显示活跃章节
+    if result.get("active_chapters"):
+        chapters = " > ".join([f"{ch['section_number']} {ch['title']}" for ch in result["active_chapters"][:3]])
+        console.print(f"[dim]章节: {chapters}[/dim]\n")
+
+    # 显示前序块
+    if result.get("before_blocks"):
+        console.print("[dim]─── 前序内容 ───[/dim]")
+        for block in result["before_blocks"]:
+            from_page = f" (P{block['from_page']})" if block.get("from_page") else ""
+            console.print(f"[dim]{block['block_type']}{from_page}[/dim]")
+            console.print(Markdown(block["content_markdown"][:200] + "..."))
+
+    # 显示目标块
+    target = result["target_block"]
+    console.print("\n[bold green]─── 目标内容 ───[/bold green]")
+    console.print(Panel(Markdown(target["content_markdown"]), title=f"[{target['block_type']}]"))
+
+    # 显示后续块
+    if result.get("after_blocks"):
+        console.print("[dim]─── 后续内容 ───[/dim]")
+        for block in result["after_blocks"]:
+            from_page = f" (P{block['from_page']})" if block.get("from_page") else ""
+            console.print(f"[dim]{block['block_type']}{from_page}[/dim]")
+            console.print(Markdown(block["content_markdown"][:200] + "..."))
+
+    # 显示页面注释
+    if result.get("page_annotations"):
+        console.print("\n[bold]页面注释:[/bold]")
+        for ann in result["page_annotations"]:
+            console.print(f"  • {ann['annotation_id']}: {ann['content'][:80]}...")
+
+
+# ==================== Phase 3: 发现工具 CLI 命令 ====================
+
+
+@app.command("find-similar")
+def find_similar(
+    reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
+    query: str | None = typer.Option(None, "--query", "-q", help="查询文本"),
+    block_id: str | None = typer.Option(None, "--block", "-b", help="源内容块ID"),
+    limit: int = typer.Option(5, "--limit", "-l", help="结果数量"),
+    same_page: bool = typer.Option(False, "--same-page", help="包含同页内容"),
+):
+    """查找语义相似的内容"""
+    from grid_code.exceptions import RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    if not query and not block_id:
+        console.print("[red]错误: 必须提供 --query 或 --block 参数[/red]")
+        raise typer.Exit(1)
+
+    tools = GridCodeTools()
+
+    try:
+        results = tools.find_similar_content(
+            reg_id=reg_id,
+            query_text=query,
+            source_block_id=block_id,
+            limit=limit,
+            exclude_same_page=not same_page,
+        )
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+
+    if not results:
+        console.print("[yellow]未找到相似内容[/yellow]")
+        return
+
+    if isinstance(results[0], dict) and "error" in results[0]:
+        console.print(f"[red]错误: {results[0]['error']}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold]找到 {len(results)} 条相似内容:[/bold]\n")
+
+    for i, item in enumerate(results, 1):
+        console.print(f"[bold cyan]{i}. {item['source']}[/bold cyan]")
+        console.print(f"   相似度: {item['similarity_score']:.4f}")
+        if item.get("chapter_path"):
+            console.print(f"   章节: {' > '.join(item['chapter_path'])}")
+        console.print(f"   {item['snippet'][:150]}...")
+        console.print()
+
+
+@app.command("compare-sections")
+def compare_sections(
+    section_a: str = typer.Argument(..., help="第一个章节编号"),
+    section_b: str = typer.Argument(..., help="第二个章节编号"),
+    reg_id: str = typer.Option(..., "--reg-id", "-r", help="规程标识"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="JSON 输出文件路径"),
+):
+    """比较两个章节的内容"""
+    import json
+
+    from grid_code.exceptions import ChapterNotFoundError, RegulationNotFoundError
+    from grid_code.mcp.tools import GridCodeTools
+
+    tools = GridCodeTools()
+
+    try:
+        result = tools.compare_sections(reg_id, section_a, section_b)
+    except RegulationNotFoundError:
+        console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+        raise typer.Exit(1)
+    except ChapterNotFoundError as e:
+        console.print(f"[red]错误: {e}[/red]")
+        raise typer.Exit(1)
+
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+        console.print(f"[green]✓ 已保存到 {output}[/green]")
+        return
+
+    console.print(f"\n[bold]章节比较: {section_a} vs {section_b}[/bold]\n")
+
+    # 显示两列对比
+    table = Table(title="结构对比")
+    table.add_column("属性", style="dim")
+    table.add_column(f"{section_a}", style="cyan")
+    table.add_column(f"{section_b}", style="green")
+    table.add_column("差异", style="yellow")
+
+    a_info = result["section_a_info"]
+    b_info = result["section_b_info"]
+    diff = result["structural_comparison"]
+
+    table.add_row("标题", a_info["title"][:30], b_info["title"][:30], "")
+    table.add_row("页码范围", f"P{a_info['page_range'][0]}-{a_info['page_range'][1]}", f"P{b_info['page_range'][0]}-{b_info['page_range'][1]}", "")
+    table.add_row("内容块数", str(a_info["block_count"]), str(b_info["block_count"]), f"{diff['block_diff']:+d}")
+    table.add_row("子章节数", str(a_info["children_count"]), str(b_info["children_count"]), f"{diff['children_diff']:+d}")
+    table.add_row("表格数", str(a_info["table_count"]), str(b_info["table_count"]), f"{diff['table_diff']:+d}")
+    table.add_row("列表项数", str(a_info["list_count"]), str(b_info["list_count"]), f"{diff['list_diff']:+d}")
+
+    console.print(table)
+
+    if result.get("common_keywords"):
+        console.print(f"\n[bold]共同关键词:[/bold] {', '.join(result['common_keywords'][:10])}")
+
+
 @app.command()
 def version():
     """显示版本信息"""

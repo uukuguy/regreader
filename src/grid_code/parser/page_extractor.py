@@ -816,6 +816,13 @@ class PageExtractor:
         if not text:
             return None
 
+        # 0. 一级章节编号格式（如 "1. 总则"、"2. 系统结构"）
+        # 匹配: "数字. 中文标题" 或 "数字. 标题"
+        # 这种格式通常是文档的一级章节
+        level1_pattern = r'^(\d{1,2})\.\s+[\u4e00-\u9fa5].{0,30}$'
+        if len(text) <= 100 and re.match(level1_pattern, text):
+            return 1
+
         # 1. 数字编号格式（最可靠，不限制长度）
         # 匹配各种章节编号格式：
         # - "2.1" -> 2级标题

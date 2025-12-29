@@ -58,3 +58,30 @@ class ChapterNotFoundError(GridCodeError):
         self.reg_id = reg_id
         self.section_number = section_number
         super().__init__(f"规程 '{reg_id}' 的章节 '{section_number}' 不存在")
+
+
+class AnnotationNotFoundError(GridCodeError):
+    """注释不存在错误"""
+
+    def __init__(self, reg_id: str, annotation_id: str):
+        self.reg_id = reg_id
+        self.annotation_id = annotation_id
+        super().__init__(f"规程 '{reg_id}' 中未找到注释 '{annotation_id}'")
+
+
+class TableNotFoundError(GridCodeError):
+    """表格不存在错误"""
+
+    def __init__(self, reg_id: str, table_id: str):
+        self.reg_id = reg_id
+        self.table_id = table_id
+        super().__init__(f"规程 '{reg_id}' 中未找到表格 '{table_id}'")
+
+
+class ReferenceResolutionError(GridCodeError):
+    """交叉引用解析错误"""
+
+    def __init__(self, reference_text: str, reason: str):
+        self.reference_text = reference_text
+        self.reason = reason
+        super().__init__(f"无法解析引用 '{reference_text}': {reason}")

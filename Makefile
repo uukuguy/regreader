@@ -1,7 +1,9 @@
 # GridCode Makefile
 # Power Grid Regulations Intelligent Retrieval Agent
 
-.PHONY: help install install-dev install-all test test-heading lint format check serve serve-stdio chat build clean reindex read-chapter
+.PHONY: help install install-dev install-all test test-heading lint format check serve serve-stdio chat build clean reindex read-chapter \
+	toc read-pages chapter-structure page-info lookup-annotation search-tables resolve-reference \
+	search-annotations get-table get-block-context find-similar compare-sections
 
 # Default target
 .DEFAULT_GOAL := help
@@ -26,16 +28,22 @@ help: ## Show this help message
 	@echo "$(BLUE)GridCode - Power Grid Regulations Intelligent Retrieval Agent$(NC)"
 	@echo ""
 	@echo "$(GREEN)Available targets:$(NC)"
-	@awk 'BEGIN {FS = ":.*##"; printf ""} /^[a-zA-Z_-]+:.*?##/ { printf "  $(YELLOW)%-15s$(NC) %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf ""} /^[a-zA-Z_-]+:.*?##/ { printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@echo ""
 	@echo "$(GREEN)Examples:$(NC)"
-	@echo "  make install-dev          # Install with dev dependencies"
-	@echo "  make test                 # Run all tests"
-	@echo "  make serve                # Start MCP server (SSE mode)"
-	@echo "  make chat REG_ID=angui    # Start chat with specific regulation"
-	@echo "  make inspect PAGE_NUM=25  # Inspect page 25 data across indexes"
-	@echo "  make read-chapter SECTION=\"2.1.4\"  # Read chapter content"
-	@echo "  make reindex FILE=doc.pdf # Reindex document with new parser logic"
+	@echo "  make install-dev              # Install with dev dependencies"
+	@echo "  make test                     # Run all tests"
+	@echo "  make serve                    # Start MCP server (SSE mode)"
+	@echo "  make chat REG_ID=angui        # Start chat with specific regulation"
+	@echo ""
+	@echo "$(GREEN)MCP Tools Testing:$(NC)"
+	@echo "  make toc                      # Get regulation TOC"
+	@echo "  make read-pages START_PAGE=85 END_PAGE=87"
+	@echo "  make search-tables TABLE_QUERY=\"母线失压\""
+	@echo "  make lookup-annotation ANNOTATION_ID=\"注1\" PAGE_NUM=85"
+	@echo "  make resolve-reference REFERENCE=\"见第六章\""
+	@echo "  make find-similar SIMILAR_QUERY=\"母线失压处理\""
+	@echo "  make compare-sections SECTION_A=\"2.1.4\" SECTION_B=\"2.1.5\""
 
 #----------------------------------------------------------------------
 # Installation
@@ -169,6 +177,101 @@ read-chapter: ## Read chapter content by section number (usage: make read-chapte
 	else \
 		$(UV) run gridcode read-chapter --reg-id $(REG_ID) --section "$(SECTION)"; \
 	fi
+
+#----------------------------------------------------------------------
+# MCP Tools CLI (基础工具)
+#----------------------------------------------------------------------
+
+START_LEVEL ?= 1
+MAX_LEVEL ?= 3
+toc: ## Get regulation TOC (usage: make toc REG_ID=angui)
+	$(UV) run gridcode toc $(REG_ID) --level ${MAX_LEVEL}
+
+START_PAGE ?= 1
+END_PAGE ?= 3
+read-pages: ## Read page range (usage: make read-pages REG_ID=angui START_PAGE=85 END_PAGE=87)
+	$(UV) run gridcode read-pages --reg-id $(REG_ID) --start $(START_PAGE) --end $(END_PAGE)
+
+chapter-structure: ## Get chapter structure (usage: make chapter-structure REG_ID=angui)
+	$(UV) run gridcode chapter-structure $(REG_ID)
+
+page-info: ## Get page chapter info (usage: make page-info REG_ID=angui PAGE_NUM=85)
+	$(UV) run gridcode page-info --reg-id $(REG_ID) --page $(PAGE_NUM)
+
+#----------------------------------------------------------------------
+# MCP Tools CLI (Phase 1: 核心多跳工具)
+#----------------------------------------------------------------------
+
+ANNOTATION_ID ?= 注1
+lookup-annotation: ## Lookup annotation (usage: make lookup-annotation REG_ID=angui ANNOTATION_ID="注1" PAGE_NUM=85)
+	@if [ -n "$(PAGE_NUM)" ] && [ "$(PAGE_NUM)" != "7" ]; then \
+		$(UV) run gridcode lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)" --page $(PAGE_NUM); \
+	else \
+		$(UV) run gridcode lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)"; \
+	fi
+
+TABLE_QUERY ?= 母线失压
+search-tables: ## Search tables (usage: make search-tables REG_ID=angui TABLE_QUERY="母线失压")
+	$(UV) run gridcode search-tables "$(TABLE_QUERY)" --reg-id $(REG_ID)
+
+REFERENCE ?= 见第六章
+resolve-reference: ## Resolve cross-reference (usage: make resolve-reference REG_ID=angui REFERENCE="见第六章")
+	$(UV) run gridcode resolve-reference "$(REFERENCE)" --reg-id $(REG_ID)
+
+#----------------------------------------------------------------------
+# MCP Tools CLI (Phase 2: 上下文工具)
+#----------------------------------------------------------------------
+
+PATTERN ?=
+ANNOTATION_TYPE ?=
+search-annotations: ## Search all annotations (usage: make search-annotations REG_ID=angui PATTERN="电压" ANNOTATION_TYPE=note)
+	@if [ -n "$(PATTERN)" ] && [ -n "$(ANNOTATION_TYPE)" ]; then \
+		$(UV) run gridcode search-annotations $(REG_ID) --pattern "$(PATTERN)" --type $(ANNOTATION_TYPE); \
+	elif [ -n "$(PATTERN)" ]; then \
+		$(UV) run gridcode search-annotations $(REG_ID) --pattern "$(PATTERN)"; \
+	elif [ -n "$(ANNOTATION_TYPE)" ]; then \
+		$(UV) run gridcode search-annotations $(REG_ID) --type $(ANNOTATION_TYPE); \
+	else \
+		$(UV) run gridcode search-annotations $(REG_ID); \
+	fi
+
+TABLE_ID ?=
+get-table: ## Get full table by ID (usage: make get-table REG_ID=angui TABLE_ID="table_xxx")
+	@if [ -z "$(TABLE_ID)" ]; then \
+		echo "$(YELLOW)Error: TABLE_ID is required.$(NC)"; \
+		echo "Usage: make get-table REG_ID=angui TABLE_ID=\"table_xxx\""; \
+		exit 1; \
+	fi
+	$(UV) run gridcode get-table "$(TABLE_ID)" --reg-id $(REG_ID)
+
+BLOCK_ID ?=
+CONTEXT ?= 2
+get-block-context: ## Get block with context (usage: make get-block-context REG_ID=angui BLOCK_ID="block_xxx" CONTEXT=2)
+	@if [ -z "$(BLOCK_ID)" ]; then \
+		echo "$(YELLOW)Error: BLOCK_ID is required.$(NC)"; \
+		echo "Usage: make get-block-context REG_ID=angui BLOCK_ID=\"block_xxx\""; \
+		exit 1; \
+	fi
+	$(UV) run gridcode get-block-context "$(BLOCK_ID)" --reg-id $(REG_ID) --context $(CONTEXT)
+
+#----------------------------------------------------------------------
+# MCP Tools CLI (Phase 3: 发现工具)
+#----------------------------------------------------------------------
+
+SIMILAR_QUERY ?= 母线失压处理
+LIMIT ?= 5
+find-similar: ## Find similar content (usage: make find-similar REG_ID=angui SIMILAR_QUERY="母线失压处理")
+	$(UV) run gridcode find-similar --reg-id $(REG_ID) --query "$(SIMILAR_QUERY)" --limit $(LIMIT)
+
+SECTION_A ?=
+SECTION_B ?=
+compare-sections: ## Compare two sections (usage: make compare-sections REG_ID=angui SECTION_A="2.1.4" SECTION_B="2.1.5")
+	@if [ -z "$(SECTION_A)" ] || [ -z "$(SECTION_B)" ]; then \
+		echo "$(YELLOW)Error: SECTION_A and SECTION_B are required.$(NC)"; \
+		echo "Usage: make compare-sections REG_ID=angui SECTION_A=\"2.1.4\" SECTION_B=\"2.1.5\""; \
+		exit 1; \
+	fi
+	$(UV) run gridcode compare-sections "$(SECTION_A)" "$(SECTION_B)" --reg-id $(REG_ID)
 
 BACKUP ?= true
 reindex: ## Reindex document with new parser (usage: make reindex FILE=/path/to/doc.pdf REG_ID=angui BACKUP=true)

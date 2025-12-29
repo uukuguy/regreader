@@ -234,6 +234,291 @@ def create_mcp_server(name: str = "gridcode") -> FastMCP:
         except GridCodeError as e:
             return {"error": str(e)}
 
+    # ==================== Phase 1: 核心多跳工具 ====================
+
+    @mcp.tool()
+    def lookup_annotation(
+        reg_id: str,
+        annotation_id: str,
+        page_hint: int | None = None,
+    ) -> dict:
+        """查找并返回指定注释的完整内容。
+
+        处理表格单元格中常见的 "见注1"、"方案A" 等引用。
+        支持多种注释标识变体：注1/注①/注一、方案A/方案甲 等。
+
+        当在表格或正文中看到"见注X"时，使用此工具获取注释完整内容。
+
+        Args:
+            reg_id: 规程标识，如 'angui_2024'
+            annotation_id: 注释标识，如 '注1', '注①', '方案A', '方案甲'
+            page_hint: 页码提示（可选），如果知道注释大概在哪一页，
+                      提供此参数可加速搜索
+
+        Returns:
+            注释信息，包含:
+            - annotation_id: 注释标识
+            - content: 注释完整内容
+            - page_num: 所在页码
+            - related_blocks: 关联的内容块ID列表
+            - source: 来源引用
+        """
+        try:
+            return tools.lookup_annotation(reg_id, annotation_id, page_hint)
+        except GridCodeError as e:
+            return {"error": str(e)}
+
+    @mcp.tool()
+    def search_tables(
+        query: str,
+        reg_id: str,
+        chapter_scope: str | None = None,
+        search_cells: bool = True,
+        limit: int = 10,
+    ) -> list[dict]:
+        """搜索表格（按标题或单元格内容）。
+
+        在规程中查找表格，支持按表格标题（如"表6-2"）或
+        单元格内容（如"母线失压"）进行搜索。
+
+        适用于需要查找特定表格或在表格中定位信息的场景。
+
+        Args:
+            query: 搜索查询，如 "母线失压" 或 "表6-2"
+            reg_id: 规程标识
+            chapter_scope: 限定章节范围（可选），如 "第六章"
+            search_cells: 是否搜索单元格内容（默认True）
+            limit: 返回结果数量限制，默认10
+
+        Returns:
+            匹配的表格列表，每个包含:
+            - table_id: 表格标识
+            - caption: 表格标题
+            - page_num: 所在页码
+            - row_count: 行数
+            - col_count: 列数
+            - col_headers: 列标题
+            - is_truncated: 是否跨页（需要读取后续页面获取完整表格）
+            - match_type: 匹配类型（'caption', 'cell', 'both'）
+            - matched_cells: 匹配的单元格信息
+            - chapter_path: 所属章节路径
+            - source: 来源引用
+        """
+        try:
+            return tools.search_tables(query, reg_id, chapter_scope, search_cells, limit)
+        except GridCodeError as e:
+            return [{"error": str(e)}]
+
+    @mcp.tool()
+    def resolve_reference(
+        reg_id: str,
+        reference_text: str,
+    ) -> dict:
+        """解析并解决交叉引用。
+
+        当在规程内容中遇到交叉引用时（如"见第六章"、"参见表6-2"、
+        "详见2.1.4"），使用此工具解析引用并获取目标位置和内容预览。
+
+        支持多种引用格式:
+        - 章节引用: "见第六章", "参见2.1.4", "详见第三节"
+        - 表格引用: "见表6-2", "参见附表1"
+        - 条款引用: "见第X条", "按本规程第Y条执行"
+        - 注释引用: "见注1", "参见方案A"
+        - 附录引用: "见附录A", "详见附录三"
+
+        Args:
+            reg_id: 规程标识
+            reference_text: 引用文本，如 "见第六章" 或 "详见表6-2"
+
+        Returns:
+            解析结果，包含:
+            - reference_type: 引用类型（chapter/section/table/annotation/appendix/article）
+            - parsed_target: 解析出的目标
+            - resolved: 是否成功解析
+            - target_location: 目标位置信息（页码、章节编号等）
+            - preview: 目标内容预览（前300字符）
+            - source: 完整来源引用
+            - error: 错误信息（如未找到）
+        """
+        try:
+            return tools.resolve_reference(reg_id, reference_text)
+        except GridCodeError as e:
+            return {"error": str(e)}
+
+    # ==================== Phase 2: 上下文工具 ====================
+
+    @mcp.tool()
+    def search_annotations(
+        reg_id: str,
+        pattern: str | None = None,
+        annotation_type: str | None = None,
+    ) -> list[dict]:
+        """搜索规程中的所有注释。
+
+        查找规程中的所有注释，支持按内容模式和类型过滤。
+        适用于需要获取所有相关注释的场景。
+
+        Args:
+            reg_id: 规程标识
+            pattern: 内容匹配模式（可选），支持简单文本匹配
+            annotation_type: 注释类型过滤（可选）
+                - 'note': 注释类（注1, 注①等）
+                - 'plan': 方案类（方案A, 方案甲等）
+                - None: 不过滤，返回所有注释
+
+        Returns:
+            匹配的注释列表，每个包含:
+            - annotation_id: 注释标识
+            - content: 注释完整内容（截取前200字符）
+            - page_num: 所在页码
+            - source: 来源引用
+        """
+        try:
+            return tools.search_annotations(reg_id, pattern, annotation_type)
+        except GridCodeError as e:
+            return [{"error": str(e)}]
+
+    @mcp.tool()
+    def get_table_by_id(
+        reg_id: str,
+        table_id: str,
+        include_merged: bool = True,
+    ) -> dict:
+        """获取完整表格内容（按表格ID）。
+
+        根据表格ID获取表格的完整信息，包括所有单元格数据。
+        如果表格跨页，自动合并后续页面的内容。
+
+        通常先使用 search_tables 找到表格，再用此工具获取完整内容。
+
+        Args:
+            reg_id: 规程标识
+            table_id: 表格标识（从 search_tables 结果获取）
+            include_merged: 如果表格跨页，是否自动合并（默认True）
+
+        Returns:
+            表格完整信息，包含:
+            - table_id: 表格标识
+            - caption: 表格标题
+            - page_num: 起始页码
+            - page_range: [起始页, 结束页]
+            - row_count: 行数
+            - col_count: 列数
+            - col_headers: 列标题
+            - row_headers: 行标题
+            - cells: 完整单元格数据
+            - markdown: 表格Markdown格式
+            - chapter_path: 所属章节路径
+            - annotations: 相关注释列表
+            - source: 来源引用
+        """
+        try:
+            return tools.get_table_by_id(reg_id, table_id, include_merged)
+        except GridCodeError as e:
+            return {"error": str(e)}
+
+    @mcp.tool()
+    def get_block_with_context(
+        reg_id: str,
+        block_id: str,
+        context_blocks: int = 2,
+    ) -> dict:
+        """读取指定内容块及其上下文。
+
+        当搜索结果的片段不够完整时，使用此工具获取更多上下文。
+        返回目标块及其前后的内容块，帮助理解完整语境。
+
+        Args:
+            reg_id: 规程标识
+            block_id: 内容块标识（从搜索结果的 block_id 字段获取）
+            context_blocks: 上下文块数量（前后各N个块），默认2
+
+        Returns:
+            内容块及上下文，包含:
+            - target_block: 目标块完整信息（block_id, block_type, content_markdown, chapter_path）
+            - page_num: 所在页码
+            - before_blocks: 前序块列表
+            - after_blocks: 后续块列表
+            - page_annotations: 页面注释列表
+            - active_chapters: 活跃章节信息
+            - source: 来源引用
+        """
+        try:
+            return tools.get_block_with_context(reg_id, block_id, context_blocks)
+        except GridCodeError as e:
+            return {"error": str(e)}
+
+    # ==================== Phase 3: 发现工具 ====================
+
+    @mcp.tool()
+    def find_similar_content(
+        reg_id: str,
+        query_text: str | None = None,
+        source_block_id: str | None = None,
+        limit: int = 5,
+        exclude_same_page: bool = True,
+    ) -> list[dict]:
+        """查找语义相似的内容。
+
+        发现与给定文本或内容块语义相似的其他内容。
+        适用于寻找相关规定、类似条款或关联内容的场景。
+
+        可以提供文本查询，或者提供已有内容块的ID来查找相似内容。
+
+        Args:
+            reg_id: 规程标识
+            query_text: 查询文本（与 source_block_id 二选一）
+            source_block_id: 源内容块ID（与 query_text 二选一）
+            limit: 返回结果数量限制，默认5
+            exclude_same_page: 是否排除同页内容（默认True）
+
+        Returns:
+            相似内容列表，每个包含:
+            - block_id: 内容块标识
+            - page_num: 页码
+            - chapter_path: 章节路径
+            - snippet: 内容片段
+            - similarity_score: 相似度分数 (0-1)
+            - source: 来源引用
+        """
+        try:
+            return tools.find_similar_content(
+                reg_id, query_text, source_block_id, limit, exclude_same_page
+            )
+        except GridCodeError as e:
+            return [{"error": str(e)}]
+
+    @mcp.tool()
+    def compare_sections(
+        reg_id: str,
+        section_a: str,
+        section_b: str,
+        include_tables: bool = True,
+    ) -> dict:
+        """比较两个章节的内容。
+
+        并排比较两个章节的结构和内容，帮助理解它们的异同。
+        适用于比较不同类型、不同等级的相关规定。
+
+        Args:
+            reg_id: 规程标识
+            section_a: 第一个章节编号，如 "2.1.4"
+            section_b: 第二个章节编号，如 "2.1.5"
+            include_tables: 是否包含表格内容，默认True
+
+        Returns:
+            比较结果，包含:
+            - section_a_info: 第一个章节的信息（标题、页码范围、块数量、表格数等）
+            - section_b_info: 第二个章节的信息
+            - common_keywords: 共同关键词列表
+            - structural_comparison: 结构差异（块数差、子章节差、表格差等）
+            - source: 来源引用
+        """
+        try:
+            return tools.compare_sections(reg_id, section_a, section_b, include_tables)
+        except GridCodeError as e:
+            return {"error": str(e)}
+
     return mcp
 
 
