@@ -79,6 +79,30 @@ class ChapterNode(BaseModel):
         return f"{self.section_number} {self.title}" if self.title else self.section_number
 
 
+class ActiveChapter(BaseModel):
+    """活跃章节（本页相关的章节）
+
+    包含本页首次出现的章节和从上页延续的章节。
+    """
+
+    node_id: str = Field(description="节点唯一标识")
+    section_number: str = Field(description="章节编号，如 '2.1.4.1.6'")
+    title: str = Field(description="章节标题（纯文本，不含编号）")
+    level: int = Field(description="章节层级 1-6")
+    page_num: int = Field(description="章节首次出现的页码")
+    inherited: bool = Field(
+        default=False, description="是否为延续的章节（从上页继承）"
+    )
+    has_direct_content: bool = Field(
+        default=False, description="章节号后是否有直接内容"
+    )
+
+    @property
+    def full_title(self) -> str:
+        """返回完整标题（编号 + 标题）"""
+        return f"{self.section_number} {self.title}" if self.title else self.section_number
+
+
 class ContentBlock(BaseModel):
     """页面内的内容块（文本、表格、标题、列表、章节内容）
 
@@ -118,18 +142,15 @@ class PageDocument(BaseModel):
 
     reg_id: str = Field(description="规程标识（如 'angui_2024'）")
     page_num: int = Field(description="页码（从1开始）")
-    chapter_path: list[str] = Field(
-        default_factory=list, description="章节路径（如 ['第六章', '事故处理', '母线故障']）"
+
+    # 本页活跃的章节（包括首次出现和延续的章节）
+    active_chapters: list[ActiveChapter] = Field(
+        default_factory=list, description="本页活跃的章节（首次出现 + 延续）"
     )
 
     # 内容块列表
     content_blocks: list[ContentBlock] = Field(
         default_factory=list, description="按阅读顺序排列的内容块"
-    )
-
-    # 本页定义的章节节点
-    chapter_nodes: list[ChapterNode] = Field(
-        default_factory=list, description="本页首次出现的章节节点"
     )
 
     # 页面级 Markdown（完整页面内容，供 LLM 阅读）
@@ -146,6 +167,11 @@ class PageDocument(BaseModel):
     def source(self) -> str:
         """返回来源引用字符串"""
         return f"{self.reg_id} P{self.page_num}"
+
+    @property
+    def chapter_path(self) -> list[str]:
+        """从活跃章节生成章节路径（用于索引层兼容）"""
+        return [ch.full_title for ch in self.active_chapters]
 
     def get_tables(self) -> list[ContentBlock]:
         """获取页面中的所有表格"""

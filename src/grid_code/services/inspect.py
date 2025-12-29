@@ -139,22 +139,29 @@ class InspectService:
         cursor = conn.cursor()
 
         try:
-            # 查询 page_meta 表
+            # 使用 block_id 关联 page_meta 和 page_index 表
+            # 修复：不使用 rowid，改用 block_id 进行 JOIN
             cursor.execute(
                 """
-                SELECT rowid as id, * FROM page_meta
-                WHERE reg_id = ? AND page_num = ?
+                SELECT
+                    m.block_id,
+                    m.reg_id,
+                    m.page_num,
+                    m.block_type,
+                    m.chapter_path,
+                    m.content_preview,
+                    i.content
+                FROM page_meta m
+                LEFT JOIN page_index i ON m.block_id = i.block_id
+                WHERE m.reg_id = ? AND m.page_num = ?
             """,
                 (reg_id, page_num),
             )
 
             records = []
             for row in cursor.fetchall():
-                # 从 page_meta 获取基本信息
                 chapter_path = json.loads(row["chapter_path"]) if row["chapter_path"] else []
-
-                # 从 FTS5 虚拟表获取完整内容
-                content = self._get_fts_content(cursor, row["id"])
+                content = row["content"] or ""
 
                 records.append(
                     FTS5Record(
@@ -171,25 +178,6 @@ class InspectService:
 
         finally:
             conn.close()
-
-    def _get_fts_content(self, cursor: sqlite3.Cursor, rowid: int) -> str:
-        """从 FTS5 虚拟表获取完整内容
-
-        Args:
-            cursor: 数据库游标
-            rowid: page_meta 表的 rowid
-
-        Returns:
-            完整内容
-        """
-        cursor.execute(
-            """
-            SELECT content FROM page_index WHERE rowid = ?
-        """,
-            (rowid,),
-        )
-        row = cursor.fetchone()
-        return row["content"] if row else ""
 
     def _get_lancedb_data(
         self, reg_id: str, page_num: int, show_vectors: bool = False

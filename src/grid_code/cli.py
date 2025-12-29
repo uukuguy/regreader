@@ -354,7 +354,7 @@ def delete(
 def inspect(
     reg_id: str = typer.Argument(..., help="规程标识"),
     page_num: int = typer.Argument(..., help="页码"),
-    output: Path | None = typer.Option("outputs/inspections", "--output", "-o", help="JSON 输出文件路径"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="JSON 输出文件路径"),
     show_vectors: bool = typer.Option(False, "--show-vectors", help="显示向量数据（默认隐藏）"),
 ):
     """检查指定页面在不同数据源中的原始数据"""

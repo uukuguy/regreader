@@ -166,6 +166,39 @@ def create_mcp_server(name: str = "gridcode") -> FastMCP:
             return {"error": str(e)}
 
     @mcp.tool()
+    def get_page_chapter_info(reg_id: str, page_num: int) -> dict:
+        """获取指定页面的章节信息。
+
+        返回该页面的所有活跃章节，包括从上页延续的章节和本页首次出现的章节。
+        适用于需要了解某页章节上下文的场景。
+
+        Args:
+            reg_id: 规程标识，如 'angui_2024'
+            page_num: 页码
+
+        Returns:
+            页面章节信息，包含:
+            - reg_id: 规程标识
+            - page_num: 页码
+            - active_chapters: 活跃章节列表，每个章节包含:
+                - node_id: 节点ID
+                - section_number: 章节编号
+                - title: 章节标题
+                - level: 层级
+                - page_num: 首次出现的页码
+                - inherited: 是否为延续的章节（从上页继承）
+                - has_direct_content: 是否有直接内容
+                - full_title: 完整标题（编号+标题）
+            - total_chapters: 总章节数
+            - new_chapters_count: 本页首次出现的章节数
+            - inherited_chapters_count: 从上页延续的章节数
+        """
+        try:
+            return tools.get_page_chapter_info(reg_id, page_num)
+        except GridCodeError as e:
+            return {"error": str(e)}
+
+    @mcp.tool()
     def read_chapter_content(
         reg_id: str,
         section_number: str,

@@ -61,17 +61,34 @@ class InspectDisplay:
 
         # 基本信息
         page = result.page_document
-        chapter_path_str = " > ".join(page.chapter_path) if page.chapter_path else "无章节信息"
 
         self.console.print(f"  规程: [cyan]{page.reg_id}[/cyan]")
         self.console.print(f"  页码: [cyan]{page.page_num}[/cyan]")
-        self.console.print(f"  章节: [cyan]{chapter_path_str}[/cyan]")
         self.console.print(f"  内容块数量: [cyan]{len(page.content_blocks)}[/cyan]")
 
         if page.continues_from_prev:
             self.console.print("  [yellow]⚠ 包含从上页延续的内容[/yellow]")
         if page.continues_to_next:
             self.console.print("  [yellow]⚠ 包含延续到下页的内容[/yellow]")
+
+        # 活跃章节列表
+        if hasattr(page, 'active_chapters') and page.active_chapters:
+            self.console.print()
+            self.console.print("  📖 [bold]本页活跃章节:[/bold]")
+
+            for i, chapter in enumerate(page.active_chapters, 1):
+                # 根据 level 添加缩进
+                indent = "  " * (chapter.level - 1)
+                if chapter.inherited:
+                    # 延续章节：灰色 + ↻ 符号
+                    self.console.print(
+                        f"    {i}. [dim]{indent}↻ {chapter.section_number} {chapter.title}[/dim]"
+                    )
+                else:
+                    # 新章节：青色高亮
+                    self.console.print(
+                        f"    {i}. {indent}[cyan]{chapter.section_number}[/cyan] {chapter.title}"
+                    )
 
         self.console.print()
 
@@ -82,13 +99,14 @@ class InspectDisplay:
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("#", style="dim", width=4)
         table.add_column("Block ID", min_width=15)
-        table.add_column("Type", width=10)
-        table.add_column("Content Preview", min_width=40)
+        table.add_column("Type", width=12)
+        table.add_column("Chapter", width=25)
+        table.add_column("Content Preview", min_width=35)
 
         for i, block in enumerate(result.page_document.content_blocks, 1):
-            # 内容预览（前60字符）
-            content_preview = block.content_markdown.strip()[:60]
-            if len(block.content_markdown.strip()) > 60:
+            # 内容预览（前50字符）
+            content_preview = block.content_markdown.strip()[:50]
+            if len(block.content_markdown.strip()) > 50:
                 content_preview += "..."
 
             # 类型颜色
@@ -97,12 +115,23 @@ class InspectDisplay:
                 "table": "blue",
                 "heading": "yellow",
                 "list": "cyan",
+                "section_content": "magenta",
             }.get(block.block_type, "white")
+
+            # 章节路径显示（显示最后1-2级）
+            if block.chapter_path:
+                if len(block.chapter_path) >= 2:
+                    chapter_display = f"[dim]... > [/dim]{block.chapter_path[-2]} > [cyan]{block.chapter_path[-1]}[/cyan]"
+                else:
+                    chapter_display = f"[cyan]{block.chapter_path[-1]}[/cyan]"
+            else:
+                chapter_display = "[dim]无[/dim]"
 
             table.add_row(
                 str(i),
                 block.block_id,
                 f"[{type_color}]{block.block_type}[/{type_color}]",
+                chapter_display,
                 content_preview,
             )
 

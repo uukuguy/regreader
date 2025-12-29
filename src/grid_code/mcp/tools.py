@@ -14,6 +14,7 @@ from grid_code.exceptions import (
 from grid_code.index import HybridSearch
 from grid_code.storage import PageStore
 from grid_code.storage.models import (
+    ActiveChapter,
     ChapterNode,
     DocumentStructure,
     PageContent,
@@ -215,6 +216,63 @@ class GridCodeTools:
             "reg_id": reg_id,
             "total_chapters": len(doc_structure.all_nodes),
             "root_nodes": root_nodes,
+        }
+
+    def get_page_chapter_info(
+        self,
+        reg_id: str,
+        page_num: int,
+    ) -> dict:
+        """
+        获取指定页面的章节信息
+
+        返回该页面的所有活跃章节，包括从上页延续的章节和本页首次出现的章节。
+
+        Args:
+            reg_id: 规程标识
+            page_num: 页码
+
+        Returns:
+            页面章节信息，包含:
+            - reg_id: 规程标识
+            - page_num: 页码
+            - active_chapters: 活跃章节列表
+            - total_chapters: 总章节数
+            - new_chapters_count: 本页首次出现的章节数
+            - inherited_chapters_count: 从上页延续的章节数
+
+        Raises:
+            RegulationNotFoundError: 规程不存在
+        """
+        # 验证规程存在
+        if not self.page_store.exists(reg_id):
+            raise RegulationNotFoundError(reg_id)
+
+        # 加载页面
+        page = self.page_store.load_page(reg_id, page_num)
+
+        # 转换活跃章节为字典格式
+        active_chapters_info = [
+            {
+                "node_id": ch.node_id,
+                "section_number": ch.section_number,
+                "title": ch.title,
+                "level": ch.level,
+                "page_num": ch.page_num,
+                "inherited": ch.inherited,
+                "has_direct_content": ch.has_direct_content,
+                "full_title": ch.full_title,
+            }
+            for ch in page.active_chapters
+        ]
+
+        return {
+            "reg_id": reg_id,
+            "page_num": page_num,
+            "active_chapters": active_chapters_info,
+            "total_chapters": len(active_chapters_info),
+            "new_chapters_count": sum(1 for ch in page.active_chapters if not ch.inherited),
+            "inherited_chapters_count": sum(1 for ch in page.active_chapters if ch.inherited),
         }
 
     def read_chapter_content(
