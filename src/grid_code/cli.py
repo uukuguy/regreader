@@ -41,7 +41,7 @@ def ingest(
 ):
     """转换并入库文档到 GridCode"""
     from grid_code.index import FTSIndex, VectorIndex
-    from grid_code.parser import DoclingParser, PageExtractor
+    from grid_code.parser import DoclingParser, PageExtractor, TableRegistryBuilder
     from grid_code.storage import PageStore
 
     if not file and not directory:
@@ -94,6 +94,16 @@ def ingest(
 
         with console.status("保存页面..."):
             page_store.save_pages(pages, toc, doc_structure, doc_file.name)
+
+        # 构建表格注册表
+        with console.status("构建表格注册表..."):
+            table_builder = TableRegistryBuilder(current_reg_id)
+            table_registry = table_builder.build(pages)
+            page_store.save_table_registry(table_registry)
+        console.print(
+            f"[green]✓ 表格注册表: {table_registry.total_tables} 个表格, "
+            f"{table_registry.cross_page_tables} 个跨页表格[/green]"
+        )
 
         with console.status("构建 FTS 索引..."):
             fts_index.index_pages(pages, doc_structure)

@@ -3,7 +3,8 @@
 
 .PHONY: help install install-dev install-all test test-heading lint format check serve serve-stdio chat build clean reindex read-chapter \
 	toc read-pages chapter-structure page-info lookup-annotation search-tables resolve-reference \
-	search-annotations get-table get-block-context find-similar compare-sections
+	search-annotations get-table get-block-context find-similar compare-sections \
+	build-table-registry table-registry-stats list-cross-page-tables
 
 # Default target
 .DEFAULT_GOAL := help
@@ -182,13 +183,12 @@ read-chapter: ## Read chapter content by section number (usage: make read-chapte
 # MCP Tools CLI (基础工具)
 #----------------------------------------------------------------------
 
-START_LEVEL ?= 1
 MAX_LEVEL ?= 3
 toc: ## Get regulation TOC (usage: make toc REG_ID=angui)
 	$(UV) run gridcode toc $(REG_ID) --level ${MAX_LEVEL}
 
-START_PAGE ?= 1
-END_PAGE ?= 3
+START_PAGE ?= 4
+END_PAGE ?= 6
 read-pages: ## Read page range (usage: make read-pages REG_ID=angui START_PAGE=85 END_PAGE=87)
 	$(UV) run gridcode read-pages --reg-id $(REG_ID) --start $(START_PAGE) --end $(END_PAGE)
 
@@ -244,6 +244,20 @@ get-table: ## Get full table by ID (usage: make get-table REG_ID=angui TABLE_ID=
 	fi
 	$(UV) run gridcode get-table "$(TABLE_ID)" --reg-id $(REG_ID)
 
+#----------------------------------------------------------------------
+# 表格注册表工具
+#----------------------------------------------------------------------
+
+build-table-registry: ## Build table registry for a regulation (usage: make build-table-registry REG_ID=angui_2024)
+	@echo "$(BLUE)Building table registry for $(REG_ID)...$(NC)"
+	@$(UV) run $(PYTHON) -c "from grid_code.storage import PageStore; from grid_code.parser import TableRegistryBuilder; ps = PageStore(); info = ps.load_info('$(REG_ID)'); pages = [ps.load_page('$(REG_ID)', i) for i in range(1, info.total_pages + 1)]; builder = TableRegistryBuilder('$(REG_ID)'); registry = builder.build(pages); ps.save_table_registry(registry); print(f'Done: {registry.total_tables} tables, {registry.cross_page_tables} cross-page')"
+
+table-registry-stats: ## Show table registry statistics (usage: make table-registry-stats REG_ID=angui_2024)
+	@$(UV) run $(PYTHON) -c "from grid_code.storage import PageStore; ps = PageStore(); reg = ps.load_table_registry('$(REG_ID)'); print(f'Total tables: {reg.total_tables}') if reg else print('No table registry found'); print(f'Cross-page tables: {reg.cross_page_tables}') if reg else None; print(f'Segment mappings: {len(reg.segment_to_table)}') if reg else None"
+
+list-cross-page-tables: ## List all cross-page tables (usage: make list-cross-page-tables REG_ID=angui_2024)
+	@$(UV) run $(PYTHON) -c "from grid_code.storage import PageStore; ps = PageStore(); reg = ps.load_table_registry('$(REG_ID)'); [print(f\"{tid}: P{e.page_start}-{e.page_end} ({len(e.segments)} segs)\") for tid, e in reg.tables.items() if e.is_cross_page] if reg else print('No table registry found')"
+
 BLOCK_ID ?=
 CONTEXT ?= 2
 get-block-context: ## Get block with context (usage: make get-block-context REG_ID=angui BLOCK_ID="block_xxx" CONTEXT=2)
@@ -258,7 +272,7 @@ get-block-context: ## Get block with context (usage: make get-block-context REG_
 # MCP Tools CLI (Phase 3: 发现工具)
 #----------------------------------------------------------------------
 
-SIMILAR_QUERY ?= 母线失压处理
+SIMILAR_QUERY ?= 三峡安控系统
 LIMIT ?= 5
 find-similar: ## Find similar content (usage: make find-similar REG_ID=angui SIMILAR_QUERY="母线失压处理")
 	$(UV) run gridcode find-similar --reg-id $(REG_ID) --query "$(SIMILAR_QUERY)" --limit $(LIMIT)

@@ -16,6 +16,8 @@ from grid_code.storage.models import (
     PageContent,
     PageDocument,
     RegulationInfo,
+    TableEntry,
+    TableRegistry,
     TocTree,
 )
 
@@ -53,6 +55,10 @@ class PageStore:
     def _get_structure_path(self, reg_id: str) -> Path:
         """获取文档结构文件路径"""
         return self._get_reg_dir(reg_id) / "structure.json"
+
+    def _get_table_registry_path(self, reg_id: str) -> Path:
+        """获取表格注册表文件路径"""
+        return self._get_reg_dir(reg_id) / "table_registry.json"
 
     def save_pages(
         self,
@@ -444,3 +450,159 @@ class PageStore:
     def exists(self, reg_id: str) -> bool:
         """检查规程是否存在"""
         return self._get_reg_dir(reg_id).exists()
+
+    # ========================================================================
+    # 表格注册表相关方法
+    # ========================================================================
+
+    def save_table_registry(self, registry: TableRegistry) -> None:
+        """保存表格注册表
+
+        Args:
+            registry: 表格注册表
+        """
+        reg_dir = self._get_reg_dir(registry.reg_id)
+        reg_dir.mkdir(parents=True, exist_ok=True)
+
+        registry_path = self._get_table_registry_path(registry.reg_id)
+        with open(registry_path, "w", encoding="utf-8") as f:
+            json.dump(registry.model_dump(), f, ensure_ascii=False, indent=2)
+
+        logger.info(
+            f"表格注册表已保存: {registry.total_tables} 个表格, "
+            f"{registry.cross_page_tables} 个跨页表格"
+        )
+
+    def load_table_registry(self, reg_id: str) -> TableRegistry | None:
+        """加载表格注册表
+
+        Args:
+            reg_id: 规程标识
+
+        Returns:
+            TableRegistry，如果不存在返回 None
+        """
+        registry_path = self._get_table_registry_path(reg_id)
+        if not registry_path.exists():
+            return None
+
+        with open(registry_path, encoding="utf-8") as f:
+            data = json.load(f)
+            return TableRegistry.model_validate(data)
+
+    def get_table_by_id(self, reg_id: str, table_id: str) -> TableEntry | None:
+        """通过 ID 快速获取表格
+
+        优先使用表格注册表（O(1) 查找），如果注册表不存在则降级为遍历页面。
+
+        Args:
+            reg_id: 规程标识
+            table_id: 表格 ID（可以是主表格 ID 或段落 ID）
+
+        Returns:
+            TableEntry，如果不存在返回 None
+        """
+        # 优先使用注册表
+        registry = self.load_table_registry(reg_id)
+        if registry:
+            # 直接查找主表格
+            if table_id in registry.tables:
+                return registry.tables[table_id]
+
+            # 通过段落 ID 映射查找
+            if table_id in registry.segment_to_table:
+                master_id = registry.segment_to_table[table_id]
+                return registry.tables.get(master_id)
+
+            return None
+
+        # 降级：遍历所有页面查找（向后兼容）
+        return self._get_table_by_id_legacy(reg_id, table_id)
+
+    def _get_table_by_id_legacy(self, reg_id: str, table_id: str) -> TableEntry | None:
+        """遍历页面查找表格（向后兼容）
+
+        Args:
+            reg_id: 规程标识
+            table_id: 表格 ID
+
+        Returns:
+            TableEntry，如果不存在返回 None
+        """
+        try:
+            info = self.load_info(reg_id)
+        except RegulationNotFoundError:
+            return None
+
+        for page_num in range(1, info.total_pages + 1):
+            try:
+                page = self.load_page(reg_id, page_num)
+                for block in page.content_blocks:
+                    if (
+                        block.block_type == "table"
+                        and block.table_meta
+                        and block.table_meta.table_id == table_id
+                    ):
+                        # 构建简单的 TableEntry（不含跨页合并）
+                        from grid_code.storage.models import TableSegment
+
+                        return TableEntry(
+                            table_id=table_id,
+                            caption=block.table_meta.caption,
+                            chapter_path=block.chapter_path,
+                            page_start=page_num,
+                            page_end=page_num,
+                            is_cross_page=False,
+                            segments=[
+                                TableSegment(
+                                    segment_id=table_id,
+                                    page_num=page_num,
+                                    block_id=block.block_id,
+                                    is_header=True,
+                                    row_start=0,
+                                    row_end=block.table_meta.row_count,
+                                )
+                            ],
+                            row_count=block.table_meta.row_count,
+                            col_count=block.table_meta.col_count,
+                            col_headers=block.table_meta.col_headers,
+                            merged_markdown=block.content_markdown,
+                        )
+            except PageNotFoundError:
+                continue
+
+        return None
+
+    def get_tables_on_page(self, reg_id: str, page_num: int) -> list[TableEntry]:
+        """获取指定页面上的所有表格
+
+        Args:
+            reg_id: 规程标识
+            page_num: 页码
+
+        Returns:
+            TableEntry 列表
+        """
+        registry = self.load_table_registry(reg_id)
+        if registry and page_num in registry.page_to_tables:
+            table_ids = registry.page_to_tables[page_num]
+            return [
+                registry.tables[tid]
+                for tid in table_ids
+                if tid in registry.tables
+            ]
+
+        # 降级：从页面读取
+        try:
+            page = self.load_page(reg_id, page_num)
+            results = []
+            for block in page.content_blocks:
+                if block.block_type == "table" and block.table_meta:
+                    entry = self._get_table_by_id_legacy(
+                        reg_id, block.table_meta.table_id
+                    )
+                    if entry:
+                        results.append(entry)
+            return results
+        except (RegulationNotFoundError, PageNotFoundError):
+            return []

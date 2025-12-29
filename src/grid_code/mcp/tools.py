@@ -1039,9 +1039,12 @@ class GridCodeTools:
         """
         获取完整表格内容（按表格ID）
 
+        优先使用表格注册表（O(1) 查找），如果注册表不存在则降级为遍历页面。
+        对于跨页表格，会自动返回合并后的完整内容。
+
         Args:
             reg_id: 规程标识
-            table_id: 表格标识（从搜索结果或block_id获取）
+            table_id: 表格标识（可以是主表格 ID 或段落 ID）
             include_merged: 如果表格跨页，是否自动合并（默认True）
 
         Returns:
@@ -1050,14 +1053,13 @@ class GridCodeTools:
             - caption: 表格标题
             - page_num: 起始页码
             - page_range: [起始页, 结束页]（如跨页）
+            - is_cross_page: 是否为跨页表格
             - row_count: 行数
             - col_count: 列数
             - col_headers: 列标题
-            - row_headers: 行标题
-            - cells: 完整单元格数据
             - markdown: 表格Markdown格式
             - chapter_path: 所属章节路径
-            - annotations: 相关注释列表
+            - segments: 表格段落信息（如跨页）
             - source: 来源引用
 
         Raises:
@@ -1067,6 +1069,73 @@ class GridCodeTools:
         if not self.page_store.exists(reg_id):
             raise RegulationNotFoundError(reg_id)
 
+        # 优先使用表格注册表（O(1) 查找）
+        table_entry = self.page_store.get_table_by_id(reg_id, table_id)
+
+        if table_entry:
+            # 从 TableEntry 构建返回结果
+            start_page = table_entry.page_start
+            end_page = table_entry.page_end
+
+            # 构建来源
+            if start_page == end_page:
+                source = f"{reg_id} P{start_page}"
+            else:
+                source = f"{reg_id} P{start_page}-{end_page}"
+            if table_entry.caption:
+                source += f" {table_entry.caption}"
+
+            # 构建段落信息
+            segments = [
+                {
+                    "segment_id": seg.segment_id,
+                    "page_num": seg.page_num,
+                    "is_header": seg.is_header,
+                    "row_range": [seg.row_start, seg.row_end],
+                }
+                for seg in table_entry.segments
+            ]
+
+            return {
+                "table_id": table_entry.table_id,
+                "caption": table_entry.caption,
+                "page_num": start_page,
+                "page_range": [start_page, end_page],
+                "is_cross_page": table_entry.is_cross_page,
+                "row_count": table_entry.row_count,
+                "col_count": table_entry.col_count,
+                "col_headers": table_entry.col_headers,
+                "markdown": table_entry.merged_markdown,
+                "chapter_path": table_entry.chapter_path,
+                "segments": segments,
+                "source": source,
+            }
+
+        # 降级：遍历所有页面查找（向后兼容）
+        return self._get_table_by_id_legacy(reg_id, table_id, include_merged)
+
+    def _get_table_by_id_legacy(
+        self,
+        reg_id: str,
+        table_id: str,
+        include_merged: bool = True,
+    ) -> dict:
+        """
+        遍历页面查找表格（向后兼容）
+
+        当表格注册表不存在时使用此方法。
+
+        Args:
+            reg_id: 规程标识
+            table_id: 表格标识
+            include_merged: 如果表格跨页，是否自动合并
+
+        Returns:
+            表格完整信息
+
+        Raises:
+            TableNotFoundError: 表格不存在
+        """
         info = self.page_store.load_info(reg_id)
 
         # 查找表格
@@ -1114,6 +1183,7 @@ class GridCodeTools:
                         "caption": table_meta.caption,
                         "page_num": start_page,
                         "page_range": [start_page, end_page],
+                        "is_cross_page": start_page != end_page,
                         "row_count": table_meta.row_count,
                         "col_count": table_meta.col_count,
                         "col_headers": table_meta.col_headers,

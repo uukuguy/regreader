@@ -318,3 +318,54 @@ class RegulationInfo(BaseModel):
     source_file: str = Field(description="源文件名")
     total_pages: int = Field(description="总页数")
     indexed_at: str = Field(description="索引时间（ISO 格式）")
+
+
+# ============================================================================
+# 表格注册表模型（全局表格索引）
+# ============================================================================
+
+
+class TableSegment(BaseModel):
+    """表格段（跨页表格的单个部分）"""
+
+    segment_id: str = Field(description="原始 table_id")
+    page_num: int = Field(description="所在页码")
+    block_id: str = Field(description="所在内容块ID")
+    is_header: bool = Field(default=False, description="是否包含表头")
+    row_start: int = Field(default=0, description="起始行（在合并表格中的位置）")
+    row_end: int = Field(default=0, description="结束行（在合并表格中的位置）")
+
+
+class TableEntry(BaseModel):
+    """表格注册表条目"""
+
+    table_id: str = Field(description="统一ID（跨页表格共用首个段落的ID）")
+    caption: str | None = Field(default=None, description="表格标题")
+    chapter_path: list[str] = Field(default_factory=list, description="所属章节路径")
+    page_start: int = Field(description="起始页码")
+    page_end: int = Field(description="结束页码")
+    is_cross_page: bool = Field(default=False, description="是否为跨页表格")
+    segments: list[TableSegment] = Field(default_factory=list, description="表格段列表")
+    row_count: int = Field(description="合并后总行数")
+    col_count: int = Field(description="列数")
+    col_headers: list[str] = Field(default_factory=list, description="列标题")
+    merged_markdown: str = Field(default="", description="合并后的 Markdown 内容")
+    created_at: str = Field(default="", description="创建时间（ISO 格式）")
+
+
+class TableRegistry(BaseModel):
+    """表格注册表（全局表格索引）"""
+
+    reg_id: str = Field(description="规程标识")
+    version: str = Field(default="1.0", description="注册表版本")
+    total_tables: int = Field(default=0, description="表格总数")
+    cross_page_tables: int = Field(default=0, description="跨页表格数")
+    tables: dict[str, TableEntry] = Field(
+        default_factory=dict, description="表格映射 {table_id: TableEntry}"
+    )
+    segment_to_table: dict[str, str] = Field(
+        default_factory=dict, description="段落ID到主表格ID映射"
+    )
+    page_to_tables: dict[int, list[str]] = Field(
+        default_factory=dict, description="页码到表格ID列表映射"
+    )
