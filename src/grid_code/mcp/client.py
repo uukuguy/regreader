@@ -5,7 +5,6 @@
 支持 LangGraph 和 Pydantic AI 等框架使用。
 """
 
-import sys
 from contextlib import AsyncExitStack
 from typing import Any, Literal
 
@@ -14,6 +13,8 @@ from loguru import logger
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
+
+from grid_code.agents.mcp_config import MCP_SERVER_ARGS, get_mcp_command
 
 
 class GridCodeMCPClient:
@@ -92,10 +93,10 @@ class GridCodeMCPClient:
 
     async def _connect_stdio(self) -> None:
         """通过 stdio 传输连接（启动子进程）"""
-        # GridCode MCP Server 启动参数
+        # GridCode MCP Server 启动参数（使用共享配置）
         server_params = StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "grid_code.cli", "serve", "--transport", "stdio"],
+            command=get_mcp_command(),
+            args=MCP_SERVER_ARGS,
             env=None,
         )
 

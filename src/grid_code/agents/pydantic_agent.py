@@ -10,14 +10,13 @@
                         └── PageStore (页面数据)
 """
 
-import sys
 from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel
 
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
+from grid_code.agents.mcp_config import MCP_SERVER_ARGS, get_mcp_command
 from grid_code.agents.prompts import SYSTEM_PROMPT
 from grid_code.config import get_settings
 
@@ -98,8 +97,8 @@ class PydanticAIAgent(BaseGridCodeAgent):
 
         # 创建 MCP Server 连接（stdio 模式）
         self._mcp_server = MCPServerStdio(
-            sys.executable,
-            args=["-m", "grid_code.cli", "serve", "--transport", "stdio"],
+            get_mcp_command(),
+            args=MCP_SERVER_ARGS,
         )
 
         # 创建 Agent（带 MCP toolsets）

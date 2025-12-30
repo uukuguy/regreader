@@ -4,12 +4,12 @@
 https://github.com/anthropics/claude-agent-sdk-python
 """
 
-import sys
 from typing import Any
 
 from loguru import logger
 
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
+from grid_code.agents.mcp_config import MCP_SERVER_ARGS, get_mcp_command, get_mcp_stdio_config, get_tool_name
 from grid_code.agents.prompts import SYSTEM_PROMPT
 from grid_code.agents.session import SessionManager, SessionState
 from grid_code.config import get_settings
@@ -124,20 +124,14 @@ class ClaudeAgent(BaseGridCodeAgent):
         GridCode MCP Server 通过 stdio 模式运行。
         工具将以 mcp__gridcode__<tool_name> 格式暴露。
         """
-        return {
-            "gridcode": {
-                "type": "stdio",
-                "command": sys.executable,
-                "args": ["-m", "grid_code.cli", "serve", "--transport", "stdio"],
-            }
-        }
+        return get_mcp_stdio_config()
 
     def _get_allowed_tools(self) -> list[str]:
         """获取允许使用的工具列表
 
         动态从 TOOL_METADATA 生成，确保与 MCP Server 同步。
         """
-        return [f"mcp__gridcode__{name}" for name in TOOL_METADATA.keys()]
+        return [get_tool_name(name) for name in TOOL_METADATA.keys()]
 
     def _build_system_prompt(self) -> str:
         """构建系统提示词
