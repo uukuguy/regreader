@@ -1259,6 +1259,289 @@ def build_table_index(
         raise typer.Exit(1)
 
 
+# ==================== 工具导航命令 ====================
+
+
+@app.command("mcp-tools")
+def mcp_tools(
+    category: str | None = typer.Option(
+        None, "--category", "-c",
+        help="按分类过滤: base, multi-hop, context, discovery, navigation"
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="显示详细信息（含工具链）"
+    ),
+    list_categories: bool = typer.Option(
+        False, "--list-categories",
+        help="仅列出分类"
+    ),
+    live: bool = typer.Option(
+        False, "--live", "-l",
+        help="实时连接 MCP Server 获取工具列表"
+    ),
+    sse_url: str | None = typer.Option(
+        None, "--sse",
+        help="SSE 服务器 URL（默认使用 stdio 模式）"
+    ),
+    verify: bool = typer.Option(
+        False, "--verify",
+        help="验证服务完整性（对比静态元数据）"
+    ),
+):
+    """列出 MCP 服务提供的所有工具
+
+    显示工具分类、用途说明和工具链关系，帮助理解如何使用各工具。
+
+    示例:
+        gridcode mcp-tools                # 列出所有工具（静态元数据）
+        gridcode mcp-tools -c base        # 仅显示基础工具
+        gridcode mcp-tools -v             # 显示详细信息
+        gridcode mcp-tools --list-categories  # 仅列出分类
+        gridcode mcp-tools --live         # 连接 stdio MCP Server
+        gridcode mcp-tools --live --sse http://localhost:8080/sse  # 连接 SSE 服务
+        gridcode mcp-tools --live --verify  # 验证服务完整性
+    """
+    from grid_code.mcp.tool_metadata import (
+        TOOL_METADATA,
+        CATEGORY_INFO,
+        CATEGORY_ORDER,
+        ToolCategory,
+    )
+
+    # 实时模式：连接 MCP Server
+    if live:
+        _mcp_tools_live(sse_url, verify, verbose)
+        return
+
+    # 仅列出分类
+    if list_categories:
+        console.print("\n[bold]MCP 工具分类[/bold]\n")
+        table = Table()
+        table.add_column("ID", style="cyan")
+        table.add_column("名称", style="green")
+        table.add_column("工具数", justify="right")
+        table.add_column("说明")
+
+        for cat in CATEGORY_ORDER:
+            cat_id = cat.value
+            info = CATEGORY_INFO.get(cat_id, {})
+            count = sum(1 for m in TOOL_METADATA.values() if m.category.value == cat_id)
+            table.add_row(cat_id, info.get("name", ""), str(count), info.get("description", ""))
+
+        console.print(table)
+        return
+
+    # 统计总工具数
+    total_tools = len(TOOL_METADATA)
+
+    # 按分类组织工具
+    tools_by_cat: dict[str, list] = {}
+    for cat in CATEGORY_ORDER:
+        cat_id = cat.value
+        if category and cat_id != category:
+            continue
+        tools = [m for m in TOOL_METADATA.values() if m.category.value == cat_id]
+        if tools:
+            tools.sort(key=lambda t: (t.priority, t.name))
+            tools_by_cat[cat_id] = tools
+
+    if not tools_by_cat:
+        if category:
+            console.print(f"[yellow]未找到分类: {category}[/yellow]")
+            console.print(f"[dim]可用分类: base, multi-hop, context, discovery, navigation[/dim]")
+        return
+
+    # 显示标题
+    if category:
+        cat_info = CATEGORY_INFO.get(category, {})
+        console.print(f"\n[bold]MCP 工具列表 - {cat_info.get('name', category)}[/bold]\n")
+    else:
+        console.print(f"\n[bold]MCP 工具列表 ({total_tools} 个)[/bold]\n")
+
+    # 遍历分类
+    for cat_id, tools in tools_by_cat.items():
+        cat_info = CATEGORY_INFO.get(cat_id, {})
+        cat_name = cat_info.get("name", cat_id)
+
+        console.print(f"[bold cyan]{cat_name}[/bold cyan] [dim]({len(tools)})[/dim]")
+
+        if verbose:
+            # 详细模式
+            for tool in tools:
+                console.print(f"\n  [green]{tool.name}[/green] - {tool.brief}")
+                if tool.cli_command:
+                    console.print(f"    CLI: [dim]{tool.cli_command}[/dim]")
+                if tool.prerequisites:
+                    console.print(f"    前置: [dim]{', '.join(tool.prerequisites)}[/dim]")
+                if tool.next_tools:
+                    console.print(f"    后续: [dim]{', '.join(tool.next_tools)}[/dim]")
+                if tool.use_cases:
+                    console.print(f"    场景: [dim]{', '.join(tool.use_cases)}[/dim]")
+            console.print()
+        else:
+            # 简明模式
+            table = Table(show_header=False, box=None, padding=(0, 2))
+            table.add_column("名称", style="green", width=25)
+            table.add_column("说明")
+            table.add_column("CLI", style="dim")
+
+            for tool in tools:
+                table.add_row(
+                    tool.name,
+                    tool.brief,
+                    tool.cli_command or "-",
+                )
+
+            console.print(table)
+            console.print()
+
+
+def _mcp_tools_live(sse_url: str | None, verify: bool, verbose: bool):
+    """实时连接 MCP Server 获取工具列表"""
+    from grid_code.mcp.tool_metadata import TOOL_METADATA
+
+    transport = "sse" if sse_url else "stdio"
+    console.print(f"\n正在连接 MCP Server ({transport})...", style="dim")
+
+    async def _fetch_live_tools():
+        from grid_code.mcp.client import GridCodeMCPClient
+        async with GridCodeMCPClient(transport=transport, server_url=sse_url) as client:
+            return await client.list_tools()
+
+    try:
+        tools = asyncio.run(_fetch_live_tools())
+        console.print("[green]连接成功！[/green]\n")
+    except Exception as e:
+        error_msg = str(e)
+        if transport == "sse":
+            console.print(f"[red]连接失败: 无法连接到 SSE 服务器[/red]")
+            console.print(f"[dim]URL: {sse_url}[/dim]")
+            console.print()
+            console.print("[yellow]提示: 请先启动 MCP Server:[/yellow]")
+            console.print("  [dim]make serve[/dim]  或  [dim]gridcode serve --transport sse[/dim]")
+        else:
+            console.print(f"[red]连接失败: {error_msg}[/red]")
+        return
+
+    if verify:
+        # 验证模式
+        _verify_mcp_tools(tools, verbose)
+    else:
+        # 列出实际工具
+        console.print(f"[bold]MCP Server 工具列表 ({len(tools)} 个)[/bold]\n")
+        table = Table()
+        table.add_column("工具名称", style="green")
+        table.add_column("描述")
+        table.add_column("参数数", justify="right")
+
+        for tool in sorted(tools, key=lambda t: t["name"]):
+            params = tool.get("input_schema", {}).get("properties", {})
+            desc = tool.get("description", "")[:60]
+            if len(tool.get("description", "")) > 60:
+                desc += "..."
+            table.add_row(tool["name"], desc, str(len(params)))
+
+        console.print(table)
+
+
+def _verify_mcp_tools(tools: list[dict], verbose: bool):
+    """验证 MCP 服务完整性"""
+    from grid_code.mcp.tool_metadata import TOOL_METADATA
+
+    expected_tools = set(TOOL_METADATA.keys())
+    actual_tools_map = {t["name"]: t for t in tools}
+    actual_tools = set(actual_tools_map.keys())
+
+    # 1. 检查工具名称
+    missing_tools = expected_tools - actual_tools
+    extra_tools = actual_tools - expected_tools
+
+    # 2. 检查参数签名
+    param_mismatches = []
+    param_matches = []
+    for tool_name, meta in TOOL_METADATA.items():
+        if tool_name not in actual_tools_map:
+            continue
+        actual_schema = actual_tools_map[tool_name].get("input_schema", {})
+        actual_params = set(actual_schema.get("properties", {}).keys())
+        expected_params = set(meta.expected_params.keys())
+
+        if actual_params != expected_params:
+            param_mismatches.append({
+                "tool": tool_name,
+                "missing": expected_params - actual_params,
+                "extra": actual_params - expected_params,
+            })
+        else:
+            param_matches.append({
+                "tool": tool_name,
+                "count": len(expected_params),
+            })
+
+    # 3. 输出验证报告
+    console.print("[bold]MCP 服务验证报告[/bold]")
+    console.print("=" * 40)
+    console.print()
+
+    # 连接状态
+    console.print("✓ 服务连接: [green]成功[/green]")
+
+    # 工具数量
+    tool_count_ok = len(missing_tools) == 0
+    if tool_count_ok:
+        console.print(f"✓ 工具数量: [green]{len(actual_tools)}/{len(expected_tools)} (100%)[/green]")
+    else:
+        pct = len(actual_tools & expected_tools) / len(expected_tools) * 100
+        console.print(f"✗ 工具数量: [red]{len(actual_tools & expected_tools)}/{len(expected_tools)} ({pct:.1f}%)[/red]")
+
+    # 参数签名
+    if param_mismatches:
+        console.print(f"✗ 参数签名: [red]{len(param_mismatches)} 个工具参数不匹配[/red]")
+    else:
+        console.print("✓ 参数签名: [green]全部匹配[/green]")
+
+    console.print()
+
+    # 详细信息
+    if verbose or missing_tools or param_mismatches:
+        console.print("[bold]工具验证详情:[/bold]")
+
+        for tool_name in sorted(expected_tools):
+            meta = TOOL_METADATA[tool_name]
+            if tool_name in missing_tools:
+                console.print(f"  ✗ [red]{tool_name:25}[/red] - 缺失")
+            elif any(m["tool"] == tool_name for m in param_mismatches):
+                mismatch = next(m for m in param_mismatches if m["tool"] == tool_name)
+                console.print(f"  ✗ [yellow]{tool_name:25}[/yellow] - 参数不匹配")
+                if mismatch["missing"]:
+                    console.print(f"      缺少: [dim]{', '.join(mismatch['missing'])}[/dim]")
+                if mismatch["extra"]:
+                    console.print(f"      多余: [dim]{', '.join(mismatch['extra'])}[/dim]")
+            else:
+                param_count = len(meta.expected_params)
+                console.print(f"  ✓ [green]{tool_name:25}[/green] - 存在，参数匹配 ({param_count}/{param_count})")
+
+        if extra_tools:
+            console.print()
+            console.print("[bold]额外工具 (未在元数据中定义):[/bold]")
+            for tool_name in sorted(extra_tools):
+                console.print(f"  ? [blue]{tool_name}[/blue]")
+
+    console.print()
+
+    # 最终结果
+    if not missing_tools and not param_mismatches:
+        console.print("验证结果: [bold green]✓ 通过[/bold green]")
+    else:
+        issues = []
+        if missing_tools:
+            issues.append(f"缺失工具: {', '.join(sorted(missing_tools))}")
+        if param_mismatches:
+            issues.append(f"参数不匹配: {', '.join(m['tool'] for m in param_mismatches)}")
+        console.print(f"验证结果: [bold red]✗ 失败[/bold red] ({'; '.join(issues)})")
+
+
 @app.command()
 def version():
     """显示版本信息"""

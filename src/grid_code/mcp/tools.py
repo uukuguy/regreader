@@ -1589,3 +1589,84 @@ class GridCodeTools:
         keyword_counts = Counter(keywords)
         # 返回出现次数最多的关键词
         return [kw for kw, _ in keyword_counts.most_common(30)]
+
+    # ==================== 导航工具 ====================
+
+    def get_tool_guide(
+        self,
+        category: str | None = None,
+        include_workflows: bool = True,
+    ) -> dict:
+        """
+        获取 MCP 工具使用指南
+
+        返回工具分类信息、推荐使用流程和使用提示，帮助智能体选择正确的工具。
+
+        Args:
+            category: 过滤特定分类（可选）
+                - 'base': 基础工具
+                - 'multi-hop': 核心多跳
+                - 'context': 上下文
+                - 'discovery': 发现
+                - 'navigation': 导航
+            include_workflows: 是否包含工作流建议，默认 True
+
+        Returns:
+            工具指南信息，包含:
+            - categories: 分类列表及统计
+            - tools_by_category: 按分类组织的工具列表
+            - workflows: 常见工作流（可选）
+            - tips: 使用提示
+        """
+        from grid_code.mcp.tool_metadata import (
+            TOOL_METADATA,
+            TOOL_WORKFLOWS,
+            TOOL_TIPS,
+            CATEGORY_INFO,
+        )
+
+        # 构建分类信息
+        categories = []
+        tools_by_category: dict[str, list[dict]] = {}
+
+        for cat_id, cat_info in CATEGORY_INFO.items():
+            # 如果指定了分类过滤，跳过不匹配的
+            if category and cat_id != category:
+                continue
+
+            # 获取该分类下的工具
+            cat_tools = []
+            for tool_name, meta in TOOL_METADATA.items():
+                if meta.category.value == cat_id:
+                    cat_tools.append({
+                        "name": tool_name,
+                        "brief": meta.brief,
+                        "priority": meta.priority,
+                        "cli_command": meta.cli_command,
+                        "prerequisites": meta.prerequisites,
+                        "next_tools": meta.next_tools,
+                    })
+
+            # 按优先级排序
+            cat_tools.sort(key=lambda x: x["priority"])
+
+            categories.append({
+                "id": cat_id,
+                "name": cat_info["name"],
+                "description": cat_info["description"],
+                "count": len(cat_tools),
+            })
+
+            tools_by_category[cat_id] = cat_tools
+
+        result = {
+            "categories": categories,
+            "tools_by_category": tools_by_category,
+            "tips": TOOL_TIPS,
+        }
+
+        # 可选添加工作流
+        if include_workflows:
+            result["workflows"] = TOOL_WORKFLOWS
+
+        return result

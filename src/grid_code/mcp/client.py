@@ -115,9 +115,17 @@ class GridCodeMCPClient:
 
     async def _connect_sse(self) -> None:
         """通过 SSE 传输连接（HTTP 长连接）"""
+        import httpx
+
+        # 创建自定义 httpx 客户端工厂，禁用系统代理
+        # 避免系统代理（如 ClashX）导致 SSE 连接失败
+        def create_no_proxy_client(**kwargs) -> httpx.AsyncClient:
+            # 保留 MCP SDK 传入的参数，但禁用代理
+            return httpx.AsyncClient(proxy=None, trust_env=False, **kwargs)
+
         # 创建 SSE 传输
         sse_transport = await self.exit_stack.enter_async_context(
-            sse_client(self.server_url)
+            sse_client(self.server_url, httpx_client_factory=create_no_proxy_client)
         )
         sse_read, sse_write = sse_transport
 

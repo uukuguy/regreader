@@ -6,6 +6,7 @@
 from mcp.server.fastmcp import FastMCP
 
 from grid_code.exceptions import GridCodeError
+from grid_code.mcp.tool_metadata import TOOL_METADATA
 from grid_code.mcp.tools import GridCodeTools
 
 
@@ -28,39 +29,28 @@ def create_mcp_server(
     mcp = FastMCP(name, host=host, port=port)
     tools = GridCodeTools()
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["get_toc"].to_dict())
     def get_toc(reg_id: str) -> dict:
-        """获取安规的章节目录树及页码范围。
+        """[分类:基础工具] 获取安规的章节目录树及页码范围。
 
         在开始搜索前，应先调用此工具了解规程的整体结构，
         以便确定搜索的章节范围。
+
+        使用场景：了解规程结构、确定搜索范围。
+        后续工具：smart_search, read_chapter_content。
 
         Args:
             reg_id: 规程标识，如 'angui_2024'
 
         Returns:
             章节树结构，包含各章节的标题和页码范围。
-            格式: {
-                "reg_id": "规程标识",
-                "title": "规程标题",
-                "total_pages": 总页数,
-                "items": [
-                    {
-                        "title": "章节标题",
-                        "level": 层级,
-                        "page_start": 起始页,
-                        "page_end": 结束页,
-                        "children": [子章节...]
-                    }
-                ]
-            }
         """
         try:
             return tools.get_toc(reg_id)
         except GridCodeError as e:
             return {"error": str(e)}
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["smart_search"].to_dict())
     def smart_search(
         query: str,
         reg_id: str,
@@ -69,27 +59,24 @@ def create_mcp_server(
         block_types: list[str] | None = None,
         section_number: str | None = None,
     ) -> list[dict]:
-        """在安规中执行混合检索（关键词+语义）。
+        """[分类:基础工具] 在安规中执行混合检索（关键词+语义）。
 
         结合全文检索和语义向量检索，返回最相关的内容片段。
-        建议先通过 get_toc 确定章节范围，再进行精准搜索。
+
+        使用场景：查找相关内容、混合检索。
+        前置工具：建议先用 get_toc 确定章节范围。
+        后续工具：read_page_range, get_block_with_context。
 
         Args:
             query: 搜索查询，如 "母线失压处理"
             reg_id: 规程标识，如 'angui_2024'
             chapter_scope: 限定章节范围（可选），如 "第六章" 或 "事故处理"
             limit: 返回结果数量限制，默认 10
-            block_types: 限定块类型列表（可选），如 ["text", "table", "section_content"]
+            block_types: 限定块类型列表（可选），如 ["text", "table"]
             section_number: 精确匹配章节号（可选），如 "2.1.4.1.6"
 
         Returns:
-            搜索结果列表，每个结果包含:
-            - page_num: 页码
-            - chapter_path: 章节路径
-            - snippet: 匹配内容片段
-            - score: 相关性分数
-            - source: 来源引用（如 "angui_2024 P85"）
-            - block_id: 块标识
+            搜索结果列表，包含 page_num, snippet, score, source, block_id 等。
         """
         try:
             return tools.smart_search(
@@ -98,18 +85,18 @@ def create_mcp_server(
         except GridCodeError as e:
             return [{"error": str(e)}]
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["read_page_range"].to_dict())
     def read_page_range(
         reg_id: str,
         start_page: int,
         end_page: int,
     ) -> dict:
-        """读取连续页面的完整 Markdown 内容。
+        """[分类:基础工具] 读取连续页面的完整 Markdown 内容。
 
-        自动处理跨页表格的拼接。当搜索结果显示表格可能跨页时，
-        应读取相邻页面以获取完整信息。
+        自动处理跨页表格的拼接。单次最多读取 10 页。
 
-        单次最多读取 10 页。
+        使用场景：阅读完整页面、查看跨页表格。
+        前置工具：通常在 smart_search 后使用。
 
         Args:
             reg_id: 规程标识
@@ -117,106 +104,81 @@ def create_mcp_server(
             end_page: 结束页码
 
         Returns:
-            页面内容，包含:
-            - content_markdown: 合并后的完整 Markdown 内容
-            - source: 来源引用
-            - has_merged_tables: 是否包含合并的跨页表格
-            - page_count: 实际读取的页数
+            页面内容，包含 content_markdown, source, has_merged_tables 等。
         """
         try:
             return tools.read_page_range(reg_id, start_page, end_page)
         except GridCodeError as e:
             return {"error": str(e)}
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["list_regulations"].to_dict())
     def list_regulations() -> list[dict]:
-        """列出所有已入库的规程。
+        """[分类:基础工具] 列出所有已入库的规程。
 
         返回所有可查询的规程信息，包括标识、标题、页数等。
 
+        使用场景：了解可用规程。
+        后续工具：get_toc。
+
         Returns:
-            规程信息列表，每个规程包含:
-            - reg_id: 规程标识
-            - title: 规程标题
-            - total_pages: 总页数
-            - indexed_at: 入库时间
+            规程信息列表，包含 reg_id, title, total_pages, indexed_at。
         """
         return tools.list_regulations()
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["get_chapter_structure"].to_dict())
     def get_chapter_structure(reg_id: str) -> dict:
-        """获取规程的完整章节结构。
+        """[分类:基础工具] 获取规程的完整章节结构。
 
         返回文档的全局章节结构树，包括各级章节编号、标题、页码等信息。
-        适用于需要精确定位到某个章节的场景。
+
+        使用场景：获取章节树。
+        前置工具：get_toc。
+        后续工具：read_chapter_content。
 
         Args:
             reg_id: 规程标识，如 'angui_2024'
 
         Returns:
-            章节结构信息，包含:
-            - reg_id: 规程标识
-            - total_chapters: 章节总数
-            - root_nodes: 顶级章节列表，每个节点包含:
-                - node_id: 节点ID
-                - section_number: 章节编号（如 "2.1.4.1.6"）
-                - title: 章节标题
-                - level: 层级
-                - page_num: 首页页码
-                - children_count: 子章节数量
-                - has_direct_content: 是否有直接内容
+            章节结构信息，包含 reg_id, total_chapters, root_nodes 等。
         """
         try:
             return tools.get_chapter_structure(reg_id)
         except GridCodeError as e:
             return {"error": str(e)}
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["get_page_chapter_info"].to_dict())
     def get_page_chapter_info(reg_id: str, page_num: int) -> dict:
-        """获取指定页面的章节信息。
+        """[分类:基础工具] 获取指定页面的章节信息。
 
         返回该页面的所有活跃章节，包括从上页延续的章节和本页首次出现的章节。
-        适用于需要了解某页章节上下文的场景。
+
+        使用场景：了解页面所属章节。
 
         Args:
             reg_id: 规程标识，如 'angui_2024'
             page_num: 页码
 
         Returns:
-            页面章节信息，包含:
-            - reg_id: 规程标识
-            - page_num: 页码
-            - active_chapters: 活跃章节列表，每个章节包含:
-                - node_id: 节点ID
-                - section_number: 章节编号
-                - title: 章节标题
-                - level: 层级
-                - page_num: 首次出现的页码
-                - inherited: 是否为延续的章节（从上页继承）
-                - has_direct_content: 是否有直接内容
-                - full_title: 完整标题（编号+标题）
-            - total_chapters: 总章节数
-            - new_chapters_count: 本页首次出现的章节数
-            - inherited_chapters_count: 从上页延续的章节数
+            页面章节信息，包含 active_chapters, total_chapters 等。
         """
         try:
             return tools.get_page_chapter_info(reg_id, page_num)
         except GridCodeError as e:
             return {"error": str(e)}
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["read_chapter_content"].to_dict())
     def read_chapter_content(
         reg_id: str,
         section_number: str,
         include_children: bool = True,
     ) -> dict:
-        """读取指定章节的完整内容。
+        """[分类:基础工具] 读取指定章节的完整内容。
 
         获取某个章节编号下的所有内容，自动处理跨页情况。
         适用于需要阅读整个章节而非搜索片段的场景。
 
-        先通过 get_chapter_structure 或 get_toc 获取章节编号，
-        再使用此工具读取章节完整内容。
+        使用场景：阅读完整章节。
+        前置工具：get_chapter_structure。
 
         Args:
             reg_id: 规程标识，如 'angui_2024'
@@ -242,18 +204,19 @@ def create_mcp_server(
 
     # ==================== Phase 1: 核心多跳工具 ====================
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["lookup_annotation"].to_dict())
     def lookup_annotation(
         reg_id: str,
         annotation_id: str,
         page_hint: int | None = None,
     ) -> dict:
-        """查找并返回指定注释的完整内容。
+        """[分类:核心多跳] 查找并返回指定注释的完整内容。
 
         处理表格单元格中常见的 "见注1"、"方案A" 等引用。
         支持多种注释标识变体：注1/注①/注一、方案A/方案甲 等。
 
-        当在表格或正文中看到"见注X"时，使用此工具获取注释完整内容。
+        使用场景：查找注释内容、理解表格脚注。
+        前置工具：smart_search（先搜索找到包含注释引用的内容）。
 
         Args:
             reg_id: 规程标识，如 'angui_2024'
@@ -274,7 +237,7 @@ def create_mcp_server(
         except GridCodeError as e:
             return {"error": str(e)}
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["search_tables"].to_dict())
     def search_tables(
         query: str,
         reg_id: str,
@@ -282,12 +245,14 @@ def create_mcp_server(
         search_cells: bool = True,
         limit: int = 10,
     ) -> list[dict]:
-        """搜索表格（按标题或单元格内容）。
+        """[分类:核心多跳] 搜索表格（按标题或单元格内容）。
 
         在规程中查找表格，支持按表格标题（如"表6-2"）或
         单元格内容（如"母线失压"）进行搜索。
 
-        适用于需要查找特定表格或在表格中定位信息的场景。
+        使用场景：查找特定表格、表格内容搜索。
+        前置工具：通常先用 get_toc 了解章节范围。
+        后续工具：找到表格后用 get_table_by_id 获取完整内容。
 
         Args:
             query: 搜索查询，如 "母线失压" 或 "表6-2"
@@ -315,15 +280,19 @@ def create_mcp_server(
         except GridCodeError as e:
             return [{"error": str(e)}]
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["resolve_reference"].to_dict())
     def resolve_reference(
         reg_id: str,
         reference_text: str,
     ) -> dict:
-        """解析并解决交叉引用。
+        """[分类:核心多跳] 解析并解决交叉引用。
 
         当在规程内容中遇到交叉引用时（如"见第六章"、"参见表6-2"、
         "详见2.1.4"），使用此工具解析引用并获取目标位置和内容预览。
+
+        使用场景：解析交叉引用。
+        前置工具：smart_search（先搜索找到包含引用的内容）。
+        后续工具：read_page_range, read_chapter_content（跳转阅读）。
 
         支持多种引用格式:
         - 章节引用: "见第六章", "参见2.1.4", "详见第三节"
@@ -353,16 +322,18 @@ def create_mcp_server(
 
     # ==================== Phase 2: 上下文工具 ====================
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["search_annotations"].to_dict())
     def search_annotations(
         reg_id: str,
         pattern: str | None = None,
         annotation_type: str | None = None,
     ) -> list[dict]:
-        """搜索规程中的所有注释。
+        """[分类:上下文] 搜索规程中的所有注释。
 
         查找规程中的所有注释，支持按内容模式和类型过滤。
-        适用于需要获取所有相关注释的场景。
+
+        使用场景：搜索所有注释。
+        后续工具：lookup_annotation（获取具体注释详情）。
 
         Args:
             reg_id: 规程标识
@@ -384,18 +355,19 @@ def create_mcp_server(
         except GridCodeError as e:
             return [{"error": str(e)}]
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["get_table_by_id"].to_dict())
     def get_table_by_id(
         reg_id: str,
         table_id: str,
         include_merged: bool = True,
     ) -> dict:
-        """获取完整表格内容（按表格ID）。
+        """[分类:上下文] 获取完整表格内容（按表格ID）。
 
         根据表格ID获取表格的完整信息，包括所有单元格数据。
         如果表格跨页，自动合并后续页面的内容。
 
-        通常先使用 search_tables 找到表格，再用此工具获取完整内容。
+        使用场景：获取完整表格。
+        前置工具：search_tables（先搜索找到目标表格）。
 
         Args:
             reg_id: 规程标识
@@ -423,16 +395,19 @@ def create_mcp_server(
         except GridCodeError as e:
             return {"error": str(e)}
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["get_block_with_context"].to_dict())
     def get_block_with_context(
         reg_id: str,
         block_id: str,
         context_blocks: int = 2,
     ) -> dict:
-        """读取指定内容块及其上下文。
+        """[分类:上下文] 读取指定内容块及其上下文。
 
         当搜索结果的片段不够完整时，使用此工具获取更多上下文。
         返回目标块及其前后的内容块，帮助理解完整语境。
+
+        使用场景：扩展上下文。
+        前置工具：smart_search（先搜索获取 block_id）。
 
         Args:
             reg_id: 规程标识
@@ -456,7 +431,7 @@ def create_mcp_server(
 
     # ==================== Phase 3: 发现工具 ====================
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["find_similar_content"].to_dict())
     def find_similar_content(
         reg_id: str,
         query_text: str | None = None,
@@ -464,10 +439,12 @@ def create_mcp_server(
         limit: int = 5,
         exclude_same_page: bool = True,
     ) -> list[dict]:
-        """查找语义相似的内容。
+        """[分类:发现] 查找语义相似的内容。
 
         发现与给定文本或内容块语义相似的其他内容。
-        适用于寻找相关规定、类似条款或关联内容的场景。
+
+        使用场景：查找相似内容。
+        前置工具：smart_search（获取初始内容后查找相似）。
 
         可以提供文本查询，或者提供已有内容块的ID来查找相似内容。
 
@@ -494,17 +471,19 @@ def create_mcp_server(
         except GridCodeError as e:
             return [{"error": str(e)}]
 
-    @mcp.tool()
+    @mcp.tool(meta=TOOL_METADATA["compare_sections"].to_dict())
     def compare_sections(
         reg_id: str,
         section_a: str,
         section_b: str,
         include_tables: bool = True,
     ) -> dict:
-        """比较两个章节的内容。
+        """[分类:发现] 比较两个章节的内容。
 
         并排比较两个章节的结构和内容，帮助理解它们的异同。
-        适用于比较不同类型、不同等级的相关规定。
+
+        使用场景：比较章节。
+        前置工具：get_chapter_structure（了解章节编号）。
 
         Args:
             reg_id: 规程标识
@@ -524,5 +503,37 @@ def create_mcp_server(
             return tools.compare_sections(reg_id, section_a, section_b, include_tables)
         except GridCodeError as e:
             return {"error": str(e)}
+
+    # ==================== 导航工具 ====================
+
+    @mcp.tool(meta=TOOL_METADATA["get_tool_guide"].to_dict())
+    def get_tool_guide(
+        category: str | None = None,
+        include_workflows: bool = True,
+    ) -> dict:
+        """[分类:导航] 获取 MCP 工具使用指南。
+
+        返回工具分类信息、推荐使用流程和使用提示，帮助理解和选择正确的工具。
+
+        使用场景：了解可用工具、获取使用指南。
+        后续工具：get_toc, list_regulations。
+
+        Args:
+            category: 过滤特定分类（可选）
+                - 'base': 基础工具
+                - 'multi-hop': 核心多跳
+                - 'context': 上下文
+                - 'discovery': 发现
+                - 'navigation': 导航
+            include_workflows: 是否包含工作流建议，默认 True
+
+        Returns:
+            工具指南信息，包含:
+            - categories: 分类列表及统计
+            - tools_by_category: 按分类组织的工具列表
+            - workflows: 常见工作流（可选）
+            - tips: 使用提示
+        """
+        return tools.get_tool_guide(category, include_workflows)
 
     return mcp

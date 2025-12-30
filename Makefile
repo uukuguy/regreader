@@ -5,7 +5,8 @@
 	toc read-pages chapter-structure page-info lookup-annotation search-tables resolve-reference \
 	search-annotations get-table get-block-context find-similar compare-sections \
 	build-table-registry table-registry-stats list-cross-page-tables build-table-index \
-	list-mcp search-mcp toc-mcp read-pages-mcp list-mcp-sse search-mcp-sse toc-mcp-sse read-pages-mcp-sse
+	list-mcp search-mcp toc-mcp read-pages-mcp list-mcp-sse search-mcp-sse toc-mcp-sse read-pages-mcp-sse \
+	mcp-tools mcp-tools-v mcp-tools-live mcp-verify mcp-verify-v mcp-verify-sse
 
 # Default target
 .DEFAULT_GOAL := help
@@ -422,3 +423,26 @@ toc-mcp-sse: ## Get TOC via MCP SSE
 
 read-pages-mcp-sse: ## Read pages via MCP SSE
 	$(MAKE) read-pages MODE=mcp-sse REG_ID="$(REG_ID)" START_PAGE="$(START_PAGE)" END_PAGE="$(END_PAGE)"
+
+#----------------------------------------------------------------------
+# MCP Service Verification
+#----------------------------------------------------------------------
+
+mcp-tools: ## List MCP tools (static metadata)
+	$(UV) run gridcode mcp-tools
+
+mcp-tools-v: ## List MCP tools with detailed info
+	$(UV) run gridcode mcp-tools -v
+
+mcp-tools-live: ## List MCP tools from live server (stdio)
+	$(UV) run gridcode mcp-tools --live
+
+mcp-verify: ## Verify MCP service completeness (stdio mode)
+	$(UV) run gridcode mcp-tools --live --verify
+
+mcp-verify-v: ## Verify MCP service with detailed output
+	$(UV) run gridcode mcp-tools --live --verify -v
+
+SSE_URL ?= http://localhost:8080/sse
+mcp-verify-sse: ## Verify MCP service via SSE (requires 'make serve' running)
+	$(UV) run gridcode mcp-tools --live --sse $(SSE_URL) --verify -v
