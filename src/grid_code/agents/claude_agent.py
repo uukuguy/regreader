@@ -1,7 +1,7 @@
 """Claude Agent SDK 实现
 
 使用 Claude Agent SDK 实现 GridCode Agent。
-https://platform.claude.com/docs/en/agent-sdk/overview
+https://github.com/anthropics/claude-agent-sdk-python
 """
 
 import sys
@@ -11,15 +11,24 @@ from loguru import logger
 
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
 from grid_code.agents.prompts import SYSTEM_PROMPT
+from grid_code.agents.session import SessionManager, SessionState
 from grid_code.config import get_settings
+from grid_code.mcp.tool_metadata import TOOL_METADATA
 
 # Claude Agent SDK imports
 try:
     from claude_agent_sdk import (
-        ClaudeAgentOptions,
-        ClaudeSDKClient,
         # Message types for isinstance checks
         AssistantMessage,
+        ClaudeAgentOptions,
+        ClaudeSDKClient,
+        # Error types
+        ClaudeSDKError,
+        CLIConnectionError,
+        CLIJSONDecodeError,
+        CLINotFoundError,
+        HookMatcher,
+        ProcessError,
         ResultMessage,
         # Content block types
         TextBlock,
@@ -33,6 +42,12 @@ except ImportError:
     ResultMessage = None  # type: ignore
     TextBlock = None  # type: ignore
     ToolUseBlock = None  # type: ignore
+    ClaudeSDKError = Exception  # type: ignore
+    CLINotFoundError = Exception  # type: ignore
+    CLIConnectionError = Exception  # type: ignore
+    ProcessError = Exception  # type: ignore
+    CLIJSONDecodeError = Exception  # type: ignore
+    HookMatcher = None  # type: ignore
     logger.warning("claude-agent-sdk not installed. Run: pip install claude-agent-sdk")
 
 
@@ -41,6 +56,12 @@ class ClaudeAgent(BaseGridCodeAgent):
 
     使用 Claude Agent SDK 的 ClaudeSDKClient 执行 agent loop，
     通过 MCP Server 连接 GridCode 工具。
+
+    特性:
+    - 动态注册全部 MCP 工具（16 个）
+    - 支持多会话管理
+    - 可选的 Hooks 审计机制
+    - 精细化的错误处理
 
     工具命名规则: mcp__{server_name}__{tool_name}
     例如: mcp__gridcode__get_toc, mcp__gridcode__smart_search
@@ -51,14 +72,15 @@ class ClaudeAgent(BaseGridCodeAgent):
         reg_id: str | None = None,
         model: str | None = None,
         api_key: str | None = None,
+        enable_hooks: bool = True,
     ):
-        """
-        初始化 Claude Agent
+        """初始化 Claude Agent
 
         Args:
             reg_id: 默认规程标识
             model: Claude 模型名称 (haiku, sonnet, opus)
             api_key: Anthropic API Key (通过环境变量 ANTHROPIC_API_KEY 设置)
+            enable_hooks: 是否启用 Hooks 审计（默认启用）
         """
         super().__init__(reg_id)
 
@@ -70,6 +92,7 @@ class ClaudeAgent(BaseGridCodeAgent):
 
         settings = get_settings()
         self._model = model or settings.default_model
+        self._enable_hooks = enable_hooks
 
         # SDK 使用环境变量 ANTHROPIC_API_KEY，此处仅验证
         api_key = api_key or settings.anthropic_api_key
@@ -79,14 +102,13 @@ class ClaudeAgent(BaseGridCodeAgent):
                 "请设置环境变量 ANTHROPIC_API_KEY"
             )
 
-        # 使用 ClaudeSDKClient 支持多轮对话
-        self._client: ClaudeSDKClient | None = None
-        self._session_id: str = "gridcode-session"
+        # 会话管理器
+        self._session_manager = SessionManager()
 
-        # Tool call records
-        self._tool_calls: list[dict] = []
-        self._sources: list[str] = []
-        self._assembled_text: str = ""
+        logger.info(
+            f"ClaudeAgent 初始化完成: model={self._model}, "
+            f"hooks={self._enable_hooks}, tools={len(TOOL_METADATA)}"
+        )
 
     @property
     def name(self) -> str:
@@ -113,18 +135,9 @@ class ClaudeAgent(BaseGridCodeAgent):
     def _get_allowed_tools(self) -> list[str]:
         """获取允许使用的工具列表
 
-        GridCode MCP Server 提供的工具:
-        - mcp__gridcode__get_toc: 获取目录
-        - mcp__gridcode__smart_search: 混合检索
-        - mcp__gridcode__read_page_range: 读取页面
-        - mcp__gridcode__list_regulations: 列出规程
+        动态从 TOOL_METADATA 生成，确保与 MCP Server 同步。
         """
-        return [
-            "mcp__gridcode__get_toc",
-            "mcp__gridcode__smart_search",
-            "mcp__gridcode__read_page_range",
-            "mcp__gridcode__list_regulations",
-        ]
+        return [f"mcp__gridcode__{name}" for name in TOOL_METADATA.keys()]
 
     def _build_system_prompt(self) -> str:
         """构建系统提示词
@@ -143,33 +156,67 @@ class ClaudeAgent(BaseGridCodeAgent):
 
         return base_prompt
 
-    def _build_options(self) -> ClaudeAgentOptions:
-        """构建 Agent 选项"""
-        return ClaudeAgentOptions(
-            system_prompt=self._build_system_prompt(),
-            mcp_servers=self._get_mcp_config(),
-            allowed_tools=self._get_allowed_tools(),
-            model=self._model,
-            max_turns=20,  # 允许多轮工具调用
-            permission_mode="bypassPermissions",  # 自动执行工具
+    def _build_hooks(self) -> dict[str, list[HookMatcher]] | None:
+        """构建 Hooks 配置
+
+        返回 PreToolUse 和 PostToolUse 的钩子列表。
+        """
+        if not self._enable_hooks or HookMatcher is None:
+            return None
+
+        # 延迟导入避免循环依赖
+        from grid_code.agents.hooks import (
+            post_tool_audit_hook,
+            pre_tool_audit_hook,
+            source_extraction_hook,
         )
 
-    async def chat(self, message: str) -> AgentResponse:
-        """
-        与 Agent 对话
+        return {
+            "PreToolUse": [
+                HookMatcher(hooks=[pre_tool_audit_hook]),
+            ],
+            "PostToolUse": [
+                HookMatcher(hooks=[post_tool_audit_hook, source_extraction_hook]),
+            ],
+        }
+
+    def _build_options(self) -> ClaudeAgentOptions:
+        """构建 Agent 选项"""
+        options_kwargs = {
+            "system_prompt": self._build_system_prompt(),
+            "mcp_servers": self._get_mcp_config(),
+            "allowed_tools": self._get_allowed_tools(),
+            "model": self._model,
+            "max_turns": 20,  # 允许多轮工具调用
+            "permission_mode": "bypassPermissions",  # 自动执行工具
+        }
+
+        # 添加 Hooks（如果启用）
+        hooks = self._build_hooks()
+        if hooks:
+            options_kwargs["hooks"] = hooks
+
+        return ClaudeAgentOptions(**options_kwargs)
+
+    async def chat(
+        self,
+        message: str,
+        session_id: str | None = None,
+    ) -> AgentResponse:
+        """与 Agent 对话
 
         使用 ClaudeSDKClient 作为上下文管理器，确保连接正确清理。
 
         Args:
             message: 用户消息
+            session_id: 会话 ID（可选，用于多会话隔离）
 
         Returns:
             AgentResponse
         """
-        # Reset per-query tracking
-        self._tool_calls = []
-        self._sources = []
-        self._assembled_text = ""
+        # 获取或创建会话
+        session = self._session_manager.get_or_create(session_id)
+        session.reset_per_query()
 
         final_result = ""
 
@@ -177,36 +224,82 @@ class ClaudeAgent(BaseGridCodeAgent):
             # 使用上下文管理器确保连接正确清理
             async with ClaudeSDKClient(options=self._build_options()) as client:
                 # 发送查询
-                await client.query(message, session_id=self._session_id)
+                await client.query(message, session_id=session.session_id)
 
                 # 接收响应
                 async for event in client.receive_response():
-                    self._process_event(event)
+                    self._process_event(event, session)
 
                     # 检查最终结果 (ResultMessage)
                     if ResultMessage is not None and isinstance(event, ResultMessage):
-                        final_result = event.result or self._assembled_text
+                        if event.result:
+                            final_result = event.result
+                        elif session.tool_calls:
+                            final_result = session.tool_calls[-1].get("output", "")
                         break
 
-                # 如果没有通过 ResultMessage 获取，使用组装的文本
+                # 如果没有通过 ResultMessage 获取，尝试从最后的消息中提取
                 if not final_result:
-                    final_result = self._assembled_text
+                    final_result = self._get_assembled_text(session)
+
+        except CLINotFoundError:
+            logger.error("Claude Code CLI 未安装")
+            return AgentResponse(
+                content="错误：Claude Code CLI 未安装。请确保 claude-agent-sdk 已正确安装。",
+                sources=[],
+                tool_calls=session.tool_calls,
+            )
+
+        except CLIConnectionError as e:
+            logger.error(f"连接 Claude Code 失败: {e}")
+            return AgentResponse(
+                content=f"连接失败：{str(e)}。请检查网络连接和 API Key 配置。",
+                sources=[],
+                tool_calls=session.tool_calls,
+            )
+
+        except ProcessError as e:
+            exit_code = getattr(e, "exit_code", -1)
+            stderr = getattr(e, "stderr", str(e))
+            logger.error(f"进程错误 (exit_code={exit_code}): {stderr}")
+            return AgentResponse(
+                content=f"执行失败 (代码 {exit_code}): {stderr or '未知错误'}",
+                sources=list(set(session.sources)),
+                tool_calls=session.tool_calls,
+            )
+
+        except CLIJSONDecodeError as e:
+            line = getattr(e, "line", str(e))
+            logger.error(f"JSON 解析失败: {line}")
+            return AgentResponse(
+                content="响应解析失败：服务返回了无效的 JSON 数据。",
+                sources=[],
+                tool_calls=session.tool_calls,
+            )
+
+        except ClaudeSDKError as e:
+            logger.error(f"Claude SDK 错误: {e}")
+            return AgentResponse(
+                content=f"SDK 错误: {str(e)}",
+                sources=list(set(session.sources)),
+                tool_calls=session.tool_calls,
+            )
 
         except Exception as e:
-            logger.error(f"Agent query failed: {e}")
+            logger.exception(f"未知错误: {e}")
             return AgentResponse(
                 content=f"查询失败: {str(e)}",
-                sources=[],
-                tool_calls=self._tool_calls,
+                sources=list(set(session.sources)),
+                tool_calls=session.tool_calls,
             )
 
         return AgentResponse(
             content=final_result,
-            sources=list(set(self._sources)),  # 去重
-            tool_calls=self._tool_calls,
+            sources=list(set(session.sources)),  # 去重
+            tool_calls=session.tool_calls,
         )
 
-    def _process_event(self, event: Any) -> None:
+    def _process_event(self, event: Any, session: SessionState) -> None:
         """处理 SDK 事件
 
         使用 isinstance() 检查事件类型，符合 SDK 最佳实践。
@@ -216,50 +309,101 @@ class ClaudeAgent(BaseGridCodeAgent):
             for block in event.content:
                 # TextBlock - 文本内容
                 if TextBlock is not None and isinstance(block, TextBlock):
-                    self._assembled_text += block.text
+                    # 文本内容不需要特殊处理，最终结果在 ResultMessage 中
+                    pass
 
                 # ToolUseBlock - 工具调用
                 elif ToolUseBlock is not None and isinstance(block, ToolUseBlock):
-                    tool_call = {
-                        "name": block.name,
-                        "input": block.input,
-                    }
-                    self._tool_calls.append(tool_call)
+                    session.add_tool_call(
+                        name=block.name,
+                        input_data=block.input,
+                    )
                     logger.debug(f"Tool call: {block.name}")
 
-        # 从工具结果中提取来源（通过 hasattr 因为 ToolResultBlock 结构可能变化）
+        # 从工具结果中提取来源
         if hasattr(event, "type") and getattr(event, "type", None) == "tool_result":
             content = getattr(event, "content", None)
             if content:
-                self._extract_sources(content)
+                self._extract_sources(content, session)
 
-    def _extract_sources(self, result: Any) -> None:
-        """从工具结果中提取来源信息"""
+        # 处理 content 属性（可能包含工具结果）
+        if hasattr(event, "content"):
+            content = getattr(event, "content", None)
+            if content and not isinstance(event, AssistantMessage):
+                self._extract_sources(content, session)
+
+    def _extract_sources(self, result: Any, session: SessionState) -> None:
+        """从工具结果中提取来源信息
+
+        支持多种结果格式：
+        - dict: 检查 source 字段
+        - list: 递归处理每个元素
+        - str: 尝试解析为 JSON
+        """
+        if result is None:
+            return
+
         if isinstance(result, dict):
-            if "source" in result:
-                self._sources.append(result["source"])
-            # 递归检查嵌套内容
-            for value in result.values():
-                self._extract_sources(value)
+            # 直接检查 source 字段
+            if "source" in result and result["source"]:
+                session.add_source(result["source"])
+
+            # 递归处理嵌套
+            for key, value in result.items():
+                if key != "source":
+                    self._extract_sources(value, session)
+
         elif isinstance(result, list):
             for item in result:
-                self._extract_sources(item)
+                self._extract_sources(item, session)
+
         elif isinstance(result, str):
-            # 尝试解析 JSON 字符串
+            # 尝试解析 JSON
             try:
                 import json
                 parsed = json.loads(result)
-                self._extract_sources(parsed)
+                self._extract_sources(parsed, session)
             except (json.JSONDecodeError, TypeError):
                 pass
 
-    async def reset(self):
+    def _get_assembled_text(self, session: SessionState) -> str:
+        """从工具调用结果中组装最终文本
+
+        如果没有明确的 ResultMessage，尝试从最后的工具输出中提取。
+        """
+        if not session.tool_calls:
+            return ""
+
+        # 查找最后一个有输出的工具调用
+        for tool_call in reversed(session.tool_calls):
+            output = tool_call.get("output")
+            if output:
+                if isinstance(output, dict):
+                    # 尝试获取 content_markdown 或 content
+                    return output.get("content_markdown", output.get("content", str(output)))
+                elif isinstance(output, str):
+                    return output
+
+        return ""
+
+    async def reset(self, session_id: str | None = None):
         """重置对话历史
 
-        由于使用上下文管理器，客户端连接会自动清理。
-        此方法仅重置内部状态。
+        Args:
+            session_id: 要重置的会话 ID，如果为 None 则重置默认会话
         """
-        self._tool_calls = []
-        self._sources = []
-        self._assembled_text = ""
-        logger.debug("Agent session reset")
+        self._session_manager.reset(session_id)
+        logger.debug(f"Session reset: {session_id or 'default'}")
+
+    async def reset_all(self):
+        """重置所有会话"""
+        self._session_manager.reset_all()
+        logger.debug("All sessions reset")
+
+    def get_sessions(self) -> list[str]:
+        """获取所有活跃会话 ID"""
+        return self._session_manager.get_all_sessions()
+
+    def get_session_info(self, session_id: str | None = None) -> dict | None:
+        """获取会话信息"""
+        return self._session_manager.get_session_info(session_id)

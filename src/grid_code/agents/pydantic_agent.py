@@ -3,7 +3,6 @@
 使用 Pydantic AI 框架实现 GridCode Agent，通过 MCP 协议调用工具。
 """
 
-import json
 from typing import Any
 
 from loguru import logger
