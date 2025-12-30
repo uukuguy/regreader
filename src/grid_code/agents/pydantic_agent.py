@@ -93,9 +93,20 @@ class PydanticAIAgent(BaseGridCodeAgent):
 
         settings = get_settings()
 
-        # 解析模型配置
-        self._model_name = self._resolve_model(model or settings.default_model)
-        logger.debug(f"Using model: {self._model_name}")
+        # 获取提供商和模型名称
+        provider = settings.get_llm_provider()
+        model_name = model or settings.llm_model_name
+
+        # 对于 Pydantic AI，统一使用 openai 兼容接口
+        # 因为大多数国产模型都提供 OpenAI 兼容接口
+        self._model_name = f"openai:{model_name}"
+        logger.debug(f"Using model: {self._model_name}, provider: {provider}")
+
+        # 设置环境变量（Pydantic AI 从环境变量读取）
+        import os
+
+        os.environ["OPENAI_API_KEY"] = settings.llm_api_key
+        os.environ["OPENAI_BASE_URL"] = settings.llm_base_url
 
         # 获取 MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
@@ -125,37 +136,6 @@ class PydanticAIAgent(BaseGridCodeAgent):
             f"PydanticAIAgent initialized: model={self._model_name}, "
             f"mcp_transport={self._mcp_manager.config.transport}"
         )
-
-    def _resolve_model(self, model: str) -> str:
-        """解析模型名称为 Pydantic AI 格式
-
-        Pydantic AI 使用 'provider:model' 格式：
-        - anthropic:claude-sonnet-4-20250514
-        - openai:gpt-4o
-        - google-gla:gemini-1.5-pro
-
-        Args:
-            model: 模型名称（可能带或不带 provider 前缀）
-
-        Returns:
-            标准化的模型名称
-        """
-        # 如果已经是 provider:model 格式，直接返回
-        if ":" in model:
-            return model
-
-        # 根据模型名称推断 provider
-        model_lower = model.lower()
-
-        if "claude" in model_lower or "sonnet" in model_lower or "opus" in model_lower or "haiku" in model_lower:
-            return f"anthropic:{model}"
-        elif "gpt" in model_lower or "o1" in model_lower or "o3" in model_lower:
-            return f"openai:{model}"
-        elif "gemini" in model_lower:
-            return f"google-gla:{model}"
-
-        # 默认使用 Anthropic
-        return f"anthropic:{model}"
 
     def _build_system_prompt(self) -> str:
         """构建系统提示词

@@ -25,6 +25,7 @@ dependencies = [
     "pydantic-ai>=1.0.0", # Pydantic AI v1.0+ with MCP toolsets
     "langgraph>=0.2.0", # LangGraph
     "langchain-anthropic>=0.3.0", # LangChain Anthropic
+    "langchain-openai>=0.2.0", # LangChain OpenAI
     # 向量嵌入
     "sentence-transformers>=3.3.0",
     "rapidocr-onnxruntime>=1.4.4",

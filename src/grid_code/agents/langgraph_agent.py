@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
+from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -91,18 +92,26 @@ class LangGraphAgent(BaseGridCodeAgent):
         super().__init__(reg_id)
 
         settings = get_settings()
-        self._model_name = model or settings.default_model
+        self._model_name = model or settings.llm_model_name
+        provider = settings.get_llm_provider()
 
-        api_key = settings.anthropic_api_key
-        if not api_key:
-            raise ValueError("未配置 Anthropic API Key")
-
-        # 创建 LLM
-        self._llm = ChatAnthropic(
-            model=self._model_name,
-            api_key=api_key,
-            max_tokens=4096,
-        )
+        # 根据提供商创建对应的 LLM
+        if provider == "anthropic":
+            self._llm = ChatAnthropic(
+                model=self._model_name,
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_base_url,
+                max_tokens=4096,
+            )
+        elif provider == "openai":
+            self._llm = ChatOpenAI(
+                model=self._model_name,
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_base_url,
+                max_tokens=4096,
+            )
+        else:
+            raise ValueError(f"Unsupported provider: {provider}")
 
         # MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)

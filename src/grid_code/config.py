@@ -79,20 +79,21 @@ class GridCodeSettings(BaseSettings):
         description="MCP SSE 服务器 URL（SSE 模式时使用，如 http://localhost:8080/sse）",
     )
 
-    # LLM API 配置
-    anthropic_api_key: str | None = Field(
-        default=None,
-        description="Anthropic API Key",
-        validation_alias=AliasChoices("ANTHROPIC_API_KEY", "GRIDCODE_ANTHROPIC_API_KEY"),
+    # LLM 统一配置入口
+    llm_base_url: str = Field(
+        default="https://api.anthropic.com",
+        description="LLM API 端点",
+        validation_alias=AliasChoices("OPENAI_BASE_URL", "LLM_BASE_URL"),
     )
-    openai_api_key: str | None = Field(
-        default=None,
-        description="OpenAI API Key（用于 GPT 模型）",
-        validation_alias=AliasChoices("OPENAI_API_KEY", "GRIDCODE_OPENAI_API_KEY"),
+    llm_api_key: str = Field(
+        default="",
+        description="LLM API 密钥",
+        validation_alias=AliasChoices("OPENAI_API_KEY", "LLM_API_KEY"),
     )
-    default_model: str = Field(
+    llm_model_name: str = Field(
         default="claude-sonnet-4-20250514",
-        description="默认使用的 LLM 模型",
+        description="LLM 模型名称（如 claude-sonnet-4-20250514, gpt-4o, gemini-pro）",
+        validation_alias=AliasChoices("OPENAI_MODEL_NAME", "LLM_MODEL_NAME"),
     )
 
     # 索引后端配置
@@ -173,6 +174,27 @@ class GridCodeSettings(BaseSettings):
     def table_lancedb_path(self) -> Path:
         """表格 LanceDB 数据库完整路径"""
         return self.index_dir / self.table_lancedb_name
+
+    def get_llm_provider(self) -> str:
+        """根据模型名称推断 LLM 提供商
+
+        Returns:
+            提供商名称: anthropic, openai, google
+        """
+        model = self.llm_model_name.lower()
+        # Anthropic Claude
+        if "claude" in model or "sonnet" in model or "opus" in model or "haiku" in model:
+            return "anthropic"
+        # OpenAI
+        elif "gpt" in model or "o1" in model or "o3" in model:
+            return "openai"
+        # Google Gemini
+        elif "gemini" in model:
+            return "google"
+        # 国产模型（使用 OpenAI 兼容接口）
+        elif "glm" in model or "deepseek" in model or "qwen" in model or "yi" in model:
+            return "openai"
+        return "openai"  # 默认使用 OpenAI 兼容接口
 
 
 # 全局配置实例（延迟初始化）

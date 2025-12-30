@@ -94,15 +94,22 @@ class ClaudeAgent(BaseGridCodeAgent):
             )
 
         settings = get_settings()
-        self._model = model or settings.default_model
+        self._model = model or settings.llm_model_name
         self._enable_hooks = enable_hooks
 
-        # SDK 使用环境变量 ANTHROPIC_API_KEY，此处仅验证
-        api_key = api_key or settings.anthropic_api_key
+        # 设置环境变量让 Claude SDK 读取
+        import os
+
+        os.environ["ANTHROPIC_API_KEY"] = settings.llm_api_key
+        if settings.llm_base_url and settings.llm_base_url != "https://api.anthropic.com":
+            # 如果有自定义端点，设置 ANTHROPIC_BASE_URL
+            os.environ["ANTHROPIC_BASE_URL"] = settings.llm_base_url
+
+        api_key = settings.llm_api_key
         if not api_key:
             raise ValueError(
-                "未配置 Anthropic API Key。"
-                "请设置环境变量 ANTHROPIC_API_KEY"
+                "未配置 LLM API Key。"
+                "请设置环境变量 OPENAI_API_KEY"
             )
 
         # 会话管理器
