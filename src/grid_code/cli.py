@@ -376,18 +376,25 @@ def chat(
     ),
 ):
     """与 Agent 对话（交互模式）"""
+    from grid_code.agents.mcp_connection import MCPConnectionConfig
 
     async def run_chat():
+        # 构建 MCP 配置（从全局状态）
+        if state.mcp_transport == "sse" and state.mcp_url:
+            mcp_config = MCPConnectionConfig.sse(state.mcp_url)
+        else:
+            mcp_config = MCPConnectionConfig.stdio()
+
         # 创建 Agent
         if agent_type == AgentType.claude:
             from grid_code.agents import ClaudeAgent
-            agent = ClaudeAgent(reg_id=reg_id)
+            agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config)
         elif agent_type == AgentType.pydantic:
             from grid_code.agents import PydanticAIAgent
-            agent = PydanticAIAgent(reg_id=reg_id)
+            agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config)
         else:
             from grid_code.agents import LangGraphAgent
-            agent = LangGraphAgent(reg_id=reg_id)
+            agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config)
 
         console.print(f"[bold]GridCode Agent ({agent.name})[/bold]")
         console.print("输入问题进行对话，输入 'exit' 退出\n")

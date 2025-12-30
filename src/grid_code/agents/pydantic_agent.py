@@ -16,7 +16,7 @@ from typing import Any
 from loguru import logger
 
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
-from grid_code.agents.mcp_config import MCP_SERVER_ARGS, get_mcp_command
+from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.prompts import SYSTEM_PROMPT
 from grid_code.config import get_settings
 
@@ -72,6 +72,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
         self,
         reg_id: str | None = None,
         model: str | None = None,
+        mcp_config: MCPConnectionConfig | None = None,
     ):
         """初始化 Pydantic AI Agent
 
@@ -80,6 +81,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
             model: 模型名称，格式为 'provider:model'
                    如 'anthropic:claude-sonnet-4-20250514'
                    默认使用配置文件中的 default_model
+            mcp_config: MCP 连接配置（可选，默认从全局配置创建）
         """
         super().__init__(reg_id)
 
@@ -95,11 +97,11 @@ class PydanticAIAgent(BaseGridCodeAgent):
         self._model_name = self._resolve_model(model or settings.default_model)
         logger.debug(f"Using model: {self._model_name}")
 
-        # 创建 MCP Server 连接（stdio 模式）
-        self._mcp_server = MCPServerStdio(
-            get_mcp_command(),
-            args=MCP_SERVER_ARGS,
-        )
+        # 获取 MCP 连接管理器
+        self._mcp_manager = get_mcp_manager(mcp_config)
+
+        # 创建 MCP Server 连接（支持 stdio 和 SSE 模式）
+        self._mcp_server = self._mcp_manager.get_pydantic_mcp_server()
 
         # 创建 Agent（带 MCP toolsets）
         self._agent = Agent(
@@ -119,7 +121,10 @@ class PydanticAIAgent(BaseGridCodeAgent):
         # 连接状态
         self._connected = False
 
-        logger.info(f"PydanticAIAgent initialized: model={self._model_name}")
+        logger.info(
+            f"PydanticAIAgent initialized: model={self._model_name}, "
+            f"mcp_transport={self._mcp_manager.config.transport}"
+        )
 
     def _resolve_model(self, model: str) -> str:
         """解析模型名称为 Pydantic AI 格式

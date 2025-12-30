@@ -1,5 +1,203 @@
 # GridCode 开发工作日志 (dev 分支)
 
+## 2025-12-30 Agent MCP 架构重构
+
+### 会话概述
+
+重构了三个 Agent 框架的 MCP 连接管理，实现统一的 `MCPConnectionConfig` 和 `MCPConnectionManager` 机制，支持 stdio（子进程）和 SSE（共享服务）两种传输方式，解决了原有架构中各 Agent 独立创建 MCP 连接的资源浪费问题。
+
+### 背景问题
+
+用户提出三个架构问题：
+1. 3个Agent和客户端是什么关系？
+2. 为什么在CLI中调用agent循环，但各自还要创建MCP server？
+3. Agent设计是否与grid-code的整体架构适配？
+
+分析后发现原有设计的问题：
+- 三个 Agent 各自独立创建 MCP 连接配置
+- 无法在运行时切换传输模式
+- CLI 全局 MCP 配置无法传递给 Agent
+
+### 完成的工作
+
+#### 1. 核心模块 (新建)
+
+创建 `src/grid_code/agents/mcp_connection.py`：
+
+**MCPConnectionConfig** - MCP 连接配置类
+```python
+@dataclass
+class MCPConnectionConfig:
+    transport: Literal["stdio", "sse"] = "stdio"
+    server_url: str | None = None
+    server_name: str = MCP_SERVER_NAME
+
+    @classmethod
+    def from_settings(cls) -> MCPConnectionConfig:
+        """从全局配置创建"""
+
+    @classmethod
+    def stdio(cls) -> MCPConnectionConfig:
+        """创建 stdio 模式配置"""
+
+    @classmethod
+    def sse(cls, server_url: str | None = None) -> MCPConnectionConfig:
+        """创建 SSE 模式配置"""
+```
+
+**MCPConnectionManager** - MCP 连接管理器（单例模式）
+```python
+class MCPConnectionManager:
+    def get_claude_sdk_config(self) -> dict[str, Any]:
+        """获取 Claude Agent SDK 格式的 MCP 配置"""
+
+    def get_pydantic_mcp_server(self):
+        """获取 Pydantic AI 的 MCP Server 对象"""
+
+    def get_langgraph_client(self) -> GridCodeMCPClient:
+        """获取 LangGraph 使用的 MCP 客户端"""
+```
+
+**便捷函数**
+```python
+def get_mcp_manager(config: MCPConnectionConfig | None = None) -> MCPConnectionManager
+def configure_mcp(transport: Literal["stdio", "sse"] = "stdio", server_url: str | None = None) -> None
+```
+
+#### 2. Agent 改造
+
+为三个 Agent 添加 `mcp_config` 参数：
+
+**ClaudeAgent** (`src/grid_code/agents/claude_agent.py`)
+- 添加 `mcp_config: MCPConnectionConfig | None = None` 参数
+- 使用 `self._mcp_manager.get_claude_sdk_config()` 获取配置
+- SSE 模式自动回退到 stdio（Claude SDK 限制）
+
+**PydanticAIAgent** (`src/grid_code/agents/pydantic_agent.py`)
+- 添加 `mcp_config: MCPConnectionConfig | None = None` 参数
+- 使用 `self._mcp_manager.get_pydantic_mcp_server()` 获取 MCP Server
+- 支持 stdio 和 SSE 两种模式
+
+**LangGraphAgent** (`src/grid_code/agents/langgraph_agent.py`)
+- 添加 `mcp_config: MCPConnectionConfig | None = None` 参数
+- 使用 `self._mcp_manager.get_langgraph_client()` 获取 MCP Client
+- 完整支持 stdio 和 SSE 两种模式
+
+#### 3. CLI 集成
+
+修改 `src/grid_code/cli.py` 的 `chat` 命令：
+```python
+# 构建 MCP 配置（从全局状态）
+if state.mcp_transport == "sse" and state.mcp_url:
+    mcp_config = MCPConnectionConfig.sse(state.mcp_url)
+else:
+    mcp_config = MCPConnectionConfig.stdio()
+
+# 传递给 Agent
+agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config)
+```
+
+#### 4. 模块导出
+
+更新 `src/grid_code/agents/__init__.py`：
+```python
+from .mcp_connection import MCPConnectionConfig, MCPConnectionManager, configure_mcp, get_mcp_manager
+
+__all__ = [
+    # ... existing exports ...
+    # MCP Connection
+    "MCPConnectionConfig",
+    "MCPConnectionManager",
+    "configure_mcp",
+    "get_mcp_manager",
+]
+```
+
+### 修改的文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `src/grid_code/agents/mcp_connection.py` | 新建 - MCPConnectionConfig + MCPConnectionManager |
+| `src/grid_code/agents/claude_agent.py` | 添加 mcp_config 参数，使用统一管理器 |
+| `src/grid_code/agents/pydantic_agent.py` | 添加 mcp_config 参数，使用统一管理器 |
+| `src/grid_code/agents/langgraph_agent.py` | 添加 mcp_config 参数，使用统一管理器 |
+| `src/grid_code/agents/__init__.py` | 导出新的 MCP 连接管理类 |
+| `src/grid_code/cli.py` | chat 命令传递 MCP 配置 |
+| `tests/dev/test_mcp_connection.py` | 新建 - 13 个单元测试 |
+
+### 测试结果
+
+```
+tests/dev/test_mcp_connection.py - 13 passed
+```
+
+测试覆盖：
+- ✅ MCPConnectionConfig 默认配置
+- ✅ stdio/sse 工厂方法
+- ✅ 单例模式
+- ✅ 配置覆盖
+- ✅ Claude SDK 配置获取（含 SSE 回退）
+- ✅ LangGraph 客户端获取
+- ✅ configure_mcp 便捷函数
+
+### 使用示例
+
+```python
+# 方式1: 使用默认配置（stdio）
+agent = ClaudeAgent(reg_id="angui_2024")
+
+# 方式2: 显式指定 stdio 配置
+from grid_code.agents import MCPConnectionConfig
+config = MCPConnectionConfig.stdio()
+agent = ClaudeAgent(reg_id="angui_2024", mcp_config=config)
+
+# 方式3: 使用 SSE 配置
+config = MCPConnectionConfig.sse("http://localhost:8080/sse")
+agent = LangGraphAgent(reg_id="angui_2024", mcp_config=config)
+
+# 方式4: 全局配置
+from grid_code.agents import configure_mcp
+configure_mcp(transport="sse", server_url="http://localhost:8080/sse")
+agent = PydanticAIAgent(reg_id="angui_2024")  # 自动使用 SSE
+```
+
+### 架构关系说明
+
+```
+CLI (gridcode chat)
+    │
+    ├─→ MCPConnectionConfig.sse() / .stdio()
+    │
+    └─→ Agent.__init__(mcp_config=...)
+            │
+            └─→ MCPConnectionManager (单例)
+                    │
+                    ├─→ get_claude_sdk_config()    → Claude SDK
+                    ├─→ get_pydantic_mcp_server()  → Pydantic AI
+                    └─→ get_langgraph_client()     → LangGraph
+                            │
+                            └─→ GridCodeMCPClient
+                                    │
+                                    └─→ MCP Server (stdio/sse)
+                                            │
+                                            └─→ PageStore
+```
+
+### 设计决策
+
+1. **单例模式**：MCPConnectionManager 使用单例确保全局配置一致性
+2. **框架适配**：每个框架使用独立的适配方法，保持原生特性
+3. **SSE 回退**：Claude SDK 不支持 SSE 时自动回退到 stdio，并记录警告
+4. **向后兼容**：不传 mcp_config 时使用默认 stdio 配置
+
+### 后续建议
+
+1. 考虑添加连接池复用机制（多 Agent 共享连接）
+2. 监控 MCP 连接状态，实现自动重连
+3. 添加 MCP 调用超时配置
+
+---
+
 ## 2025-12-30 MCP 模式支持与 Makefile 更新
 
 ### 会话概述

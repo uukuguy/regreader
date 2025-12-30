@@ -9,7 +9,8 @@ from typing import Any
 from loguru import logger
 
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
-from grid_code.agents.mcp_config import MCP_SERVER_ARGS, get_mcp_command, get_mcp_stdio_config, get_tool_name
+from grid_code.agents.mcp_config import get_tool_name
+from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.prompts import SYSTEM_PROMPT
 from grid_code.agents.session import SessionManager, SessionState
 from grid_code.config import get_settings
@@ -73,6 +74,7 @@ class ClaudeAgent(BaseGridCodeAgent):
         model: str | None = None,
         api_key: str | None = None,
         enable_hooks: bool = True,
+        mcp_config: MCPConnectionConfig | None = None,
     ):
         """初始化 Claude Agent
 
@@ -81,6 +83,7 @@ class ClaudeAgent(BaseGridCodeAgent):
             model: Claude 模型名称 (haiku, sonnet, opus)
             api_key: Anthropic API Key (通过环境变量 ANTHROPIC_API_KEY 设置)
             enable_hooks: 是否启用 Hooks 审计（默认启用）
+            mcp_config: MCP 连接配置（可选，默认从全局配置创建）
         """
         super().__init__(reg_id)
 
@@ -105,9 +108,13 @@ class ClaudeAgent(BaseGridCodeAgent):
         # 会话管理器
         self._session_manager = SessionManager()
 
+        # MCP 连接管理器
+        self._mcp_manager = get_mcp_manager(mcp_config)
+
         logger.info(
             f"ClaudeAgent 初始化完成: model={self._model}, "
-            f"hooks={self._enable_hooks}, tools={len(TOOL_METADATA)}"
+            f"hooks={self._enable_hooks}, tools={len(TOOL_METADATA)}, "
+            f"mcp_transport={self._mcp_manager.config.transport}"
         )
 
     @property
@@ -121,10 +128,11 @@ class ClaudeAgent(BaseGridCodeAgent):
     def _get_mcp_config(self) -> dict[str, Any]:
         """获取 MCP 服务器配置
 
-        GridCode MCP Server 通过 stdio 模式运行。
+        通过统一的 MCPConnectionManager 获取配置。
+        支持 stdio 和 SSE 两种传输方式。
         工具将以 mcp__gridcode__<tool_name> 格式暴露。
         """
-        return get_mcp_stdio_config()
+        return self._mcp_manager.get_claude_sdk_config()
 
     def _get_allowed_tools(self) -> list[str]:
         """获取允许使用的工具列表

@@ -27,6 +27,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
+from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.prompts import SYSTEM_PROMPT
 from grid_code.config import get_settings
 from grid_code.mcp import GridCodeMCPClient
@@ -76,12 +77,14 @@ class LangGraphAgent(BaseGridCodeAgent):
         self,
         reg_id: str | None = None,
         model: str | None = None,
+        mcp_config: MCPConnectionConfig | None = None,
     ):
         """初始化 LangGraph Agent
 
         Args:
             reg_id: 默认规程标识
             model: Claude 模型名称
+            mcp_config: MCP 连接配置（可选，默认从全局配置创建）
         """
         super().__init__(reg_id)
 
@@ -99,6 +102,9 @@ class LangGraphAgent(BaseGridCodeAgent):
             max_tokens=4096,
         )
 
+        # MCP 连接管理器
+        self._mcp_manager = get_mcp_manager(mcp_config)
+
         # MCP 客户端（延迟初始化）
         self._mcp_client: GridCodeMCPClient | None = None
         self._langchain_tools: list[StructuredTool] = []
@@ -114,7 +120,10 @@ class LangGraphAgent(BaseGridCodeAgent):
         self._tool_calls: list[dict] = []
         self._sources: list[str] = []
 
-        logger.info(f"LangGraphAgent initialized: model={self._model_name}")
+        logger.info(
+            f"LangGraphAgent initialized: model={self._model_name}, "
+            f"mcp_transport={self._mcp_manager.config.transport}"
+        )
 
     def _generate_thread_id(self) -> str:
         """生成新的会话 ID"""
@@ -148,7 +157,8 @@ class LangGraphAgent(BaseGridCodeAgent):
     async def _ensure_mcp_connected(self) -> None:
         """确保 MCP 客户端已连接并构建工具"""
         if self._mcp_client is None:
-            self._mcp_client = GridCodeMCPClient()
+            # 通过统一管理器获取 MCP 客户端
+            self._mcp_client = self._mcp_manager.get_langgraph_client()
             await self._mcp_client.connect()
 
             # 将 MCP 工具转换为 LangChain StructuredTool
@@ -158,7 +168,8 @@ class LangGraphAgent(BaseGridCodeAgent):
             self._build_graph()
 
             logger.debug(
-                f"MCP connected, tools: {[t.name for t in self._langchain_tools]}"
+                f"MCP connected ({self._mcp_manager.config.transport}), "
+                f"tools: {[t.name for t in self._langchain_tools]}"
             )
 
     def _convert_mcp_tools(self) -> list[StructuredTool]:
