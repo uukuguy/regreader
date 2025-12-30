@@ -6,7 +6,7 @@
 import os
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -83,10 +83,12 @@ class GridCodeSettings(BaseSettings):
     anthropic_api_key: str | None = Field(
         default=None,
         description="Anthropic API Key",
+        validation_alias=AliasChoices("ANTHROPIC_API_KEY", "GRIDCODE_ANTHROPIC_API_KEY"),
     )
     openai_api_key: str | None = Field(
         default=None,
         description="OpenAI API Key（用于 GPT 模型）",
+        validation_alias=AliasChoices("OPENAI_API_KEY", "GRIDCODE_OPENAI_API_KEY"),
     )
     default_model: str = Field(
         default="claude-sonnet-4-20250514",
