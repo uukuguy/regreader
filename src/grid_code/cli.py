@@ -432,6 +432,72 @@ def chat(
 
 
 @app.command()
+def ask(
+    query: str = typer.Argument(..., help="查询问题"),
+    reg_id: str = typer.Option(None, "--reg-id", "-r", help="限定规程"),
+    agent_type: AgentType = typer.Option(
+        AgentType.claude, "--agent", "-a", help="Agent 类型"
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="JSON 格式输出"),
+):
+    """单次查询 Agent（非交互模式）
+
+    示例:
+        gridcode ask "母线失压如何处理?" -r angui_2024
+        gridcode ask "什么是安规?" --agent pydantic --json
+    """
+    from grid_code.agents.mcp_connection import MCPConnectionConfig
+
+    async def run_ask():
+        # 构建 MCP 配置
+        if state.mcp_transport == "sse" and state.mcp_url:
+            mcp_config = MCPConnectionConfig.sse(state.mcp_url)
+        else:
+            mcp_config = MCPConnectionConfig.stdio()
+
+        # 创建 Agent
+        if agent_type == AgentType.claude:
+            from grid_code.agents import ClaudeAgent
+            agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config)
+        elif agent_type == AgentType.pydantic:
+            from grid_code.agents import PydanticAIAgent
+            agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config)
+        else:
+            from grid_code.agents import LangGraphAgent
+            agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config)
+
+        try:
+            if not json_output:
+                with console.status("思考中..."):
+                    response = await agent.chat(query)
+
+                console.print(response.content)
+
+                if response.sources:
+                    console.print(f"\n[dim]来源: {', '.join(response.sources)}[/dim]")
+            else:
+                import json
+
+                response = await agent.chat(query)
+                result = {
+                    "query": query,
+                    "agent": agent.name,
+                    "content": response.content,
+                    "sources": response.sources,
+                    "tool_calls": [
+                        {"name": tc.get("name"), "input": tc.get("input")}
+                        for tc in response.tool_calls
+                    ] if response.tool_calls else [],
+                }
+                console.print(json.dumps(result, ensure_ascii=False, indent=2))
+        finally:
+            if hasattr(agent, "close"):
+                await agent.close()
+
+    asyncio.run(run_ask())
+
+
+@app.command()
 def delete(
     reg_id: str = typer.Argument(..., help="要删除的规程标识"),
     force: bool = typer.Option(False, "--force", "-f", help="跳过确认"),

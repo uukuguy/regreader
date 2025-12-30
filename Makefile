@@ -1,11 +1,13 @@
 # GridCode Makefile
 # Power Grid Regulations Intelligent Retrieval Agent
 
-.PHONY: help install install-dev install-all test test-heading lint format check serve serve-stdio chat build clean reindex read-chapter \
+.PHONY: help install install-dev install-all test test-mcp test-heading lint format check serve serve-stdio chat build clean reindex read-chapter \
+	ask ask-json ask-claude ask-pydantic ask-langgraph \
 	toc read-pages chapter-structure page-info lookup-annotation search-tables resolve-reference \
 	search-annotations get-table get-block-context find-similar compare-sections \
 	build-table-registry table-registry-stats list-cross-page-tables build-table-index \
 	list-mcp search-mcp toc-mcp read-pages-mcp list-mcp-sse search-mcp-sse toc-mcp-sse read-pages-mcp-sse \
+	chat-mcp-sse chat-claude-sse chat-pydantic-sse chat-langgraph-sse \
 	mcp-tools mcp-tools-v mcp-tools-live mcp-verify mcp-verify-v mcp-verify-sse
 
 # Default target
@@ -51,7 +53,9 @@ help: ## Show this help message
 	@echo "  make install-dev              # Install with dev dependencies"
 	@echo "  make test                     # Run all tests"
 	@echo "  make serve                    # Start MCP server (SSE mode)"
-	@echo "  make chat REG_ID=angui        # Start chat with specific regulation"
+	@echo "  make chat REG_ID=angui        # Start interactive chat"
+	@echo "  make ask ASK_QUERY=\"母线失压如何处理?\"  # Single query (non-interactive)"
+	@echo "  make ask-json ASK_QUERY=\"...\" # Single query with JSON output"
 	@echo ""
 	@echo "$(GREEN)MCP Tools Testing:$(NC)"
 	@echo "  make toc                      # Get regulation TOC"
@@ -70,6 +74,8 @@ help: ## Show this help message
 	@echo ""
 	@echo "  make list MODE=mcp-stdio      # List via MCP stdio"
 	@echo "  make search MODE=mcp-sse QUERY=\"母线失压\"  # Search via MCP SSE"
+	@echo "  make chat MODE=mcp-sse AGENT=claude      # Chat via MCP SSE"
+	@echo "  make chat-claude-sse          # Chat with Claude Agent via SSE"
 
 #----------------------------------------------------------------------
 # Installation
@@ -124,6 +130,9 @@ test-cov: ## Run tests with coverage report
 test-fast: ## Run tests without slow markers
 	$(UV) run $(PYTEST) tests/ -v -m "not slow"
 
+test-mcp: ## Run MCP connection tests
+	$(UV) run $(PYTEST) tests/dev/test_mcp_connection.py -xvs
+
 test-heading: ## Run heading detection tests
 	$(UV) run $(PYTHON) tests/test_heading_detection.py
 
@@ -148,17 +157,34 @@ serve-port: ## Start MCP server on custom port (usage: make serve-port PORT=9000
 REG_ID ?= angui_2024
 AGENT ?= claude
 
-chat: ## Start interactive chat (usage: make chat REG_ID=angui AGENT=claude)
-	$(UV) run gridcode chat --reg-id $(REG_ID) --agent $(AGENT)
+chat: ## Start interactive chat (usage: make chat REG_ID=angui AGENT=claude MODE=mcp-sse)
+	$(UV) run gridcode chat --reg-id $(REG_ID) --agent $(AGENT) $(MCP_FLAGS)
 
 chat-claude: ## Start chat with Claude Agent SDK
-	$(UV) run gridcode chat --reg-id $(REG_ID) --agent claude
+	$(UV) run gridcode chat --reg-id $(REG_ID) --agent claude $(MCP_FLAGS)
 
 chat-pydantic: ## Start chat with Pydantic AI Agent
-	$(UV) run gridcode chat --reg-id $(REG_ID) --agent pydantic
+	$(UV) run gridcode chat --reg-id $(REG_ID) --agent pydantic $(MCP_FLAGS)
 
 chat-langgraph: ## Start chat with LangGraph Agent
-	$(UV) run gridcode chat --reg-id $(REG_ID) --agent langgraph
+	$(UV) run gridcode chat --reg-id $(REG_ID) --agent langgraph $(MCP_FLAGS)
+
+# Single query execution (non-interactive)
+ASK_QUERY ?= 母线失压如何处理
+ask: ## Single query to Agent (usage: make ask ASK_QUERY="母线失压如何处理?" AGENT=claude)
+	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT) $(MCP_FLAGS)
+
+ask-json: ## Single query with JSON output
+	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT) --json $(MCP_FLAGS)
+
+ask-claude: ## Single query with Claude Agent
+	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude $(MCP_FLAGS)
+
+ask-pydantic: ## Single query with Pydantic AI Agent
+	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic $(MCP_FLAGS)
+
+ask-langgraph: ## Single query with LangGraph Agent
+	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph $(MCP_FLAGS)
 
 list: ## List all ingested regulations
 	$(UV) run gridcode $(MCP_FLAGS) list
@@ -423,6 +449,19 @@ toc-mcp-sse: ## Get TOC via MCP SSE
 
 read-pages-mcp-sse: ## Read pages via MCP SSE
 	$(MAKE) read-pages MODE=mcp-sse REG_ID="$(REG_ID)" START_PAGE="$(START_PAGE)" END_PAGE="$(END_PAGE)"
+
+# Shortcut targets for chat with MCP SSE mode (requires 'make serve' running)
+chat-mcp-sse: ## Chat via MCP SSE (usage: make chat-mcp-sse AGENT=claude)
+	$(MAKE) chat MODE=mcp-sse AGENT="$(AGENT)" REG_ID="$(REG_ID)"
+
+chat-claude-sse: ## Chat with Claude Agent via MCP SSE
+	$(MAKE) chat-claude MODE=mcp-sse REG_ID="$(REG_ID)"
+
+chat-pydantic-sse: ## Chat with Pydantic AI Agent via MCP SSE
+	$(MAKE) chat-pydantic MODE=mcp-sse REG_ID="$(REG_ID)"
+
+chat-langgraph-sse: ## Chat with LangGraph Agent via MCP SSE
+	$(MAKE) chat-langgraph MODE=mcp-sse REG_ID="$(REG_ID)"
 
 #----------------------------------------------------------------------
 # MCP Service Verification
