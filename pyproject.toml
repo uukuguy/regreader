@@ -22,7 +22,7 @@ dependencies = [
     # Agent 框架
     "anthropic>=0.52.0", # Anthropic API (for other agents)
     "claude-agent-sdk>=0.1.0", # Claude Agent SDK (https://platform.claude.com/docs/en/agent-sdk)
-    "pydantic-ai>=0.0.17", # Pydantic AI
+    "pydantic-ai>=1.0.0", # Pydantic AI v1.0+ with MCP toolsets
     "langgraph>=0.2.0", # LangGraph
     "langchain-anthropic>=0.3.0", # LangChain Anthropic
     # 向量嵌入
