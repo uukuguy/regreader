@@ -170,7 +170,7 @@ chat-langgraph: ## Start chat with LangGraph Agent
 	$(UV) run gridcode chat --reg-id $(REG_ID) --agent langgraph $(MCP_FLAGS)
 
 # Single query execution (non-interactive)
-ASK_QUERY ?= 母线失压如何处理
+ASK_QUERY ?= 锦酉电厂安控装置的具体配置
 ask: ## Single query to Agent (usage: make ask ASK_QUERY="母线失压如何处理?" AGENT=claude)
 	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT) $(MCP_FLAGS)
 

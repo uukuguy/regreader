@@ -14,7 +14,7 @@
 
 import json
 import uuid
-from typing import Annotated, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -30,7 +30,9 @@ from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.prompts import SYSTEM_PROMPT
 from grid_code.config import get_settings
-from grid_code.mcp import GridCodeMCPClient
+
+if TYPE_CHECKING:
+    from grid_code.mcp import GridCodeMCPClient
 
 
 class AgentState(TypedDict):

@@ -184,10 +184,18 @@ class ClaudeAgent(BaseGridCodeAgent):
 
     def _build_options(self) -> ClaudeAgentOptions:
         """构建 Agent 选项"""
+        # 禁用内置的 computer use 工具，强制使用 MCP 工具
+        disallowed = [
+            "Bash", "Read", "Write", "Edit", "Glob", "Grep",
+            "LS", "MultiEdit", "NotebookEdit", "NotebookRead",
+            "TodoRead", "TodoWrite", "WebFetch", "WebSearch",
+        ]
+
         options_kwargs = {
             "system_prompt": self._build_system_prompt(),
             "mcp_servers": self._get_mcp_config(),
             "allowed_tools": self._get_allowed_tools(),
+            "disallowed_tools": disallowed,
             "model": self._model,
             "max_turns": 20,  # 允许多轮工具调用
             "permission_mode": "bypassPermissions",  # 自动执行工具
