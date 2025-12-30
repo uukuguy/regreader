@@ -1,15 +1,58 @@
 """GridCode CLI 入口
 
 提供命令行操作接口。
+支持本地直接访问和 MCP 远程调用两种模式。
 """
 
 import asyncio
 from enum import Enum
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from rich.console import Console
 from rich.table import Table
+
+
+# ==================== 全局状态 ====================
+
+
+class CLIState:
+    """CLI 全局状态
+
+    存储 MCP 模式相关的全局配置。
+    """
+
+    use_mcp: bool = False
+    mcp_transport: str = "stdio"
+    mcp_url: str | None = None
+
+
+state = CLIState()
+
+
+# ==================== 工具辅助函数 ====================
+
+
+def get_tools():
+    """获取工具实例（根据全局状态）
+
+    根据 --mcp 选项决定使用本地直接访问还是 MCP 远程调用。
+
+    Returns:
+        GridCodeTools 或 GridCodeMCPToolsAdapter 实例
+    """
+    from grid_code.mcp.factory import create_tools
+
+    return create_tools(
+        use_mcp=state.use_mcp,
+        transport=state.mcp_transport if state.use_mcp else None,
+        server_url=state.mcp_url,
+    )
+
+
+# ==================== CLI 应用 ====================
+
 
 app = typer.Typer(
     name="gridcode",
@@ -17,6 +60,56 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+
+@app.callback()
+def main(
+    mcp: Annotated[
+        bool,
+        typer.Option(
+            "--mcp",
+            help="使用 MCP 模式访问数据（通过 MCP Server）",
+            envvar="GRIDCODE_USE_MCP",
+        ),
+    ] = False,
+    mcp_transport: Annotated[
+        str,
+        typer.Option(
+            "--mcp-transport",
+            help="MCP 传输方式: stdio（自动启动子进程）, sse（连接外部服务）",
+            envvar="GRIDCODE_MCP_TRANSPORT",
+        ),
+    ] = "stdio",
+    mcp_url: Annotated[
+        str | None,
+        typer.Option(
+            "--mcp-url",
+            help="MCP SSE 服务器 URL（SSE 模式使用，如 http://localhost:8080/sse）",
+            envvar="GRIDCODE_MCP_SERVER_URL",
+        ),
+    ] = None,
+):
+    """GridCode CLI - 电力系统安规智能检索 Agent
+
+    使用 --mcp 标志启用 MCP 模式，通过 MCP Server 访问数据。
+
+    示例:
+        # 默认模式（本地直接访问）
+        gridcode search "母线失压" -r angui_2024
+
+        # MCP stdio 模式（自动启动子进程）
+        gridcode --mcp search "母线失压" -r angui_2024
+
+        # MCP SSE 模式（连接外部服务）
+        gridcode --mcp --mcp-transport sse --mcp-url http://localhost:8080/sse search "母线失压"
+    """
+    state.use_mcp = mcp
+    state.mcp_transport = mcp_transport
+    state.mcp_url = mcp_url
+
+    if mcp:
+        url_display = mcp_url or "(stdio 子进程)"
+        console.print(f"[dim]MCP 模式: transport={mcp_transport}, url={url_display}[/dim]")
 
 
 class TransportType(str, Enum):
@@ -125,26 +218,29 @@ def serve(
     port: int = typer.Option(8080, "--port", "-p", help="监听端口"),
 ):
     """启动 MCP Server"""
-    from grid_code.mcp.server import mcp_server
+    import sys
 
-    console.print(f"[bold]启动 MCP Server[/bold]")
-    console.print(f"传输协议: {transport.value}")
+    from grid_code.mcp.server import create_mcp_server
 
+    # stdio 模式下不能向 stdout 输出任何非 JSON-RPC 消息
     if transport == TransportType.sse:
+        console.print(f"[bold]启动 MCP Server[/bold]")
+        console.print(f"传输协议: {transport.value}")
         console.print(f"地址: http://{host}:{port}")
+        mcp_server = create_mcp_server(host=host, port=port)
         mcp_server.run(transport="sse")
     else:
-        console.print("使用 stdio 模式")
+        # stdio 模式：只能向 stderr 输出日志
+        print("[MCP] Starting stdio mode...", file=sys.stderr)
+        mcp_server = create_mcp_server()
         mcp_server.run(transport="stdio")
 
 
 @app.command("list")
 def list_regulations():
     """列出所有已入库的规程"""
-    from grid_code.storage import PageStore
-
-    page_store = PageStore()
-    regulations = page_store.list_regulations()
+    tools = get_tools()
+    regulations = tools.list_regulations()
 
     if not regulations:
         console.print("[yellow]暂无入库的规程[/yellow]")
@@ -158,10 +254,10 @@ def list_regulations():
 
     for reg in regulations:
         table.add_row(
-            reg.reg_id,
-            reg.title,
-            str(reg.total_pages),
-            reg.indexed_at[:19],  # 截断毫秒
+            reg["reg_id"],
+            reg["title"],
+            str(reg["total_pages"]),
+            reg["indexed_at"][:19],  # 截断毫秒
         )
 
     console.print(table)
@@ -177,15 +273,13 @@ def search(
     section_number: str = typer.Option(None, "--section", "-s", help="精确匹配章节号（如 2.1.4.1.6）"),
 ):
     """测试检索功能"""
-    from grid_code.index import HybridSearch
-
     # 解析块类型参数
     block_type_list = None
     if block_types:
         block_type_list = [t.strip() for t in block_types.split(",")]
 
-    hybrid_search = HybridSearch()
-    results = hybrid_search.search(
+    tools = get_tools()
+    results = tools.smart_search(
         query,
         reg_id=reg_id,
         chapter_scope=chapter,
@@ -201,11 +295,11 @@ def search(
     console.print(f"\n[bold]找到 {len(results)} 条结果:[/bold]\n")
 
     for i, result in enumerate(results, 1):
-        console.print(f"[bold cyan]{i}. {result.source}[/bold cyan]")
-        if result.chapter_path:
-            console.print(f"   章节: {' > '.join(result.chapter_path)}")
-        console.print(f"   相关度: {result.score:.4f}")
-        console.print(f"   {result.snippet[:200]}...")
+        console.print(f"[bold cyan]{i}. {result['source']}[/bold cyan]")
+        if result.get("chapter_path"):
+            console.print(f"   章节: {' > '.join(result['chapter_path'])}")
+        console.print(f"   相关度: {result['score']:.4f}")
+        console.print(f"   {result['snippet'][:200]}...")
         console.print()
 
 
@@ -220,9 +314,8 @@ def read_chapter(
     from rich.markdown import Markdown
 
     from grid_code.exceptions import ChapterNotFoundError, RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         result = tools.read_chapter_content(
@@ -625,9 +718,8 @@ def read_pages(
     from rich.markdown import Markdown
 
     from grid_code.exceptions import InvalidPageRangeError, RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         result = tools.read_page_range(reg_id, start, end)
@@ -661,9 +753,8 @@ def chapter_structure(
     import json
 
     from grid_code.exceptions import RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         result = tools.get_chapter_structure(reg_id)
@@ -709,9 +800,8 @@ def page_info(
 ):
     """获取页面章节信息"""
     from grid_code.exceptions import PageNotFoundError, RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         result = tools.get_page_chapter_info(reg_id, page_num)
@@ -756,9 +846,8 @@ def lookup_annotation(
     from rich.markdown import Markdown
 
     from grid_code.exceptions import AnnotationNotFoundError, RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         result = tools.lookup_annotation(reg_id, annotation_id, page_hint)
@@ -786,9 +875,8 @@ def search_tables(
 ):
     """搜索表格（支持精确关键词和模糊语义搜索）"""
     from grid_code.exceptions import RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         results = tools.search_tables(
@@ -841,9 +929,8 @@ def resolve_reference(
     from rich.markdown import Markdown
 
     from grid_code.exceptions import ReferenceResolutionError, RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         result = tools.resolve_reference(reg_id, reference)
@@ -886,9 +973,8 @@ def search_annotations(
 ):
     """搜索所有注释"""
     from grid_code.exceptions import RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         results = tools.search_annotations(reg_id, pattern, annotation_type)
@@ -928,9 +1014,8 @@ def get_table(
     from rich.markdown import Markdown
 
     from grid_code.exceptions import RegulationNotFoundError, TableNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         result = tools.get_table_by_id(reg_id, table_id, include_merged=not no_merge)
@@ -977,9 +1062,8 @@ def get_block_context(
     from rich.panel import Panel
 
     from grid_code.exceptions import RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         result = tools.get_block_with_context(reg_id, block_id, context)
@@ -1039,13 +1123,12 @@ def find_similar(
 ):
     """查找语义相似的内容"""
     from grid_code.exceptions import RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
     if not query and not block_id:
         console.print("[red]错误: 必须提供 --query 或 --block 参数[/red]")
         raise typer.Exit(1)
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         results = tools.find_similar_content(
@@ -1089,9 +1172,8 @@ def compare_sections(
     import json
 
     from grid_code.exceptions import ChapterNotFoundError, RegulationNotFoundError
-    from grid_code.mcp.tools import GridCodeTools
 
-    tools = GridCodeTools()
+    tools = get_tools()
 
     try:
         result = tools.compare_sections(reg_id, section_a, section_b)

@@ -65,6 +65,20 @@ class GridCodeSettings(BaseSettings):
         description="MCP Server 监听端口",
     )
 
+    # MCP 客户端模式配置
+    use_mcp_mode: bool = Field(
+        default=False,
+        description="是否默认使用 MCP 模式访问数据（通过 MCP Server）",
+    )
+    mcp_transport: str = Field(
+        default="stdio",
+        description="MCP 传输方式: stdio（自动启动子进程）, sse（连接外部服务）",
+    )
+    mcp_server_url: str | None = Field(
+        default=None,
+        description="MCP SSE 服务器 URL（SSE 模式时使用，如 http://localhost:8080/sse）",
+    )
+
     # LLM API 配置
     anthropic_api_key: str | None = Field(
         default=None,

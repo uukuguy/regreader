@@ -1,5 +1,111 @@
 # GridCode 开发工作日志 (dev 分支)
 
+## 2025-12-30 MCP 模式支持与 Makefile 更新
+
+### 会话概述
+
+实现了 CLI 的 MCP 模式支持，允许通过全局 `--mcp` 选项使用 MCP 协议调用工具。同时更新 Makefile 支持便捷切换 local/mcp-stdio/mcp-sse 模式，并修复了 SSE 连接的 502 Bad Gateway 问题。
+
+### 完成的工作
+
+#### 1. CLI MCP 模式支持
+
+添加全局选项支持 MCP 远程调用：
+
+```bash
+# stdio 模式（自动启动子进程）
+gridcode --mcp list
+
+# SSE 模式（连接外部服务器）
+gridcode --mcp --mcp-transport sse --mcp-url http://localhost:8080/sse list
+```
+
+新增文件：
+- `src/grid_code/mcp/protocol.py` - MCP 模式配置 dataclass
+- `src/grid_code/mcp/factory.py` - 工具工厂，根据模式创建本地或远程工具
+- `src/grid_code/mcp/adapter.py` - MCP 工具适配器，封装异步 MCP 调用为同步接口
+
+#### 2. Makefile 模式切换支持
+
+新增 MODE 变量实现便捷模式切换：
+
+```makefile
+# 可选值: local (默认), mcp-stdio, mcp-sse
+MODE ?= local
+MCP_URL ?= http://127.0.0.1:8080/sse
+
+ifeq ($(MODE),mcp-stdio)
+    MCP_FLAGS := --mcp
+else ifeq ($(MODE),mcp-sse)
+    MCP_FLAGS := --mcp --mcp-transport sse --mcp-url $(MCP_URL)
+else
+    MCP_FLAGS :=
+endif
+```
+
+使用示例：
+```bash
+make list                        # 本地模式
+make list MODE=mcp-stdio         # MCP stdio 模式
+make list MODE=mcp-sse           # MCP SSE 模式
+
+# 便捷快捷方式
+make list-mcp                    # 等价于 MODE=mcp-stdio
+make list-mcp-sse                # 等价于 MODE=mcp-sse
+```
+
+更新了 15 个业务命令 target 添加 `$(MCP_FLAGS)` 支持。
+
+#### 3. Server 端口配置修复
+
+修复了 `make serve` 端口参数不生效的问题：
+
+- 问题：FastMCP 需要在构造函数中设置 host/port，而非 run() 方法
+- 解决：修改 `create_mcp_server()` 接受 host/port 参数，CLI 端动态创建服务器
+
+修改文件：
+- `src/grid_code/mcp/server.py` - create_mcp_server() 添加 host/port 参数
+- `src/grid_code/cli.py` - serve 命令动态创建服务器
+
+#### 4. SSE 502 Bad Gateway 修复
+
+修复了 MCP SSE 模式返回 502 错误的问题：
+
+- 根因：httpx 默认 `trust_env=True` 会读取 HTTP_PROXY 环境变量
+- 表现：SSE 请求经过代理后返回 502，但 curl 直接请求正常
+- 解决：在 `adapter.py` 中添加自定义 httpx 客户端工厂，设置 `trust_env=False`
+
+```python
+def _no_proxy_httpx_client_factory(**kwargs) -> httpx.AsyncClient:
+    """创建不使用环境代理的 httpx AsyncClient"""
+    return httpx.AsyncClient(trust_env=False, **kwargs)
+
+# 使用自定义工厂
+transport = await stack.enter_async_context(
+    sse_client(self.server_url, httpx_client_factory=_no_proxy_httpx_client_factory)
+)
+```
+
+### 修改的文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `src/grid_code/mcp/protocol.py` | 新建 - MCP 模式配置 dataclass |
+| `src/grid_code/mcp/factory.py` | 新建 - 工具工厂 |
+| `src/grid_code/mcp/adapter.py` | 新建 - MCP 工具适配器 + trust_env 修复 |
+| `src/grid_code/mcp/server.py` | create_mcp_server() 添加 host/port 参数 |
+| `src/grid_code/cli.py` | 添加全局 --mcp 选项，修改 serve 命令 |
+| `Makefile` | 添加 MODE/MCP_FLAGS 变量，更新业务命令 |
+
+### 测试结果
+
+- ✅ `make list MODE=mcp-sse` - SSE 模式列出规程正常
+- ✅ `make toc MODE=mcp-sse REG_ID=angui_2024` - SSE 模式获取目录正常
+- ✅ `make serve PORT=8080` - 服务器正确监听 8080 端口
+- ✅ `make list-mcp` - stdio 快捷方式正常
+
+---
+
 ## 2024-12-29 MCP工具集扩展与CLI命令实现
 
 ### 会话概述

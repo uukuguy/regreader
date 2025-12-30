@@ -4,7 +4,8 @@
 .PHONY: help install install-dev install-all test test-heading lint format check serve serve-stdio chat build clean reindex read-chapter \
 	toc read-pages chapter-structure page-info lookup-annotation search-tables resolve-reference \
 	search-annotations get-table get-block-context find-similar compare-sections \
-	build-table-registry table-registry-stats list-cross-page-tables build-table-index
+	build-table-registry table-registry-stats list-cross-page-tables build-table-index \
+	list-mcp search-mcp toc-mcp read-pages-mcp list-mcp-sse search-mcp-sse toc-mcp-sse read-pages-mcp-sse
 
 # Default target
 .DEFAULT_GOAL := help
@@ -14,6 +15,20 @@ PYTHON := python
 UV := uv
 PYTEST := pytest
 RUFF := ruff
+
+# MCP Mode Configuration
+# MODE: local (default), mcp-stdio, mcp-sse
+MODE ?= local
+MCP_URL ?= http://127.0.0.1:8080/sse
+
+# Generate CLI flags based on MODE
+ifeq ($(MODE),mcp-stdio)
+    MCP_FLAGS := --mcp
+else ifeq ($(MODE),mcp-sse)
+    MCP_FLAGS := --mcp --mcp-transport sse --mcp-url $(MCP_URL)
+else
+    MCP_FLAGS :=
+endif
 
 # Colors for output
 BLUE := \033[0;34m
@@ -46,6 +61,14 @@ help: ## Show this help message
 	@echo "  make resolve-reference REFERENCE=\"见第六章\""
 	@echo "  make find-similar SIMILAR_QUERY=\"母线失压处理\""
 	@echo "  make compare-sections SECTION_A=\"2.1.4\" SECTION_B=\"2.1.5\""
+	@echo ""
+	@echo "$(GREEN)MCP Mode Switching:$(NC)"
+	@echo "  MODE=local       (default) Direct local access"
+	@echo "  MODE=mcp-stdio   Via MCP Server (stdio transport)"
+	@echo "  MODE=mcp-sse     Via MCP Server (SSE transport, needs 'make serve')"
+	@echo ""
+	@echo "  make list MODE=mcp-stdio      # List via MCP stdio"
+	@echo "  make search MODE=mcp-sse QUERY=\"母线失压\"  # Search via MCP SSE"
 
 #----------------------------------------------------------------------
 # Installation
@@ -137,11 +160,11 @@ chat-langgraph: ## Start chat with LangGraph Agent
 	$(UV) run gridcode chat --reg-id $(REG_ID) --agent langgraph
 
 list: ## List all ingested regulations
-	$(UV) run gridcode list
+	$(UV) run gridcode $(MCP_FLAGS) list
 
 QUERY ?= 母线失压
 search: ## Search regulations (usage: make search QUERY="母线失压" REG_ID=angui)
-	$(UV) run gridcode search "$(QUERY)" --reg-id $(REG_ID)
+	$(UV) run gridcode $(MCP_FLAGS) search "$(QUERY)" --reg-id $(REG_ID)
 
 FILE ?= ./data/raw/angui_2024.pdf
 ingest: ## Ingest a document (usage: make ingest FILE=/path/to/doc.docx REG_ID=angui)
@@ -175,9 +198,9 @@ read-chapter: ## Read chapter content by section number (usage: make read-chapte
 		exit 1; \
 	fi
 	@if [ "$(NO_CHILDREN)" = "true" ]; then \
-		$(UV) run gridcode read-chapter --reg-id $(REG_ID) --section "$(SECTION)" --no-children; \
+		$(UV) run gridcode $(MCP_FLAGS) read-chapter --reg-id $(REG_ID) --section "$(SECTION)" --no-children; \
 	else \
-		$(UV) run gridcode read-chapter --reg-id $(REG_ID) --section "$(SECTION)"; \
+		$(UV) run gridcode $(MCP_FLAGS) read-chapter --reg-id $(REG_ID) --section "$(SECTION)"; \
 	fi
 
 #----------------------------------------------------------------------
@@ -186,18 +209,18 @@ read-chapter: ## Read chapter content by section number (usage: make read-chapte
 
 MAX_LEVEL ?= 3
 toc: ## Get regulation TOC (usage: make toc REG_ID=angui)
-	$(UV) run gridcode toc $(REG_ID) --level ${MAX_LEVEL}
+	$(UV) run gridcode $(MCP_FLAGS) toc $(REG_ID) --level ${MAX_LEVEL}
 
 START_PAGE ?= 4
 END_PAGE ?= 6
 read-pages: ## Read page range (usage: make read-pages REG_ID=angui START_PAGE=85 END_PAGE=87)
-	$(UV) run gridcode read-pages --reg-id $(REG_ID) --start $(START_PAGE) --end $(END_PAGE)
+	$(UV) run gridcode $(MCP_FLAGS) read-pages --reg-id $(REG_ID) --start $(START_PAGE) --end $(END_PAGE)
 
 chapter-structure: ## Get chapter structure (usage: make chapter-structure REG_ID=angui)
-	$(UV) run gridcode chapter-structure $(REG_ID)
+	$(UV) run gridcode $(MCP_FLAGS) chapter-structure $(REG_ID)
 
 page-info: ## Get page chapter info (usage: make page-info REG_ID=angui PAGE_NUM=85)
-	$(UV) run gridcode page-info --reg-id $(REG_ID) --page $(PAGE_NUM)
+	$(UV) run gridcode $(MCP_FLAGS) page-info --reg-id $(REG_ID) --page $(PAGE_NUM)
 
 #----------------------------------------------------------------------
 # MCP Tools CLI (Phase 1: 核心多跳工具)
@@ -206,19 +229,19 @@ page-info: ## Get page chapter info (usage: make page-info REG_ID=angui PAGE_NUM
 ANNOTATION_ID ?= 注1
 lookup-annotation: ## Lookup annotation (usage: make lookup-annotation REG_ID=angui ANNOTATION_ID="注1" PAGE_NUM=85)
 	@if [ -n "$(PAGE_NUM)" ] && [ "$(PAGE_NUM)" != "7" ]; then \
-		$(UV) run gridcode lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)" --page $(PAGE_NUM); \
+		$(UV) run gridcode $(MCP_FLAGS) lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)" --page $(PAGE_NUM); \
 	else \
-		$(UV) run gridcode lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)"; \
+		$(UV) run gridcode $(MCP_FLAGS) lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)"; \
 	fi
 
 TABLE_QUERY ?= 灵宝直流安控系统
 TABLE_SEARCH_MODE ?= hybrid
 search-tables: ## Search tables (usage: make search-tables REG_ID=angui TABLE_QUERY="母线失压" TABLE_SEARCH_MODE=hybrid)
-	$(UV) run gridcode search-tables "$(TABLE_QUERY)" --reg-id $(REG_ID) --mode $(TABLE_SEARCH_MODE)
+	$(UV) run gridcode $(MCP_FLAGS) search-tables "$(TABLE_QUERY)" --reg-id $(REG_ID) --mode $(TABLE_SEARCH_MODE)
 
 REFERENCE ?= 见第六章
 resolve-reference: ## Resolve cross-reference (usage: make resolve-reference REG_ID=angui REFERENCE="见第六章")
-	$(UV) run gridcode resolve-reference "$(REFERENCE)" --reg-id $(REG_ID)
+	$(UV) run gridcode $(MCP_FLAGS) resolve-reference "$(REFERENCE)" --reg-id $(REG_ID)
 
 #----------------------------------------------------------------------
 # MCP Tools CLI (Phase 2: 上下文工具)
@@ -228,13 +251,13 @@ PATTERN ?=
 ANNOTATION_TYPE ?=
 search-annotations: ## Search all annotations (usage: make search-annotations REG_ID=angui PATTERN="电压" ANNOTATION_TYPE=note)
 	@if [ -n "$(PATTERN)" ] && [ -n "$(ANNOTATION_TYPE)" ]; then \
-		$(UV) run gridcode search-annotations $(REG_ID) --pattern "$(PATTERN)" --type $(ANNOTATION_TYPE); \
+		$(UV) run gridcode $(MCP_FLAGS) search-annotations $(REG_ID) --pattern "$(PATTERN)" --type $(ANNOTATION_TYPE); \
 	elif [ -n "$(PATTERN)" ]; then \
-		$(UV) run gridcode search-annotations $(REG_ID) --pattern "$(PATTERN)"; \
+		$(UV) run gridcode $(MCP_FLAGS) search-annotations $(REG_ID) --pattern "$(PATTERN)"; \
 	elif [ -n "$(ANNOTATION_TYPE)" ]; then \
-		$(UV) run gridcode search-annotations $(REG_ID) --type $(ANNOTATION_TYPE); \
+		$(UV) run gridcode $(MCP_FLAGS) search-annotations $(REG_ID) --type $(ANNOTATION_TYPE); \
 	else \
-		$(UV) run gridcode search-annotations $(REG_ID); \
+		$(UV) run gridcode $(MCP_FLAGS) search-annotations $(REG_ID); \
 	fi
 
 TABLE_ID ?=
@@ -244,7 +267,7 @@ get-table: ## Get full table by ID (usage: make get-table REG_ID=angui TABLE_ID=
 		echo "Usage: make get-table REG_ID=angui TABLE_ID=\"table_xxx\""; \
 		exit 1; \
 	fi
-	$(UV) run gridcode get-table "$(TABLE_ID)" --reg-id $(REG_ID)
+	$(UV) run gridcode $(MCP_FLAGS) get-table "$(TABLE_ID)" --reg-id $(REG_ID)
 
 #----------------------------------------------------------------------
 # 表格注册表工具
@@ -276,7 +299,7 @@ get-block-context: ## Get block with context (usage: make get-block-context REG_
 		echo "Usage: make get-block-context REG_ID=angui BLOCK_ID=\"block_xxx\""; \
 		exit 1; \
 	fi
-	$(UV) run gridcode get-block-context "$(BLOCK_ID)" --reg-id $(REG_ID) --context $(CONTEXT)
+	$(UV) run gridcode $(MCP_FLAGS) get-block-context "$(BLOCK_ID)" --reg-id $(REG_ID) --context $(CONTEXT)
 
 #----------------------------------------------------------------------
 # MCP Tools CLI (Phase 3: 发现工具)
@@ -285,7 +308,7 @@ get-block-context: ## Get block with context (usage: make get-block-context REG_
 SIMILAR_QUERY ?= 三峡安控系统
 LIMIT ?= 5
 find-similar: ## Find similar content (usage: make find-similar REG_ID=angui SIMILAR_QUERY="母线失压处理")
-	$(UV) run gridcode find-similar --reg-id $(REG_ID) --query "$(SIMILAR_QUERY)" --limit $(LIMIT)
+	$(UV) run gridcode $(MCP_FLAGS) find-similar --reg-id $(REG_ID) --query "$(SIMILAR_QUERY)" --limit $(LIMIT)
 
 SECTION_A ?=
 SECTION_B ?=
@@ -295,7 +318,7 @@ compare-sections: ## Compare two sections (usage: make compare-sections REG_ID=a
 		echo "Usage: make compare-sections REG_ID=angui SECTION_A=\"2.1.4\" SECTION_B=\"2.1.5\""; \
 		exit 1; \
 	fi
-	$(UV) run gridcode compare-sections "$(SECTION_A)" "$(SECTION_B)" --reg-id $(REG_ID)
+	$(UV) run gridcode $(MCP_FLAGS) compare-sections "$(SECTION_A)" "$(SECTION_B)" --reg-id $(REG_ID)
 
 BACKUP ?= true
 reindex: ## Reindex document with new parser (usage: make reindex FILE=/path/to/doc.pdf REG_ID=angui BACKUP=true)
@@ -369,3 +392,33 @@ dev: install-dev ## Setup development environment
 
 run: ## Run any gridcode command (usage: make run CMD="list")
 	$(UV) run gridcode $(CMD)
+
+#----------------------------------------------------------------------
+# MCP Mode Convenience Targets
+#----------------------------------------------------------------------
+
+# Shortcut targets for MCP stdio mode
+list-mcp: ## List regulations via MCP stdio
+	$(MAKE) list MODE=mcp-stdio
+
+search-mcp: ## Search via MCP stdio (usage: make search-mcp QUERY="母线失压")
+	$(MAKE) search MODE=mcp-stdio QUERY="$(QUERY)" REG_ID="$(REG_ID)"
+
+toc-mcp: ## Get TOC via MCP stdio
+	$(MAKE) toc MODE=mcp-stdio REG_ID="$(REG_ID)"
+
+read-pages-mcp: ## Read pages via MCP stdio
+	$(MAKE) read-pages MODE=mcp-stdio REG_ID="$(REG_ID)" START_PAGE="$(START_PAGE)" END_PAGE="$(END_PAGE)"
+
+# Shortcut targets for MCP SSE mode (requires 'make serve' running)
+list-mcp-sse: ## List regulations via MCP SSE
+	$(MAKE) list MODE=mcp-sse
+
+search-mcp-sse: ## Search via MCP SSE (usage: make search-mcp-sse QUERY="母线失压")
+	$(MAKE) search MODE=mcp-sse QUERY="$(QUERY)" REG_ID="$(REG_ID)"
+
+toc-mcp-sse: ## Get TOC via MCP SSE
+	$(MAKE) toc MODE=mcp-sse REG_ID="$(REG_ID)"
+
+read-pages-mcp-sse: ## Read pages via MCP SSE
+	$(MAKE) read-pages MODE=mcp-sse REG_ID="$(REG_ID)" START_PAGE="$(START_PAGE)" END_PAGE="$(END_PAGE)"

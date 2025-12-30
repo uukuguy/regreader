@@ -9,17 +9,23 @@ from grid_code.exceptions import GridCodeError
 from grid_code.mcp.tools import GridCodeTools
 
 
-def create_mcp_server(name: str = "gridcode") -> FastMCP:
+def create_mcp_server(
+    name: str = "gridcode",
+    host: str = "127.0.0.1",
+    port: int = 8000,
+) -> FastMCP:
     """
     创建 MCP Server 实例
 
     Args:
         name: 服务名称
+        host: 监听地址（SSE 模式）
+        port: 监听端口（SSE 模式）
 
     Returns:
         FastMCP 实例
     """
-    mcp = FastMCP(name)
+    mcp = FastMCP(name, host=host, port=port)
     tools = GridCodeTools()
 
     @mcp.tool()
@@ -520,7 +526,3 @@ def create_mcp_server(name: str = "gridcode") -> FastMCP:
             return {"error": str(e)}
 
     return mcp
-
-
-# 全局 MCP 实例（用于 CLI 启动）
-mcp_server = create_mcp_server()
