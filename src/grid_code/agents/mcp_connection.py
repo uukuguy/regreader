@@ -278,7 +278,12 @@ class MCPConnectionManager:
 
         # 创建禁用代理的 httpx 客户端
         # 与 GridCodeMCPClient 保持一致，避免代理导致的 502 错误
-        http_client = httpx.AsyncClient(proxy=None, trust_env=False)
+        # 设置较长的超时时间，SSE 连接需要等待 LLM 响应
+        http_client = httpx.AsyncClient(
+            proxy=None,
+            trust_env=False,
+            timeout=httpx.Timeout(300.0, connect=30.0),  # 5分钟读取超时，30秒连接超时
+        )
 
         return MCPServerSSE(
             url=self.config.server_url,
