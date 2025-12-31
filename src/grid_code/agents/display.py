@@ -122,7 +122,6 @@ class AgentStatusDisplay(StatusCallback):
 
         # 状态存储
         self._current_status: Text | None = None
-        self._history: list[Text] = []
         self._tool_start_times: dict[str, float] = {}
         self._iteration_count: int = 0
         self._spinner_frame: int = 0
@@ -473,24 +472,27 @@ class AgentStatusDisplay(StatusCallback):
         return text
 
     def _render(self) -> Text:
-        """渲染当前状态
+        """渲染当前状态（只渲染当前状态，不含历史）
 
         Returns:
-            完整的显示内容
+            当前状态的显示内容
         """
-        lines = Text()
-
-        # 历史记录（限制数量）
-        history_to_show = self._history[-self._max_history:]
-        for item in history_to_show:
-            lines.append_text(item)
-            lines.append("\n")
-
-        # 当前状态
+        # 只渲染当前状态，历史记录已经直接打印到 console
         if self._current_status:
-            lines.append_text(self._current_status)
+            return self._current_status
+        return Text("")
 
-        return lines
+    def _print_to_history(self, item: Text) -> None:
+        """将完成的项直接打印到控制台（不通过 Live）
+
+        Args:
+            item: 要打印的 Text 对象
+        """
+        if self._live:
+            # 暂停 Live，打印内容，然后恢复
+            self._live.console.print(item)
+        else:
+            self._console.print(item)
 
     async def on_event(self, event: AgentEvent) -> None:
         """处理事件并更新显示
@@ -525,17 +527,16 @@ class AgentStatusDisplay(StatusCallback):
             tool_id = event.data.get("tool_id") or event.data["tool_name"]
             self._tool_start_times[tool_id] = now
 
-            # 更新当前状态
-            self._current_status = self._format_tool_call_start(event)
-
-            # 如果有流式文本且未提交过，先添加到历史
+            # 如果有流式文本且未提交过，先打印到控制台
             if self._streaming_text and self._verbose:
-                # 避免重复添加相同内容
                 if self._streaming_text != self._last_committed_text:
-                    self._history.append(self._format_thinking_text(self._streaming_text))
+                    self._print_to_history(self._format_thinking_text(self._streaming_text))
                     self._last_committed_text = self._streaming_text
                 self._streaming_text = ""
                 self._is_streaming = False
+
+            # 更新当前状态（spinner）
+            self._current_status = self._format_tool_call_start(event)
 
         elif event.event_type == AgentEventType.TOOL_CALL_END:
             # 计算执行耗时
@@ -547,12 +548,12 @@ class AgentStatusDisplay(StatusCallback):
             # 记录工具结束时间
             self._last_tool_end_time = time.time()
 
-            # 添加到历史
-            self._history.append(self._format_tool_call_end(event))
+            # 直接打印工具结果（不累积到历史）
+            self._print_to_history(self._format_tool_call_end(event))
             self._current_status = None
 
         elif event.event_type == AgentEventType.TOOL_CALL_ERROR:
-            self._history.append(self._format_tool_call_error(event))
+            self._print_to_history(self._format_tool_call_error(event))
             self._current_status = None
             self._last_tool_end_time = time.time()
 
@@ -561,7 +562,7 @@ class AgentStatusDisplay(StatusCallback):
             self._iteration_count = iteration
             # 只有从第2轮开始才显示迭代标记
             if iteration > 1:
-                self._history.append(self._format_iteration(iteration))
+                self._print_to_history(self._format_iteration(iteration))
 
         elif event.event_type == AgentEventType.TEXT_DELTA:
             # 流式文本增量（仅详细模式）
@@ -589,13 +590,13 @@ class AgentStatusDisplay(StatusCallback):
                 description = event.data.get("description", "")
                 if phase:
                     self._current_phase = phase
-                    self._history.append(self._format_phase_change(phase, description))
+                    self._print_to_history(self._format_phase_change(phase, description))
 
         elif event.event_type == AgentEventType.RESPONSE_COMPLETE:
             # 清理流式文本状态（避免重复添加）
             if self._streaming_text and self._verbose:
                 if self._streaming_text != self._last_committed_text:
-                    self._history.append(self._format_thinking_text(self._streaming_text))
+                    self._print_to_history(self._format_thinking_text(self._streaming_text))
                     self._last_committed_text = self._streaming_text
                 self._streaming_text = ""
                 self._is_streaming = False
@@ -604,7 +605,7 @@ class AgentStatusDisplay(StatusCallback):
             if self._verbose:
                 total_tools = event.data.get("total_tool_calls", 0)
                 if total_tools > 0:
-                    self._history.append(self._format_summary(event))
+                    self._print_to_history(self._format_summary(event))
 
         # 更新 Live 显示
         if self._live:
@@ -623,7 +624,6 @@ class AgentStatusDisplay(StatusCallback):
             self: 当前显示器实例
         """
         # 重置状态
-        self._history = []
         self._current_status = None
         self._tool_start_times = {}
         self._iteration_count = 0
@@ -643,23 +643,20 @@ class AgentStatusDisplay(StatusCallback):
             self._render(),
             console=self._console,
             refresh_per_second=10,
-            transient=False,  # 保留历史
+            transient=True,  # 只显示当前状态，完成后清除
         ) as live:
             self._live = live
             try:
                 yield self
             finally:
                 self._live = None
-                # 最终刷新
-                live.update(self._render())
 
     def print_final(self) -> None:
         """打印最终状态（非 Live 模式）
 
-        用于静默模式下直接打印结果。
+        已废弃：现在直接打印到控制台，不再累积历史。
         """
-        for item in self._history:
-            self._console.print(item)
+        pass
 
 
 # ==================== 简单显示类 ====================
