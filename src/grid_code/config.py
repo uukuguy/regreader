@@ -70,6 +70,10 @@ class GridCodeSettings(BaseSettings):
         default=None,
         description="嵌入模型运行设备（如 cuda:0，默认自动选择）",
     )
+    embedding_local_files_only: bool = Field(
+        default=False,
+        description="仅使用本地缓存的模型（离线模式，避免网络请求）",
+    )
     # API 类后端预留（未来扩展）
     embedding_api_key: str | None = Field(
         default=None,

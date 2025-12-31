@@ -125,6 +125,11 @@ def create_embedder(
             if device:
                 kwargs["device"] = device
 
+        if "local_files_only" not in kwargs:
+            local_files_only = getattr(settings, "embedding_local_files_only", False)
+            if local_files_only:
+                kwargs["local_files_only"] = local_files_only
+
         return SentenceTransformerEmbedder(
             model_name=model_name,
             dimension=dimension,

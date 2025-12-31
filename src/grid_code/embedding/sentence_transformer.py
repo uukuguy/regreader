@@ -33,6 +33,7 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         dimension: int | None = None,
         query_instruction: str | None = None,
         device: str | None = None,
+        local_files_only: bool = False,
     ):
         """初始化 SentenceTransformer 嵌入模型
 
@@ -41,10 +42,12 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             dimension: 嵌入维度（可选，自动检测）
             query_instruction: 查询前缀（可选，BGE 模型自动设置）
             device: 运行设备（可选，自动选择）
+            local_files_only: 仅使用本地缓存（离线模式）
         """
         self._model_name = model_name
         self._dimension = dimension
         self._device = device
+        self._local_files_only = local_files_only
         self._model = None
 
         # 自动检测 BGE 模型的查询前缀
@@ -88,9 +91,14 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         logger.info(f"加载 SentenceTransformer 模型: {self._model_name}")
         from sentence_transformers import SentenceTransformer
 
+        model_kwargs = {}
+        if self._local_files_only:
+            model_kwargs["local_files_only"] = True
+
         self._model = SentenceTransformer(
             self._model_name,
             device=self._device,
+            **model_kwargs,
         )
 
         # 配置 prompts（如果有查询前缀）
