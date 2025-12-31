@@ -6,12 +6,16 @@
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import lancedb
 from loguru import logger
 
 from grid_code.config import get_settings
 from grid_code.storage.models import TableEntry, TableRegistry, TableSearchResult
+
+if TYPE_CHECKING:
+    from grid_code.embedding import BaseEmbedder
 
 
 class TableLanceDBIndex:
@@ -26,12 +30,16 @@ class TableLanceDBIndex:
 
     TABLE_NAME = "table_vectors"
 
-    def __init__(self, db_path: Path | None = None):
-        """
-        初始化表格向量索引
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        embedder: "BaseEmbedder | None" = None,
+    ):
+        """初始化表格向量索引
 
         Args:
             db_path: LanceDB 数据库路径，默认使用配置中的路径
+            embedder: 嵌入模型实例（可选，默认使用全局单例）
         """
         settings = get_settings()
         self.db_path = db_path or settings.index_dir / "table_vectors"
@@ -39,9 +47,7 @@ class TableLanceDBIndex:
 
         self._db: lancedb.DBConnection | None = None
         self._table: lancedb.table.Table | None = None
-        self._embedder = None
-        self.embedding_model_name = settings.embedding_model
-        self._embedding_dimension = settings.embedding_dimension
+        self._embedder = embedder
 
     @property
     def name(self) -> str:
@@ -49,7 +55,7 @@ class TableLanceDBIndex:
 
     @property
     def embedding_dimension(self) -> int:
-        return self._embedding_dimension
+        return self.embedder.dimension
 
     @property
     def db(self) -> lancedb.DBConnection:
@@ -59,12 +65,12 @@ class TableLanceDBIndex:
         return self._db
 
     @property
-    def embedder(self):
-        """延迟加载嵌入模型"""
+    def embedder(self) -> "BaseEmbedder":
+        """获取嵌入模型（延迟初始化）"""
         if self._embedder is None:
-            logger.info(f"加载嵌入模型: {self.embedding_model_name}")
-            from sentence_transformers import SentenceTransformer
-            self._embedder = SentenceTransformer(self.embedding_model_name)
+            from grid_code.embedding import get_embedder
+
+            self._embedder = get_embedder()
         return self._embedder
 
     def _get_table(self) -> lancedb.table.Table | None:
@@ -83,16 +89,6 @@ class TableLanceDBIndex:
             data=data,
             mode="overwrite",
         )
-
-    def _embed_text(self, text: str) -> list[float]:
-        """生成文本嵌入向量"""
-        embedding = self.embedder.encode(text, normalize_embeddings=True)
-        return embedding.tolist()
-
-    def _embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """批量生成文本嵌入向量"""
-        embeddings = self.embedder.encode(texts, normalize_embeddings=True)
-        return embeddings.tolist()
 
     def _build_embed_text(self, entry: TableEntry) -> str:
         """构建用于嵌入的文本
@@ -136,7 +132,7 @@ class TableLanceDBIndex:
             reg_id: 规程标识
         """
         embed_text = self._build_embed_text(entry)
-        vector = self._embed_text(embed_text)
+        vector = self.embedder.embed_document(embed_text)
 
         record = {
             "vector": vector,
@@ -185,7 +181,7 @@ class TableLanceDBIndex:
 
         # 批量生成嵌入向量
         logger.info(f"生成 {len(all_texts)} 个表格嵌入向量...")
-        all_vectors = self._embed_texts(all_texts)
+        all_vectors = self.embedder.embed_documents(all_texts)
 
         # 构建记录
         for i, entry in enumerate(entries_list):
@@ -237,7 +233,7 @@ class TableLanceDBIndex:
             logger.warning("表格向量索引表不存在")
             return []
 
-        query_vector = self._embed_text(query)
+        query_vector = self.embedder.embed_query(query)
         search_query = table.search(query_vector).limit(limit * 2)
 
         try:

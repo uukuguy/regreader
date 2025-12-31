@@ -6,12 +6,16 @@ https://github.com/qdrant/qdrant-client
 
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from grid_code.config import get_settings
 from grid_code.index.base import BaseVectorIndex
 from grid_code.storage.models import PageDocument, SearchResult
+
+if TYPE_CHECKING:
+    from grid_code.embedding import BaseEmbedder
 
 
 class QdrantIndex(BaseVectorIndex):
@@ -27,14 +31,15 @@ class QdrantIndex(BaseVectorIndex):
         path: Path | None = None,
         url: str | None = None,
         api_key: str | None = None,
+        embedder: "BaseEmbedder | None" = None,
     ):
-        """
-        初始化 Qdrant 索引
+        """初始化 Qdrant 索引
 
         Args:
             path: 本地存储路径（本地模式）
             url: Qdrant 服务器 URL（服务器模式）
             api_key: API Key（服务器模式）
+            embedder: 嵌入模型实例（可选，默认使用全局单例）
         """
         settings = get_settings()
         self.path = path or (settings.index_dir / "qdrant")
@@ -42,9 +47,7 @@ class QdrantIndex(BaseVectorIndex):
         self.api_key = api_key
 
         self._client = None
-        self._embedder = None
-        self.embedding_model_name = settings.embedding_model
-        self._embedding_dimension = settings.embedding_dimension
+        self._embedder = embedder
 
         self._init_client()
 
@@ -54,15 +57,15 @@ class QdrantIndex(BaseVectorIndex):
 
     @property
     def embedding_dimension(self) -> int:
-        return self._embedding_dimension
+        return self.embedder.dimension
 
     @property
-    def embedder(self):
-        """延迟加载嵌入模型"""
+    def embedder(self) -> "BaseEmbedder":
+        """获取嵌入模型（延迟初始化）"""
         if self._embedder is None:
-            logger.info(f"加载嵌入模型: {self.embedding_model_name}")
-            from sentence_transformers import SentenceTransformer
-            self._embedder = SentenceTransformer(self.embedding_model_name)
+            from grid_code.embedding import get_embedder
+
+            self._embedder = get_embedder()
         return self._embedder
 
     def _init_client(self):
@@ -102,16 +105,6 @@ class QdrantIndex(BaseVectorIndex):
         except Exception as e:
             logger.warning(f"Qdrant 集合初始化失败: {e}")
 
-    def _embed_text(self, text: str) -> list[float]:
-        """生成文本嵌入向量"""
-        embedding = self.embedder.encode(text, normalize_embeddings=True)
-        return embedding.tolist()
-
-    def _embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """批量生成文本嵌入向量"""
-        embeddings = self.embedder.encode(texts, normalize_embeddings=True)
-        return embeddings.tolist()
-
     def index_page(self, page: PageDocument) -> None:
         """索引单个页面"""
         if self._client is None:
@@ -129,7 +122,7 @@ class QdrantIndex(BaseVectorIndex):
             if not content or len(content) < 10:
                 continue
 
-            vector = self._embed_text(content)
+            vector = self.embedder.embed_document(content)
 
             points.append(PointStruct(
                 id=str(uuid.uuid4()),
@@ -190,7 +183,7 @@ class QdrantIndex(BaseVectorIndex):
             return
 
         logger.info(f"生成 {len(all_texts)} 个嵌入向量...")
-        all_vectors = self._embed_texts(all_texts)
+        all_vectors = self.embedder.embed_documents(all_texts)
 
         # 批量创建 points
         points = []
@@ -232,7 +225,7 @@ class QdrantIndex(BaseVectorIndex):
         except ImportError:
             return []
 
-        query_vector = self._embed_text(query)
+        query_vector = self.embedder.embed_query(query)
 
         # 构建过滤条件
         query_filter = None

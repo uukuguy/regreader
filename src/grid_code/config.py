@@ -46,6 +46,10 @@ class GridCodeSettings(BaseSettings):
     )
 
     # 嵌入模型配置
+    embedding_backend: str = Field(
+        default="sentence_transformer",
+        description="嵌入模型后端: sentence_transformer, flag",
+    )
     embedding_model: str = Field(
         default="BAAI/bge-small-zh-v1.5",
         description="句向量嵌入模型（HuggingFace 模型名）",
@@ -53,6 +57,27 @@ class GridCodeSettings(BaseSettings):
     embedding_dimension: int = Field(
         default=512,
         description="嵌入向量维度",
+    )
+    embedding_query_instruction: str | None = Field(
+        default=None,
+        description="查询嵌入前缀（可选，BGE 模型自动设置）",
+    )
+    embedding_use_fp16: bool = Field(
+        default=True,
+        description="是否使用 FP16 加速（FlagEmbedding 专用）",
+    )
+    embedding_device: str | None = Field(
+        default=None,
+        description="嵌入模型运行设备（如 cuda:0，默认自动选择）",
+    )
+    # API 类后端预留（未来扩展）
+    embedding_api_key: str | None = Field(
+        default=None,
+        description="嵌入 API 密钥（OpenAI/Cohere 等 API 后端）",
+    )
+    embedding_api_base: str | None = Field(
+        default=None,
+        description="嵌入 API 端点（自定义 API 服务器）",
     )
 
     # MCP Server 配置

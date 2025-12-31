@@ -50,6 +50,11 @@ qdrant = [
     "qdrant-client>=1.12.0",
 ]
 
+# 可选的嵌入后端
+flag = [
+    "FlagEmbedding>=1.2.0",
+]
+
 # 安装所有可选索引后端
 all-indexes = [
     "tantivy>=0.22.0",
