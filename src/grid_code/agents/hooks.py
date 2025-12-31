@@ -5,11 +5,51 @@
 Hooks 类型:
 - PreToolUse: 工具调用前，可以记录日志、验证参数、阻止调用
 - PostToolUse: 工具调用后，可以记录结果、提取来源、监控错误
+
+状态回调:
+通过 set_status_callback() 注册全局回调，
+Hooks 会在执行时发送事件到回调。
 """
 
+import time
 from typing import Any
 
 from loguru import logger
+
+from grid_code.agents.callbacks import NullCallback, StatusCallback
+from grid_code.agents.events import (
+    tool_end_event,
+    tool_error_event,
+    tool_start_event,
+)
+
+
+# ==================== 全局状态回调 ====================
+
+_status_callback: StatusCallback = NullCallback()
+_tool_timers: dict[str, float] = {}
+
+
+def set_status_callback(callback: StatusCallback | None) -> None:
+    """设置全局状态回调
+
+    Args:
+        callback: 状态回调实例，None 表示禁用
+    """
+    global _status_callback
+    _status_callback = callback or NullCallback()
+
+
+def get_status_callback() -> StatusCallback:
+    """获取当前状态回调
+
+    Returns:
+        当前注册的状态回调
+    """
+    return _status_callback
+
+
+# ==================== Hook 函数 ====================
 
 
 async def pre_tool_audit_hook(
@@ -22,7 +62,8 @@ async def pre_tool_audit_hook(
     在每次工具调用前执行，用于：
     1. 记录工具调用日志
     2. 验证必要参数
-    3. 可选阻止无效调用
+    3. 发送状态事件
+    4. 可选阻止无效调用
 
     Args:
         input_data: 包含 tool_name 和 tool_input 的字典
@@ -34,9 +75,17 @@ async def pre_tool_audit_hook(
     """
     tool_name = input_data.get("tool_name", "unknown")
     tool_input = input_data.get("tool_input", {})
+    tool_id = tool_use_id or tool_name
+
+    # 记录开始时间
+    _tool_timers[tool_id] = time.time()
 
     # 记录调用日志
     logger.debug(f"[PreToolUse] {tool_name} | args: {_truncate_dict(tool_input)}")
+
+    # 发送状态事件
+    event = tool_start_event(tool_name, tool_input, tool_id)
+    await _status_callback.on_event(event)
 
     # 验证 reg_id 参数（如果存在）
     if "reg_id" in tool_input:
@@ -77,7 +126,8 @@ async def post_tool_audit_hook(
     在每次工具调用完成后执行，用于：
     1. 记录执行结果
     2. 监控错误情况
-    3. 统计调用次数
+    3. 发送状态事件
+    4. 统计调用次数
 
     Args:
         input_data: 包含 tool_name、tool_input、tool_result 的字典
@@ -89,18 +139,67 @@ async def post_tool_audit_hook(
     """
     tool_name = input_data.get("tool_name", "unknown")
     tool_result = input_data.get("tool_result", {})
+    tool_input = input_data.get("tool_input", {})
+    tool_id = tool_use_id or tool_name
 
-    # 检查错误
+    # 计算耗时
+    start_time = _tool_timers.pop(tool_id, None)
+    duration_ms = (time.time() - start_time) * 1000 if start_time else 0
+
+    # 检查错误并发送事件
+    error_msg = None
     if isinstance(tool_result, dict) and "error" in tool_result:
         error_msg = tool_result.get("error", "未知错误")
         logger.warning(f"[PostToolUse] {tool_name} 返回错误: {error_msg}")
+
+        # 发送错误事件
+        event = tool_error_event(tool_name, str(error_msg), tool_id)
+        await _status_callback.on_event(event)
+        return {}
+
     elif isinstance(tool_result, list) and tool_result and isinstance(tool_result[0], dict):
         if "error" in tool_result[0]:
-            logger.warning(f"[PostToolUse] {tool_name} 返回错误: {tool_result[0].get('error')}")
-        else:
-            logger.debug(f"[PostToolUse] {tool_name} 成功，返回 {len(tool_result)} 条结果")
+            error_msg = tool_result[0].get("error")
+            logger.warning(f"[PostToolUse] {tool_name} 返回错误: {error_msg}")
+
+            event = tool_error_event(tool_name, str(error_msg), tool_id)
+            await _status_callback.on_event(event)
+            return {}
+
+        logger.debug(f"[PostToolUse] {tool_name} 成功，返回 {len(tool_result)} 条结果")
+
+        # 提取来源
+        sources: list[str] = []
+        for item in tool_result:
+            _extract_sources_recursive(item, sources)
+
+        # 发送完成事件
+        event = tool_end_event(
+            tool_name=tool_name,
+            tool_id=tool_id,
+            duration_ms=duration_ms,
+            result_count=len(tool_result),
+            sources=list(set(sources)),
+            tool_input=tool_input,
+        )
+        await _status_callback.on_event(event)
+
     else:
         logger.debug(f"[PostToolUse] {tool_name} 执行完成")
+
+        # 提取来源
+        sources = []
+        _extract_sources_recursive(tool_result, sources)
+
+        # 发送完成事件
+        event = tool_end_event(
+            tool_name=tool_name,
+            tool_id=tool_id,
+            duration_ms=duration_ms,
+            sources=list(set(sources)),
+            tool_input=tool_input,
+        )
+        await _status_callback.on_event(event)
 
     return {}
 

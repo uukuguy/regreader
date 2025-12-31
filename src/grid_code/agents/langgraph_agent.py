@@ -13,6 +13,7 @@
 """
 
 import json
+import time
 import uuid
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
@@ -28,6 +29,14 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
+from grid_code.agents.callbacks import NullCallback, StatusCallback
+from grid_code.agents.events import (
+    iteration_event,
+    response_complete_event,
+    thinking_event,
+    tool_end_event,
+    tool_start_event,
+)
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.prompts import SYSTEM_PROMPT
 from grid_code.config import get_settings
@@ -81,6 +90,7 @@ class LangGraphAgent(BaseGridCodeAgent):
         reg_id: str | None = None,
         model: str | None = None,
         mcp_config: MCPConnectionConfig | None = None,
+        status_callback: StatusCallback | None = None,
     ):
         """初始化 LangGraph Agent
 
@@ -88,6 +98,7 @@ class LangGraphAgent(BaseGridCodeAgent):
             reg_id: 默认规程标识
             model: Claude 模型名称
             mcp_config: MCP 连接配置（可选，默认从全局配置创建）
+            status_callback: 状态回调（可选），用于实时输出 Agent 运行状态
         """
         super().__init__(reg_id)
 
@@ -130,6 +141,12 @@ class LangGraphAgent(BaseGridCodeAgent):
         # 工具调用追踪（单次查询）
         self._tool_calls: list[dict] = []
         self._sources: list[str] = []
+
+        # 状态回调
+        self._callback = status_callback or NullCallback()
+
+        # 迭代计数（用于状态显示）
+        self._iteration_count: int = 0
 
         logger.info(
             f"LangGraphAgent initialized: model={self._model_name}, "
@@ -205,7 +222,16 @@ class LangGraphAgent(BaseGridCodeAgent):
                 if self.reg_id and "reg_id" in kwargs and not kwargs.get("reg_id"):
                     kwargs["reg_id"] = self.reg_id
 
+                # 发送工具调用开始事件
+                await self._callback.on_event(tool_start_event(tool_name, kwargs))
+
+                # 记录开始时间
+                start_time = time.time()
+
                 result = await self._mcp_client.call_tool(tool_name, kwargs)
+
+                # 计算耗时
+                duration_ms = (time.time() - start_time) * 1000
 
                 # 追踪工具调用
                 self._tool_calls.append({
@@ -215,7 +241,27 @@ class LangGraphAgent(BaseGridCodeAgent):
                 })
 
                 # 提取来源
+                sources_before = len(self._sources)
                 self._extract_sources(result)
+                new_sources = self._sources[sources_before:]
+
+                # 计算结果数量
+                result_count = None
+                if isinstance(result, list):
+                    result_count = len(result)
+                elif isinstance(result, dict) and "results" in result:
+                    result_count = len(result["results"])
+
+                # 发送工具调用完成事件
+                await self._callback.on_event(
+                    tool_end_event(
+                        tool_name=tool_name,
+                        duration_ms=duration_ms,
+                        result_count=result_count,
+                        sources=new_sources,
+                        tool_input=kwargs,
+                    )
+                )
 
                 # 返回 JSON 字符串
                 if isinstance(result, (dict, list)):
@@ -289,6 +335,12 @@ class LangGraphAgent(BaseGridCodeAgent):
         # 定义 agent 节点
         async def agent_node(state: AgentState) -> dict:
             """Agent 节点：调用 LLM"""
+            # 增加迭代计数并发送事件
+            self._iteration_count += 1
+            if self._iteration_count > 1:
+                # 从第2轮开始发送迭代事件（第1轮已经在 chat 中发送了 thinking 事件）
+                await self._callback.on_event(iteration_event(self._iteration_count))
+
             # 添加系统提示
             messages = state["messages"]
             if not messages or not isinstance(messages[0], SystemMessage):
@@ -362,6 +414,13 @@ class LangGraphAgent(BaseGridCodeAgent):
         # 重置单次查询的追踪
         self._tool_calls = []
         self._sources = []
+        self._iteration_count = 0
+
+        # 记录开始时间
+        start_time = time.time()
+
+        # 发送思考开始事件
+        await self._callback.on_event(thinking_event(start=True))
 
         # 配置（包含 thread_id）
         config = {"configurable": {"thread_id": self._thread_id}}
@@ -381,6 +440,21 @@ class LangGraphAgent(BaseGridCodeAgent):
                     final_content = msg.content
                     break
 
+            # 发送思考结束事件
+            await self._callback.on_event(thinking_event(start=False))
+
+            # 计算总耗时
+            duration_ms = (time.time() - start_time) * 1000
+
+            # 发送响应完成事件
+            await self._callback.on_event(
+                response_complete_event(
+                    total_tool_calls=len(self._tool_calls),
+                    total_sources=len(set(self._sources)),
+                    duration_ms=duration_ms,
+                )
+            )
+
             return AgentResponse(
                 content=final_content,
                 sources=list(set(self._sources)),
@@ -389,6 +463,10 @@ class LangGraphAgent(BaseGridCodeAgent):
 
         except Exception as e:
             logger.exception(f"Graph execution error: {e}")
+
+            # 发送思考结束事件（即使出错）
+            await self._callback.on_event(thinking_event(start=False))
+
             return AgentResponse(
                 content=f"查询失败: {str(e)}",
                 sources=list(set(self._sources)),

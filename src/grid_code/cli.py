@@ -374,8 +374,17 @@ def chat(
     agent_type: AgentType = typer.Option(
         AgentType.claude, "--agent", "-a", help="Agent 类型"
     ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="详细模式：显示完整工具参数"
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="静默模式：只显示最终结果"
+    ),
 ):
     """与 Agent 对话（交互模式）"""
+    from grid_code.agents.callbacks import NullCallback
+    from grid_code.agents.display import AgentStatusDisplay
+    from grid_code.agents.hooks import set_status_callback
     from grid_code.agents.mcp_connection import MCPConnectionConfig
 
     async def run_chat():
@@ -385,16 +394,24 @@ def chat(
         else:
             mcp_config = MCPConnectionConfig.stdio()
 
+        # 创建状态显示回调
+        if quiet:
+            status_callback = NullCallback()
+        else:
+            status_callback = AgentStatusDisplay(console, verbose=verbose)
+
         # 创建 Agent
         if agent_type == AgentType.claude:
             from grid_code.agents import ClaudeAgent
+            # Claude Agent 使用全局回调
+            set_status_callback(status_callback)
             agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config)
         elif agent_type == AgentType.pydantic:
             from grid_code.agents import PydanticAIAgent
-            agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config)
+            agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
         else:
             from grid_code.agents import LangGraphAgent
-            agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config)
+            agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
 
         console.print(f"[bold]GridCode Agent ({agent.name})[/bold]")
         console.print("输入问题进行对话，输入 'exit' 退出\n")
@@ -412,8 +429,13 @@ def chat(
                 if not user_input.strip():
                     continue
 
-                with console.status("思考中..."):
-                    response = await agent.chat(user_input)
+                # 使用状态显示
+                if quiet:
+                    with console.status("思考中..."):
+                        response = await agent.chat(user_input)
+                else:
+                    async with status_callback.live_context():
+                        response = await agent.chat(user_input)
 
                 console.print(f"\n[bold blue]GridCode:[/bold blue]")
                 console.print(response.content)
@@ -425,6 +447,9 @@ def chat(
             # 确保关闭 MCP 连接
             if hasattr(agent, "close"):
                 await agent.close()
+            # 清理全局回调
+            if agent_type == AgentType.claude:
+                set_status_callback(None)
 
         console.print("[dim]再见![/dim]")
 
@@ -439,13 +464,24 @@ def ask(
         AgentType.claude, "--agent", "-a", help="Agent 类型"
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="JSON 格式输出"),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="详细模式：显示完整工具参数"
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="静默模式：只显示最终结果"
+    ),
 ):
     """单次查询 Agent（非交互模式）
 
     示例:
         gridcode ask "母线失压如何处理?" -r angui_2024
         gridcode ask "什么是安规?" --agent pydantic --json
+        gridcode ask "安全距离是多少?" -v  # 详细模式
+        gridcode ask "什么是接地?" -q      # 静默模式
     """
+    from grid_code.agents.callbacks import NullCallback
+    from grid_code.agents.display import AgentStatusDisplay
+    from grid_code.agents.hooks import set_status_callback
     from grid_code.agents.mcp_connection import MCPConnectionConfig
 
     async def run_ask():
@@ -455,27 +491,41 @@ def ask(
         else:
             mcp_config = MCPConnectionConfig.stdio()
 
+        # 创建状态显示回调（JSON 输出时自动静默）
+        if quiet or json_output:
+            status_callback = NullCallback()
+        else:
+            status_callback = AgentStatusDisplay(console, verbose=verbose)
+
         # 创建 Agent
         if agent_type == AgentType.claude:
             from grid_code.agents import ClaudeAgent
+            # Claude Agent 使用全局回调
+            set_status_callback(status_callback)
             agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config)
         elif agent_type == AgentType.pydantic:
             from grid_code.agents import PydanticAIAgent
-            agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config)
+            agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
         else:
             from grid_code.agents import LangGraphAgent
-            agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config)
+            agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
 
         try:
             if not json_output:
-                with console.status("思考中..."):
-                    response = await agent.chat(query)
+                # 非 JSON 模式：使用状态显示
+                if quiet:
+                    with console.status("思考中..."):
+                        response = await agent.chat(query)
+                else:
+                    async with status_callback.live_context():
+                        response = await agent.chat(query)
 
                 console.print(response.content)
 
                 if response.sources:
                     console.print(f"\n[dim]来源: {', '.join(response.sources)}[/dim]")
             else:
+                # JSON 模式：静默执行
                 import json
 
                 response = await agent.chat(query)
@@ -493,6 +543,9 @@ def ask(
         finally:
             if hasattr(agent, "close"):
                 await agent.close()
+            # 清理全局回调
+            if agent_type == AgentType.claude:
+                set_status_callback(None)
 
     asyncio.run(run_ask())
 

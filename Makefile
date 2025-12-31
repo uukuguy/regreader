@@ -184,7 +184,7 @@ ask-claude: ## Single query with Claude Agent
 	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude
 
 ask-pydantic: ## Single query with Pydantic AI Agent
-	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic -v
 
 ask-langgraph: ## Single query with LangGraph Agent
 	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph
