@@ -237,10 +237,7 @@ class MCPConnectionManager:
     def get_pydantic_mcp_server(self):
         """获取 Pydantic AI 的 MCP Server 对象
 
-        返回 MCPServerStdio 或 MCPServerSSE（如果可用）。
-
-        注意：Pydantic AI 的 SSE 支持取决于 pydantic-ai 版本。
-        如果不支持 MCPServerSSE，会自动回退到 stdio 模式。
+        返回 MCPServerStdio 或 MCPServerSSE。
 
         Returns:
             MCPServerStdio 或 MCPServerSSE 实例
@@ -255,15 +252,8 @@ class MCPConnectionManager:
         if self.config.transport == "stdio":
             return self._create_pydantic_stdio_server()
 
-        # 尝试使用 SSE 模式
-        try:
-            return self._create_pydantic_sse_server()
-        except ImportError:
-            logger.warning(
-                "Pydantic AI 不支持 MCPServerSSE，将使用 stdio 模式。"
-                "请升级 pydantic-ai 或使用 LangGraph Agent。"
-            )
-            return self._create_pydantic_stdio_server()
+        # SSE 模式
+        return self._create_pydantic_sse_server()
 
     def _create_pydantic_stdio_server(self):
         """创建 Pydantic AI 的 stdio MCP Server"""
@@ -275,13 +265,25 @@ class MCPConnectionManager:
         )
 
     def _create_pydantic_sse_server(self):
-        """创建 Pydantic AI 的 SSE MCP Server"""
-        from pydantic_ai.mcp import MCPServerHTTP
+        """创建 Pydantic AI 的 SSE MCP Server
+
+        使用 MCPServerSSE（而非已弃用的 MCPServerHTTP），
+        并传入禁用代理的 httpx 客户端以避免网络问题。
+        """
+        import httpx
+        from pydantic_ai.mcp import MCPServerSSE
 
         if not self.config.server_url:
             raise ValueError("SSE 模式需要 server_url")
 
-        return MCPServerHTTP(url=self.config.server_url)
+        # 创建禁用代理的 httpx 客户端
+        # 与 GridCodeMCPClient 保持一致，避免代理导致的 502 错误
+        http_client = httpx.AsyncClient(proxy=None, trust_env=False)
+
+        return MCPServerSSE(
+            url=self.config.server_url,
+            http_client=http_client,
+        )
 
     # ==================== LangGraph 适配 ====================
 
