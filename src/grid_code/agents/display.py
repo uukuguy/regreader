@@ -135,6 +135,7 @@ class AgentStatusDisplay(StatusCallback):
         self._streaming_text: str = ""
         self._is_streaming: bool = False
         self._current_phase: str | None = None
+        self._last_committed_text: str = ""  # 追踪已提交的文本，避免重复
 
         # Live 实例
         self._live: Live | None = None
@@ -527,9 +528,12 @@ class AgentStatusDisplay(StatusCallback):
             # 更新当前状态
             self._current_status = self._format_tool_call_start(event)
 
-            # 如果有流式文本，先添加到历史
+            # 如果有流式文本且未提交过，先添加到历史
             if self._streaming_text and self._verbose:
-                self._history.append(self._format_thinking_text(self._streaming_text))
+                # 避免重复添加相同内容
+                if self._streaming_text != self._last_committed_text:
+                    self._history.append(self._format_thinking_text(self._streaming_text))
+                    self._last_committed_text = self._streaming_text
                 self._streaming_text = ""
                 self._is_streaming = False
 
@@ -563,18 +567,20 @@ class AgentStatusDisplay(StatusCallback):
             # 流式文本增量（仅详细模式）
             if self._verbose:
                 delta = event.data.get("delta", "")
-                self._streaming_text += delta
-                self._is_streaming = True
-                # 更新当前状态显示流式文本
-                self._current_status = self._format_thinking_text(self._streaming_text)
+                if delta:
+                    self._streaming_text += delta
+                    self._is_streaming = True
+                    # 更新当前状态显示流式文本
+                    self._current_status = self._format_thinking_text(self._streaming_text)
 
         elif event.event_type == AgentEventType.THINKING_DELTA:
             # 思考增量（仅详细模式）
             if self._verbose:
                 delta = event.data.get("delta", "")
-                self._streaming_text += delta
-                self._is_streaming = True
-                self._current_status = self._format_thinking_text(self._streaming_text)
+                if delta:
+                    self._streaming_text += delta
+                    self._is_streaming = True
+                    self._current_status = self._format_thinking_text(self._streaming_text)
 
         elif event.event_type == AgentEventType.PHASE_CHANGE:
             # 阶段变化（仅详细模式）
@@ -586,9 +592,11 @@ class AgentStatusDisplay(StatusCallback):
                     self._history.append(self._format_phase_change(phase, description))
 
         elif event.event_type == AgentEventType.RESPONSE_COMPLETE:
-            # 清理流式文本状态
+            # 清理流式文本状态（避免重复添加）
             if self._streaming_text and self._verbose:
-                self._history.append(self._format_thinking_text(self._streaming_text))
+                if self._streaming_text != self._last_committed_text:
+                    self._history.append(self._format_thinking_text(self._streaming_text))
+                    self._last_committed_text = self._streaming_text
                 self._streaming_text = ""
                 self._is_streaming = False
 
@@ -629,6 +637,7 @@ class AgentStatusDisplay(StatusCallback):
         self._streaming_text = ""
         self._is_streaming = False
         self._current_phase = None
+        self._last_committed_text = ""
 
         with Live(
             self._render(),
