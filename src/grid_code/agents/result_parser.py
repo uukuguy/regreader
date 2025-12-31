@@ -137,19 +137,22 @@ def _parse_smart_search(result: Any) -> ToolResultSummary:
 def _parse_get_toc(result: Any) -> ToolResultSummary:
     """解析 get_toc 结果
 
-    get_toc 返回格式:
+    get_toc 返回格式 (TocTree):
     {
-        "chapters": [
-            {"id": "1", "title": "总则", "level": 1, ...},
+        "reg_id": "angui_2024",
+        "title": "...",
+        "total_pages": 150,
+        "items": [
+            {"title": "1. 总则", "level": 1, "page_start": 4, ...},
             ...
         ]
     }
-    或直接返回列表
     """
     summary = ToolResultSummary(result_type="chapters")
 
     if isinstance(result, dict):
-        chapters = result.get("chapters", [])
+        # TocTree 使用 items 字段，兼容旧格式 chapters
+        chapters = result.get("items", []) or result.get("chapters", [])
     elif isinstance(result, list):
         chapters = result
     else:
@@ -184,42 +187,37 @@ def _parse_read_page_range(result: Any) -> ToolResultSummary:
 
     read_page_range 返回格式:
     {
-        "pages": [
-            {"page_num": 85, "content": "...", ...},
-            ...
-        ]
+        "content_markdown": "...",
+        "source": "angui_2024 P150",
+        "start_page": 150,
+        "end_page": 150,
+        "page_count": 1,
+        "has_merged_tables": false
     }
     """
     summary = ToolResultSummary(result_type="pages")
 
-    if isinstance(result, dict):
-        pages = result.get("pages", [])
-    elif isinstance(result, list):
-        pages = result
-    else:
+    if not isinstance(result, dict):
         return summary
 
-    summary.result_count = len(pages)
+    # 提取页码信息
+    start_page = result.get("start_page")
+    end_page = result.get("end_page")
+    page_count = result.get("page_count", 0)
 
-    # 提取页码
-    page_nums = []
-    total_chars = 0
+    # 设置结果数量
+    summary.result_count = page_count if page_count else 1
 
-    for page in pages:
-        if isinstance(page, dict):
-            page_num = page.get("page_num") or page.get("page")
-            if page_num:
-                page_nums.append(int(page_num))
+    # 构建页码列表
+    if start_page and end_page:
+        summary.page_sources = list(range(int(start_page), int(end_page) + 1))
+    elif start_page:
+        summary.page_sources = [int(start_page)]
 
-            # 统计字符数
-            content = page.get("content") or page.get("text")
-            if content:
-                total_chars += len(str(content))
-
-    summary.page_sources = sorted(page_nums)
-
-    # 生成预览
-    if page_nums:
+    # 统计内容字符数
+    content = result.get("content_markdown") or result.get("content")
+    if content:
+        total_chars = len(str(content))
         summary.content_preview = f"共 {total_chars} 字符"
 
     return summary

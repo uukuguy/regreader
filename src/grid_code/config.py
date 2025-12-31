@@ -6,6 +6,8 @@
 import os
 from pathlib import Path
 
+from typing import Literal
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -123,6 +125,12 @@ class GridCodeSettings(BaseSettings):
         default="claude-sonnet-4-20250514",
         description="LLM 模型名称（如 claude-sonnet-4-20250514, gpt-4o, gemini-pro）",
         validation_alias=AliasChoices("OPENAI_MODEL_NAME", "LLM_MODEL_NAME"),
+    )
+
+    # Agent 配置
+    prompt_mode: Literal["full", "optimized", "simple"] = Field(
+        default="optimized",
+        description="Agent 提示词模式: full（完整版）, optimized（优化版，默认）, simple（最简版）",
     )
 
     # 索引后端配置

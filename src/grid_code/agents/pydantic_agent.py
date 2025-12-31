@@ -31,7 +31,8 @@ from grid_code.agents.events import (
     tool_start_event,
 )
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
-from grid_code.agents.prompts import SYSTEM_PROMPT
+from grid_code.agents.memory import AgentMemory, ContentChunk
+from grid_code.agents.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_SIMPLE, SYSTEM_PROMPT_V2
 from grid_code.agents.result_parser import parse_tool_result
 from grid_code.config import get_settings
 
@@ -143,15 +144,19 @@ class PydanticAIAgent(BaseGridCodeAgent):
         self._mcp_server = self._mcp_manager.get_pydantic_mcp_server()
 
         # 创建 Agent（带 MCP toolsets）
+        # 使用 lambda 实现动态系统提示词，每次运行时重新构建
         self._agent = Agent(
             self._model_name,
             deps_type=AgentDependencies,
-            system_prompt=self._build_system_prompt(),
+            system_prompt=lambda ctx: self._build_system_prompt(),
             toolsets=[self._mcp_server],
         )
 
         # 消息历史（用于多轮对话）
         self._message_history: list[ModelMessage] = []
+
+        # 记忆系统（目录缓存 + 相关内容记忆）
+        self._memory = AgentMemory()
 
         # 工具调用记录（单次查询）
         self._tool_calls: list[dict] = []
@@ -172,17 +177,34 @@ class PydanticAIAgent(BaseGridCodeAgent):
     def _build_system_prompt(self) -> str:
         """构建系统提示词
 
-        如果指定了 reg_id，则添加上下文限定。
+        根据配置选择不同版本的提示词：
+        - full: 完整版（向后兼容）
+        - optimized: 优化版（默认，减少 token 消耗）
+        - simple: 最简版（最快响应）
+
+        同时注入记忆上下文（目录缓存提示 + 已获取的相关内容）
         """
-        base_prompt = SYSTEM_PROMPT
+        settings = get_settings()
+
+        if settings.prompt_mode == "full":
+            base_prompt = SYSTEM_PROMPT
+        elif settings.prompt_mode == "simple":
+            base_prompt = SYSTEM_PROMPT_SIMPLE
+        else:  # optimized
+            base_prompt = SYSTEM_PROMPT_V2
 
         if self.reg_id:
-            context = (
-                f"\n\n# 当前规程上下文\n"
-                f"默认规程标识: {self.reg_id}\n"
-                f"调用工具时如未指定 reg_id，请使用此默认值。"
-            )
-            return base_prompt + context
+            base_prompt += f"\n\n# 当前规程\n默认规程: {self.reg_id}"
+
+        # 注入目录缓存提示
+        toc_hint = self._memory.get_toc_cache_hint()
+        if toc_hint:
+            base_prompt += toc_hint
+
+        # 注入已获取的相关内容
+        memory_context = self._memory.get_memory_context()
+        if memory_context:
+            base_prompt += f"\n\n{memory_context}"
 
         return base_prompt
 
@@ -324,6 +346,9 @@ class PydanticAIAgent(BaseGridCodeAgent):
 
                     # 提取来源信息
                     self._extract_sources_from_content(result_content)
+
+                    # 更新记忆系统
+                    self._update_memory(tool_name, result_content)
 
         return event_stream_handler
 
@@ -478,16 +503,59 @@ class PydanticAIAgent(BaseGridCodeAgent):
             except (json.JSONDecodeError, TypeError):
                 pass
 
+    def _update_memory(self, tool_name: str, result: Any) -> None:
+        """根据工具结果更新记忆系统
+
+        Args:
+            tool_name: 工具名称
+            result: 工具返回结果
+        """
+        # 解析 JSON 字符串
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except (json.JSONDecodeError, TypeError):
+                return
+
+        if not isinstance(result, dict):
+            return
+
+        if tool_name == "get_toc":
+            # 缓存目录
+            reg_id = result.get("reg_id", self.reg_id)
+            if reg_id:
+                self._memory.cache_toc(reg_id, result)
+
+        elif tool_name == "smart_search":
+            # 提取搜索结果
+            results = result.get("results", [])
+            self._memory.add_search_results(results)
+
+        elif tool_name == "read_page_range":
+            # 记录页面内容摘要
+            content = result.get("content_markdown") or result.get("content")
+            source = result.get("source", "")
+            if content and source:
+                self._memory.add_page_content(content, source)
+
+        elif tool_name == "read_chapter_content":
+            # 记录章节内容摘要
+            content = result.get("content") or result.get("content_markdown")
+            source = result.get("source", "")
+            if content and source:
+                self._memory.add_page_content(content, source, relevance=0.85)
+
     async def reset(self) -> None:
         """重置对话历史
 
-        清空消息历史，开始新的对话。
+        清空消息历史和记忆，开始新的对话。
         """
         self._message_history = []
         self._tool_calls = []
         self._sources = []
         self._tool_start_times = {}
-        logger.debug("Conversation history reset")
+        self._memory.reset()
+        logger.debug("Conversation history and memory reset")
 
     def get_message_count(self) -> int:
         """获取当前消息历史数量

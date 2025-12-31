@@ -11,7 +11,8 @@ from loguru import logger
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
 from grid_code.agents.mcp_config import get_tool_name
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
-from grid_code.agents.prompts import SYSTEM_PROMPT
+from grid_code.agents.memory import AgentMemory
+from grid_code.agents.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_SIMPLE, SYSTEM_PROMPT_V2
 from grid_code.agents.session import SessionManager, SessionState
 from grid_code.config import get_settings
 from grid_code.mcp.tool_metadata import TOOL_METADATA
@@ -115,6 +116,9 @@ class ClaudeAgent(BaseGridCodeAgent):
         # 会话管理器
         self._session_manager = SessionManager()
 
+        # 记忆系统（目录缓存 + 相关内容记忆）
+        self._memory = AgentMemory()
+
         # MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
 
@@ -151,17 +155,34 @@ class ClaudeAgent(BaseGridCodeAgent):
     def _build_system_prompt(self) -> str:
         """构建系统提示词
 
-        如果指定了 reg_id，则添加上下文限定。
+        根据配置选择不同版本的提示词：
+        - full: 完整版（向后兼容）
+        - optimized: 优化版（默认，减少 token 消耗）
+        - simple: 最简版（最快响应）
+
+        同时注入记忆上下文（目录缓存提示 + 已获取的相关内容）
         """
-        base_prompt = SYSTEM_PROMPT
+        settings = get_settings()
+
+        if settings.prompt_mode == "full":
+            base_prompt = SYSTEM_PROMPT
+        elif settings.prompt_mode == "simple":
+            base_prompt = SYSTEM_PROMPT_SIMPLE
+        else:  # optimized
+            base_prompt = SYSTEM_PROMPT_V2
 
         if self.reg_id:
-            context = (
-                f"\n\n# 当前规程上下文\n"
-                f"默认规程标识: {self.reg_id}\n"
-                f"调用工具时如未指定 reg_id，请使用此默认值。"
-            )
-            return base_prompt + context
+            base_prompt += f"\n\n# 当前规程\n默认规程: {self.reg_id}"
+
+        # 注入目录缓存提示
+        toc_hint = self._memory.get_toc_cache_hint()
+        if toc_hint:
+            base_prompt += toc_hint
+
+        # 注入已获取的相关内容
+        memory_context = self._memory.get_memory_context()
+        if memory_context:
+            base_prompt += f"\n\n{memory_context}"
 
         return base_prompt
 
@@ -320,6 +341,7 @@ class ClaudeAgent(BaseGridCodeAgent):
         """处理 SDK 事件
 
         使用 isinstance() 检查事件类型，符合 SDK 最佳实践。
+        同时更新记忆系统。
         """
         # 处理 AssistantMessage
         if AssistantMessage is not None and isinstance(event, AssistantMessage):
@@ -337,17 +359,69 @@ class ClaudeAgent(BaseGridCodeAgent):
                     )
                     logger.debug(f"Tool call: {block.name}")
 
-        # 从工具结果中提取来源
+        # 从工具结果中提取来源并更新记忆
         if hasattr(event, "type") and getattr(event, "type", None) == "tool_result":
             content = getattr(event, "content", None)
+            tool_name = getattr(event, "tool_name", None)
             if content:
                 self._extract_sources(content, session)
+                # 更新记忆系统
+                if tool_name:
+                    self._update_memory(tool_name, content)
 
         # 处理 content 属性（可能包含工具结果）
         if hasattr(event, "content"):
             content = getattr(event, "content", None)
             if content and not isinstance(event, AssistantMessage):
                 self._extract_sources(content, session)
+
+    def _update_memory(self, tool_name: str, result: Any) -> None:
+        """根据工具结果更新记忆系统
+
+        Args:
+            tool_name: 工具名称（如 mcp__gridcode__get_toc）
+            result: 工具返回结果
+        """
+        import json
+
+        # 解析 JSON 字符串
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except (json.JSONDecodeError, TypeError):
+                return
+
+        if not isinstance(result, dict):
+            return
+
+        # 提取真实工具名（去除 mcp__gridcode__ 前缀）
+        simple_name = tool_name
+        if "__" in tool_name:
+            parts = tool_name.split("__")
+            simple_name = parts[-1] if len(parts) > 1 else tool_name
+
+        # 根据工具类型更新记忆
+        if simple_name == "get_toc":
+            # 缓存目录
+            reg_id = result.get("reg_id") or self.reg_id
+            if reg_id:
+                self._memory.cache_toc(reg_id, result)
+                logger.debug(f"[Memory] 缓存目录: {reg_id}")
+
+        elif simple_name == "smart_search":
+            # 提取搜索结果
+            results = result.get("results", [])
+            if results:
+                self._memory.add_search_results(results)
+                logger.debug(f"[Memory] 添加搜索结果: {len(results)} 条")
+
+        elif simple_name == "read_page_range":
+            # 记录页面内容
+            content = result.get("content_markdown", "")
+            source = result.get("source", "")
+            if content and source:
+                self._memory.add_page_content(content, source)
+                logger.debug(f"[Memory] 添加页面内容: {source}")
 
     def _extract_sources(self, result: Any, session: SessionState) -> None:
         """从工具结果中提取来源信息
@@ -410,11 +484,13 @@ class ClaudeAgent(BaseGridCodeAgent):
             session_id: 要重置的会话 ID，如果为 None 则重置默认会话
         """
         self._session_manager.reset(session_id)
+        self._memory.clear_query_context()  # 清除查询上下文，保留目录缓存
         logger.debug(f"Session reset: {session_id or 'default'}")
 
     async def reset_all(self):
         """重置所有会话"""
         self._session_manager.reset_all()
+        self._memory.reset()  # 完全重置记忆（包括目录缓存）
         logger.debug("All sessions reset")
 
     def get_sessions(self) -> list[str]:
