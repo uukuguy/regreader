@@ -158,35 +158,35 @@ REG_ID ?= angui_2024
 AGENT ?= claude
 
 chat: ## Start interactive chat (usage: make chat REG_ID=angui AGENT=claude MODE=mcp-sse)
-	$(UV) run gridcode chat --reg-id $(REG_ID) --agent $(AGENT) $(MCP_FLAGS)
+	$(UV) run gridcode $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent $(AGENT)
 
 chat-claude: ## Start chat with Claude Agent SDK
-	$(UV) run gridcode chat --reg-id $(REG_ID) --agent claude $(MCP_FLAGS)
+	$(UV) run gridcode $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent claude
 
 chat-pydantic: ## Start chat with Pydantic AI Agent
-	$(UV) run gridcode chat --reg-id $(REG_ID) --agent pydantic $(MCP_FLAGS)
+	$(UV) run gridcode $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent pydantic
 
 chat-langgraph: ## Start chat with LangGraph Agent
-	$(UV) run gridcode chat --reg-id $(REG_ID) --agent langgraph $(MCP_FLAGS)
+	$(UV) run gridcode $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent langgraph
 
 # Single query execution (non-interactive)
 # ASK_QUERY ?= 锦西电厂安控装置的具体配置
 # ASK_QUERY ?= 锦西电厂安控装置的主要功能
 ASK_QUERY ?= 华北电网500千伏天乐双线停运时，安控系统应采取哪些措施？
 ask: ## Single query to Agent (usage: make ask ASK_QUERY="母线失压如何处理?" AGENT=claude)
-	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT) $(MCP_FLAGS)
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT)
 
 ask-json: ## Single query with JSON output
-	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT) --json $(MCP_FLAGS)
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT) --json
 
 ask-claude: ## Single query with Claude Agent
-	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude $(MCP_FLAGS)
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude
 
 ask-pydantic: ## Single query with Pydantic AI Agent
-	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic $(MCP_FLAGS)
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic
 
 ask-langgraph: ## Single query with LangGraph Agent
-	$(UV) run gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph $(MCP_FLAGS)
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph
 
 list: ## List all ingested regulations
 	$(UV) run gridcode $(MCP_FLAGS) list
