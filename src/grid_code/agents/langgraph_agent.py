@@ -17,7 +17,6 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
@@ -33,12 +32,15 @@ from grid_code.agents.callbacks import NullCallback, StatusCallback
 from grid_code.agents.events import (
     iteration_event,
     response_complete_event,
+    text_delta_event,
     thinking_event,
     tool_end_event,
     tool_start_event,
 )
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
-from grid_code.agents.prompts import SYSTEM_PROMPT
+from grid_code.agents.memory import AgentMemory
+from grid_code.agents.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_SIMPLE, SYSTEM_PROMPT_V2
+from grid_code.agents.result_parser import parse_tool_result
 from grid_code.config import get_settings
 
 if TYPE_CHECKING:
@@ -104,25 +106,21 @@ class LangGraphAgent(BaseGridCodeAgent):
 
         settings = get_settings()
         self._model_name = model or settings.llm_model_name
-        provider = settings.get_llm_provider()
 
-        # 根据提供商创建对应的 LLM
-        if provider == "anthropic":
-            self._llm = ChatAnthropic(
-                model=self._model_name,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_base_url,
-                max_tokens=4096,
-            )
-        elif provider == "openai":
-            self._llm = ChatOpenAI(
-                model=self._model_name,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_base_url,
-                max_tokens=4096,
-            )
-        else:
-            raise ValueError(f"Unsupported provider: {provider}")
+        # 统一使用 OpenAI 兼容接口（与 pydantic_agent 一致）
+        # 因为大多数模型服务都提供 OpenAI 兼容接口
+        self._llm = ChatOpenAI(
+            model=self._model_name,
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            max_tokens=4096,
+            streaming=True,  # 启用流式输出
+        )
+
+        logger.debug(
+            f"LLM initialized: model={self._model_name}, "
+            f"base_url={settings.llm_base_url}"
+        )
 
         # MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
@@ -148,6 +146,12 @@ class LangGraphAgent(BaseGridCodeAgent):
         # 迭代计数（用于状态显示）
         self._iteration_count: int = 0
 
+        # 记忆系统（目录缓存 + 相关内容记忆）
+        self._memory = AgentMemory()
+
+        # 追踪上一工具结束时间（用于计算思考耗时）
+        self._last_tool_end_time: float | None = None
+
         logger.info(
             f"LangGraphAgent initialized: model={self._model_name}, "
             f"mcp_transport={self._mcp_manager.config.transport}"
@@ -171,15 +175,43 @@ class LangGraphAgent(BaseGridCodeAgent):
         return self._thread_id
 
     def _build_system_prompt(self) -> str:
-        """构建系统提示词"""
-        base_prompt = SYSTEM_PROMPT
+        """构建系统提示词
+
+        根据配置选择不同版本的提示词：
+        - full: 完整版（向后兼容）
+        - optimized: 优化版（默认，减少 token 消耗）
+        - simple: 最简版（最快响应）
+
+        同时注入记忆上下文（目录缓存提示 + 已获取的相关内容）
+        """
+        settings = get_settings()
+
+        # 根据 prompt_mode 选择基础提示词
+        if settings.prompt_mode == "full":
+            base_prompt = SYSTEM_PROMPT
+        elif settings.prompt_mode == "simple":
+            base_prompt = SYSTEM_PROMPT_SIMPLE
+        else:  # optimized
+            base_prompt = SYSTEM_PROMPT_V2
+
+        # 注入默认规程上下文
         if self.reg_id:
-            context = (
+            base_prompt += (
                 f"\n\n# 当前规程上下文\n"
                 f"默认规程标识: {self.reg_id}\n"
                 f"调用工具时如未指定 reg_id，请使用此默认值。"
             )
-            return base_prompt + context
+
+        # 注入目录缓存提示
+        toc_hint = self._memory.get_toc_cache_hint()
+        if toc_hint:
+            base_prompt += toc_hint
+
+        # 注入已获取的相关内容
+        memory_context = self._memory.get_memory_context()
+        if memory_context:
+            base_prompt += f"\n\n{memory_context}"
+
         return base_prompt
 
     async def _ensure_mcp_connected(self) -> None:
@@ -222,6 +254,13 @@ class LangGraphAgent(BaseGridCodeAgent):
                 if self.reg_id and "reg_id" in kwargs and not kwargs.get("reg_id"):
                     kwargs["reg_id"] = self.reg_id
 
+                # 计算思考耗时（从上一工具结束到本工具开始）
+                now = time.time()
+                thinking_duration_ms = None
+                if self._last_tool_end_time is not None:
+                    thinking_duration_ms = (now - self._last_tool_end_time) * 1000
+                    logger.debug(f"[LangGraph] thinking_duration_ms={thinking_duration_ms:.1f}")
+
                 # 发送工具调用开始事件
                 await self._callback.on_event(tool_start_event(tool_name, kwargs))
 
@@ -230,14 +269,19 @@ class LangGraphAgent(BaseGridCodeAgent):
 
                 result = await self._mcp_client.call_tool(tool_name, kwargs)
 
-                # 计算耗时
-                duration_ms = (time.time() - start_time) * 1000
+                # 计算执行耗时
+                end_time = time.time()
+                duration_ms = (end_time - start_time) * 1000
+
+                # 更新上一工具结束时间
+                self._last_tool_end_time = end_time
 
                 # 追踪工具调用
                 self._tool_calls.append({
                     "name": tool_name,
                     "input": kwargs,
                     "output": result,
+                    "thinking_duration_ms": thinking_duration_ms,
                 })
 
                 # 提取来源
@@ -245,23 +289,28 @@ class LangGraphAgent(BaseGridCodeAgent):
                 self._extract_sources(result)
                 new_sources = self._sources[sources_before:]
 
-                # 计算结果数量
-                result_count = None
-                if isinstance(result, list):
-                    result_count = len(result)
-                elif isinstance(result, dict) and "results" in result:
-                    result_count = len(result["results"])
+                # 使用结果解析器提取详细摘要
+                summary = parse_tool_result(tool_name, result)
 
-                # 发送工具调用完成事件
+                # 发送工具调用完成事件（带详细摘要）
                 await self._callback.on_event(
                     tool_end_event(
                         tool_name=tool_name,
                         duration_ms=duration_ms,
-                        result_count=result_count,
+                        result_count=summary.result_count,
                         sources=new_sources,
                         tool_input=kwargs,
+                        # 详细模式新增字段
+                        result_type=summary.result_type,
+                        chapter_count=summary.chapter_count,
+                        page_sources=summary.page_sources,
+                        content_preview=summary.content_preview,
+                        thinking_duration_ms=thinking_duration_ms,
                     )
                 )
+
+                # 更新记忆系统
+                self._update_memory(tool_name, result)
 
                 # 返回 JSON 字符串
                 if isinstance(result, (dict, list)):
@@ -393,11 +442,54 @@ class LangGraphAgent(BaseGridCodeAgent):
             for item in result:
                 self._extract_sources(item)
 
+    def _update_memory(self, tool_name: str, result: Any) -> None:
+        """根据工具结果更新记忆系统
+
+        Args:
+            tool_name: 工具名称
+            result: 工具返回结果
+        """
+        # 解析 JSON 字符串
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except (json.JSONDecodeError, TypeError):
+                return
+
+        if not isinstance(result, dict):
+            return
+
+        if tool_name == "get_toc":
+            # 缓存目录
+            reg_id = result.get("reg_id", self.reg_id)
+            if reg_id:
+                self._memory.cache_toc(reg_id, result)
+
+        elif tool_name == "smart_search":
+            # 提取搜索结果
+            results = result.get("results", [])
+            self._memory.add_search_results(results)
+
+        elif tool_name == "read_page_range":
+            # 记录页面内容摘要
+            content = result.get("content_markdown") or result.get("content")
+            source = result.get("source", "")
+            if content and source:
+                self._memory.add_page_content(content, source)
+
+        elif tool_name == "read_chapter_content":
+            # 记录章节内容摘要
+            content = result.get("content") or result.get("content_markdown")
+            source = result.get("source", "")
+            if content and source:
+                self._memory.add_page_content(content, source, relevance=0.85)
+
     async def chat(self, message: str) -> AgentResponse:
         """与 Agent 对话
 
         使用 StateGraph 执行 ReAct 循环。
         通过 thread_id 支持多轮对话。
+        支持流式输出 LLM 响应内容。
 
         Args:
             message: 用户消息
@@ -415,6 +507,7 @@ class LangGraphAgent(BaseGridCodeAgent):
         self._tool_calls = []
         self._sources = []
         self._iteration_count = 0
+        self._last_tool_end_time = None  # 重置工具时间追踪
 
         # 记录开始时间
         start_time = time.time()
@@ -425,19 +518,50 @@ class LangGraphAgent(BaseGridCodeAgent):
         # 配置（包含 thread_id）
         config = {"configurable": {"thread_id": self._thread_id}}
 
-        # 执行图
+        # 执行图（使用流式处理）
         try:
-            result = await self._graph.ainvoke(
+            final_content = ""
+            final_messages = []
+
+            # 使用 astream_events 获取流式事件
+            async for event in self._graph.astream_events(
                 {"messages": [HumanMessage(content=message)]},
                 config=config,
-            )
+                version="v2",
+            ):
+                event_type = event.get("event", "")
 
-            # 提取最终回答
-            final_content = ""
-            messages = result.get("messages", [])
-            for msg in reversed(messages):
+                # 处理 LLM 流式输出
+                if event_type == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        # 发送文本增量事件
+                        if isinstance(chunk.content, str):
+                            await self._callback.on_event(
+                                text_delta_event(chunk.content)
+                            )
+
+                # 处理图执行结束
+                elif event_type == "on_chain_end":
+                    # 检查是否为最终输出
+                    output = event.get("data", {}).get("output", {})
+                    if isinstance(output, dict) and "messages" in output:
+                        final_messages = output.get("messages", [])
+
+            # 从最终消息中提取回答
+            for msg in reversed(final_messages):
                 if isinstance(msg, AIMessage) and not msg.tool_calls:
-                    final_content = msg.content
+                    if isinstance(msg.content, str):
+                        final_content = msg.content
+                    elif isinstance(msg.content, list):
+                        # content 可能是 blocks 列表
+                        text_parts = []
+                        for item in msg.content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                text_parts.append(item.get("text", ""))
+                            elif isinstance(item, str):
+                                text_parts.append(item)
+                        final_content = "".join(text_parts)
                     break
 
             # 发送思考结束事件
@@ -477,10 +601,13 @@ class LangGraphAgent(BaseGridCodeAgent):
         """重置对话历史
 
         生成新的 thread_id，开始新的会话。
+        同时重置记忆系统。
         """
         self._thread_id = self._generate_thread_id()
         self._tool_calls = []
         self._sources = []
+        self._last_tool_end_time = None
+        self._memory.reset()  # 重置记忆系统
         logger.debug(f"Session reset, new thread_id: {self._thread_id}")
 
     def new_session(self) -> str:
