@@ -144,13 +144,17 @@ class PydanticAIAgent(BaseGridCodeAgent):
         self._mcp_server = self._mcp_manager.get_pydantic_mcp_server()
 
         # 创建 Agent（带 MCP toolsets）
-        # 使用 lambda 实现动态系统提示词，每次运行时重新构建
         self._agent = Agent(
             self._model_name,
             deps_type=AgentDependencies,
-            system_prompt=lambda ctx: self._build_system_prompt(),
             toolsets=[self._mcp_server],
         )
+
+        # 使用装饰器注册动态系统提示词
+        # dynamic=True 确保每次运行时重新构建（包含记忆上下文）
+        @self._agent.system_prompt(dynamic=True)
+        def dynamic_system_prompt(ctx: RunContext[AgentDependencies]) -> str:
+            return self._build_system_prompt()
 
         # 消息历史（用于多轮对话）
         self._message_history: list[ModelMessage] = []
