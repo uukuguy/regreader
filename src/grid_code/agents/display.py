@@ -566,22 +566,23 @@ class AgentStatusDisplay(StatusCallback):
 
         elif event.event_type == AgentEventType.TEXT_DELTA:
             # 流式文本增量（仅详细模式）
+            # 只累积文本，不更新 Live 显示（避免终端刷新问题导致重复）
             if self._verbose:
                 delta = event.data.get("delta", "")
                 if delta:
                     self._streaming_text += delta
                     self._is_streaming = True
-                    # 更新当前状态显示流式文本
-                    self._current_status = self._format_thinking_text(self._streaming_text)
+                    # 不再更新 _current_status，避免 Live 刷新导致重复显示
 
         elif event.event_type == AgentEventType.THINKING_DELTA:
             # 思考增量（仅详细模式）
+            # 只累积文本，不更新 Live 显示
             if self._verbose:
                 delta = event.data.get("delta", "")
                 if delta:
                     self._streaming_text += delta
                     self._is_streaming = True
-                    self._current_status = self._format_thinking_text(self._streaming_text)
+                    # 不再更新 _current_status，避免 Live 刷新导致重复显示
 
         elif event.event_type == AgentEventType.PHASE_CHANGE:
             # 阶段变化（仅详细模式）
