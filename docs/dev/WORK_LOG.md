@@ -1,5 +1,111 @@
 # GridCode 开发工作日志 (dev 分支)
 
+## 2026-01-02 代码分析与文档更新
+
+### 会话概述
+
+对当前代码实现进行全面分析，更新 CLAUDE.md 项目指南，并生成最新的系统设计与实现文档。
+
+### 完成的工作
+
+#### 1. 全面代码分析
+
+对项目各模块进行了深入分析：
+
+**Parser 层**
+- `docling_parser.py` - 文档解析器，支持 OCR 和表格结构提取
+- `page_extractor.py` - 页面内容提取器
+- `table_registry_builder.py` - 跨页表格处理
+
+**Storage 层**
+- `models.py` - 核心数据模型 (PageDocument, ContentBlock, DocumentStructure, TableRegistry 等)
+- `page_store.py` - 页面持久化存储管理
+
+**Index 层**
+- `base.py` - 抽象基类定义
+- `hybrid_search.py` - RRF 混合检索器
+- `table_search.py` - 表格混合检索
+- `keyword/` - FTS5/Tantivy/Whoosh 关键词索引实现
+- `vector/` - LanceDB/Qdrant 向量索引实现
+
+**Embedding 层**
+- `base.py` - 嵌入抽象接口
+- `sentence_transformer.py` - SentenceTransformer 后端
+- `flag.py` - FlagEmbedding 后端
+
+**MCP 层**
+- `tools.py` - 工具实现（4 阶段分类：基础/多跳/上下文/发现）
+- `server.py` - FastMCP Server 创建
+- `tool_metadata.py` - 工具元数据
+- `client.py` - MCP 客户端
+
+**Agent 层**
+- `base.py` - Agent 抽象基类
+- `claude_agent.py` - Claude Agent SDK 实现
+- `pydantic_agent.py` - Pydantic AI 实现
+- `langgraph_agent.py` - LangGraph 实现
+- `memory.py` - 对话历史管理
+- `display.py` - 状态显示回调
+- `mcp_connection.py` - MCP 连接配置
+
+#### 2. CLAUDE.md 更新
+
+更新了项目开发指南，包括：
+
+- **项目结构**: 更新为完整的目录树，包含所有子模块和文件
+- **技术栈**: 添加 Embedding 层（SentenceTransformer/FlagEmbedding）
+- **数据模型**: 扩展为三个分类（页面级/结构/检索）
+- **MCP 工具接口**: 按 Phase 0-3 分类展示全部工具
+- **开发约束**: 添加 Embedding 层扩展指南
+- **CLI 命令**: 完整列出所有命令及示例
+- **配置系统**: 添加完整环境变量参考
+- **异常体系**: 列出完整异常类层次结构
+- **文档路径**: 更新为 dev 分支路径
+
+#### 3. 设计实施文档
+
+创建 `docs/dev/DESIGN_DOCUMENT.md`，包含：
+
+- **项目概述**: 定位、设计理念、技术栈架构图
+- **数据模型设计**: 核心模型层级、章节结构模型、检索模型
+- **存储层实现**: PageStore、TableRegistry 详细设计
+- **索引层实现**: 抽象接口、关键词/向量索引实现、混合检索
+- **Embedding 层实现**: 抽象接口和具体实现
+- **MCP 工具层实现**: 工具分类体系、核心工具实现、Server 实现
+- **Agent 层实现**: 抽象基类、三种框架实现、对话历史管理
+- **CLI 实现**: 命令结构和完整命令列表
+- **配置系统**: GridCodeSettings 详细配置
+- **异常体系**: 完整异常类定义
+- **实现状态汇总**: 已完成模块和可选模块状态
+- **技术亮点**: 架构设计、数据处理、检索优化、工具设计
+- **附录**: 依赖清单、环境变量参考
+
+### 修改的文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `CLAUDE.md` | 全面更新项目开发指南 |
+| `docs/dev/DESIGN_DOCUMENT.md` | 新建 - 系统设计与实现文档 |
+| `docs/dev/WORK_LOG.md` | 更新工作日志 |
+
+### 技术亮点总结
+
+1. **Page-Based 架构**: 保留文档原始结构，支持跨页内容处理
+2. **可插拔索引**: 支持多种关键词和向量索引后端
+3. **MCP 协议标准化**: 工具接口统一，多 Agent 框架复用
+4. **三框架并行**: 同时支持 Claude SDK、Pydantic AI、LangGraph
+5. **分阶段工具体系**: 基础 → 多跳 → 上下文 → 发现
+6. **RRF 混合检索**: 结合关键词和语义检索优势
+
+### 后续建议
+
+1. 补充单元测试覆盖率
+2. 添加集成测试用例
+3. 完善 README.md 用户文档
+4. 考虑添加性能基准测试
+
+---
+
 ## 2025-12-30 Agent MCP 架构重构
 
 ### 会话概述
