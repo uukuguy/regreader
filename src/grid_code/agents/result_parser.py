@@ -39,21 +39,39 @@ def parse_tool_result(tool_name: str, result: Any) -> ToolResultSummary:
     """根据工具类型解析结果，提取摘要信息
 
     Args:
-        tool_name: 工具名称
+        tool_name: 工具名称（支持完整 MCP 名称如 mcp__gridcode__smart_search）
         result: 工具返回的原始结果
 
     Returns:
         ToolResultSummary 包含解析后的摘要信息
     """
+    # 去除 MCP 前缀（mcp__gridcode__smart_search -> smart_search）
+    simple_name = tool_name
+    if "__" in tool_name:
+        parts = tool_name.split("__")
+        simple_name = parts[-1] if len(parts) > 1 else tool_name
+
+    # DEBUG: 记录原始输入
+    logger.debug(f"[parse_tool_result] tool={simple_name}, input_type={type(result).__name__}")
+    logger.debug(f"[parse_tool_result] input_repr={repr(result)[:300]}")
+
     # 尝试解析 JSON 字符串
     if isinstance(result, str):
         try:
             result = json.loads(result)
+            logger.debug(f"[parse_tool_result] parsed JSON string to {type(result).__name__}")
         except (json.JSONDecodeError, TypeError):
             # 非 JSON 字符串，返回基本摘要
             return ToolResultSummary(
                 content_preview=_truncate_text(result, 100)
             )
+
+    # 处理 Claude SDK TextContent 格式: [{"type": "text", "text": "..."}]
+    original_result = result
+    result = _unwrap_text_content(result)
+    if result is not original_result:
+        logger.debug(f"[parse_tool_result] unwrapped TextContent to {type(result).__name__}")
+        logger.debug(f"[parse_tool_result] unwrapped_repr={repr(result)[:300]}")
 
     # 根据工具名称分发到对应的解析器
     parsers = {
@@ -66,12 +84,12 @@ def parse_tool_result(tool_name: str, result: Any) -> ToolResultSummary:
         "search_vector": _parse_search_vector,
     }
 
-    parser = parsers.get(tool_name)
+    parser = parsers.get(simple_name)
     if parser:
         try:
             return parser(result)
         except Exception as e:
-            logger.debug(f"Failed to parse {tool_name} result: {e}")
+            logger.debug(f"Failed to parse {simple_name} result: {e}")
 
     # 默认解析器
     return _parse_generic(result)
@@ -97,7 +115,8 @@ def _parse_smart_search(result: Any) -> ToolResultSummary:
     summary = ToolResultSummary(result_type="search_results")
 
     if isinstance(result, dict):
-        results = result.get("results", [])
+        # 兼容 "result"（MCP 格式）和 "results"（旧格式）
+        results = result.get("result") or result.get("results", [])
     elif isinstance(result, list):
         results = result
     else:
@@ -370,6 +389,50 @@ def _truncate_text(text: str, max_length: int = 50) -> str:
         return text
 
     return text[:max_length] + "..."
+
+
+def _unwrap_text_content(result: Any) -> Any:
+    """解包 Claude SDK TextContent 格式
+
+    Claude Agent SDK 的 MCP 工具响应可能被包装在 TextContent 格式中:
+    [{"type": "text", "text": '{"key": "value"}'}]
+
+    此函数递归解包并解析内部 JSON。
+
+    Args:
+        result: 可能被包装的结果
+
+    Returns:
+        解包后的结果
+    """
+    if not isinstance(result, list):
+        return result
+
+    # 检查是否为 TextContent 格式
+    if len(result) == 1 and isinstance(result[0], dict):
+        item = result[0]
+        if item.get("type") == "text" and "text" in item:
+            text_content = item["text"]
+            # 尝试解析 text 字段中的 JSON
+            if isinstance(text_content, str):
+                try:
+                    return json.loads(text_content)
+                except (json.JSONDecodeError, TypeError):
+                    return text_content
+            return text_content
+
+    # 检查多个 TextContent 项（合并文本后解析）
+    if all(isinstance(item, dict) and item.get("type") == "text" for item in result):
+        combined_text = "".join(
+            item.get("text", "") for item in result if isinstance(item, dict)
+        )
+        if combined_text:
+            try:
+                return json.loads(combined_text)
+            except (json.JSONDecodeError, TypeError):
+                return combined_text
+
+    return result
 
 
 def format_page_sources(pages: list[int], max_display: int = 5) -> str:

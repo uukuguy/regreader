@@ -224,24 +224,52 @@ class LanceDBIndex(BaseVectorIndex):
             logger.warning("向量索引表不存在")
             return []
 
-        query_vector = self.embedder.embed_query(query)
-        search_query = table.search(query_vector).limit(limit * 2)
+        # 生成查询向量（可能因模型加载失败而出错）
+        try:
+            query_vector = self.embedder.embed_query(query)
+        except Exception as e:
+            logger.warning(f"生成查询向量失败: {e}")
+            return []
 
         try:
+            search_query = table.search(query_vector)
+
+            # 构建预过滤条件（在 LanceDB 层面过滤，避免后过滤导致结果为空）
+            where_conditions = []
+            if reg_id:
+                where_conditions.append(f"reg_id = '{reg_id}'")
+            if chapter_scope:
+                # LanceDB 支持 SQL LIKE 语法
+                where_conditions.append(f"chapter_path LIKE '%{chapter_scope}%'")
+            if block_types:
+                # 多值 IN 查询
+                types_str = ", ".join(f"'{t}'" for t in block_types)
+                where_conditions.append(f"block_type IN ({types_str})")
+            if section_number:
+                where_conditions.append(f"section_number = '{section_number}'")
+
+            if where_conditions:
+                where_clause = " AND ".join(where_conditions)
+                search_query = search_query.where(where_clause)
+                logger.debug(f"[LanceDB] 向量搜索过滤条件: {where_clause}")
+
+            search_query = search_query.limit(limit * 2)
             results_df = search_query.to_pandas()
+
+            logger.debug(
+                f"[LanceDB] 向量搜索 query='{query[:30]}...', "
+                f"reg_id={reg_id}, 返回 {len(results_df)} 条原始结果"
+            )
         except Exception as e:
             logger.warning(f"LanceDB 搜索错误: {e}")
             return []
 
         if results_df.empty:
+            logger.debug(f"[LanceDB] 向量搜索结果为空 (query='{query[:30]}...', reg_id={reg_id})")
             return []
 
         results = []
         for _, row in results_df.iterrows():
-            if reg_id and row["reg_id"] != reg_id:
-                continue
-            if chapter_scope and chapter_scope not in row["chapter_path"]:
-                continue
 
             # 块类型过滤
             if block_types:

@@ -181,7 +181,7 @@ ask-json: ## Single query with JSON output
 	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT) --json
 
 ask-claude: ## Single query with Claude Agent
-	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude -v
 
 ask-pydantic: ## Single query with Pydantic AI Agent
 	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic -v

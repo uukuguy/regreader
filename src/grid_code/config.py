@@ -73,7 +73,7 @@ class GridCodeSettings(BaseSettings):
         description="嵌入模型运行设备（如 cuda:0，默认自动选择）",
     )
     embedding_local_files_only: bool = Field(
-        default=False,
+        default=True,
         description="仅使用本地缓存的模型（离线模式，避免网络请求）",
     )
     # API 类后端预留（未来扩展）
@@ -125,6 +125,23 @@ class GridCodeSettings(BaseSettings):
         default="claude-sonnet-4-20250514",
         description="LLM 模型名称（如 claude-sonnet-4-20250514, gpt-4o, gemini-pro）",
         validation_alias=AliasChoices("OPENAI_MODEL_NAME", "LLM_MODEL_NAME"),
+    )
+
+    # Anthropic/Claude 专用配置（用于 ClaudeAgent）
+    anthropic_api_key: str = Field(
+        default="",
+        description="Anthropic API 密钥",
+        validation_alias="ANTHROPIC_API_KEY",
+    )
+    anthropic_base_url: str = Field(
+        default="",
+        description="Anthropic API 端点（留空使用官方端点）",
+        validation_alias="ANTHROPIC_BASE_URL",
+    )
+    anthropic_model_name: str = Field(
+        default="",
+        description="Anthropic 模型名称（留空使用 SDK 默认值，如 claude-sonnet-4-5-20250929）",
+        validation_alias="ANTHROPIC_MODEL_NAME",
     )
 
     # Agent 配置

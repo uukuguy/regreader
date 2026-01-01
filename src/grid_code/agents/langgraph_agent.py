@@ -30,7 +30,6 @@ from pydantic import BaseModel, Field
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
 from grid_code.agents.callbacks import NullCallback, StatusCallback
 from grid_code.agents.events import (
-    iteration_event,
     response_complete_event,
     text_delta_event,
     thinking_event,
@@ -39,7 +38,7 @@ from grid_code.agents.events import (
 )
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.memory import AgentMemory
-from grid_code.agents.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_SIMPLE, SYSTEM_PROMPT_V2
+from grid_code.agents.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_SIMPLE, SYSTEM_PROMPT_V2, SYSTEM_PROMPT_V3
 from grid_code.agents.result_parser import parse_tool_result
 from grid_code.config import get_settings
 
@@ -192,7 +191,7 @@ class LangGraphAgent(BaseGridCodeAgent):
         elif settings.prompt_mode == "simple":
             base_prompt = SYSTEM_PROMPT_SIMPLE
         else:  # optimized
-            base_prompt = SYSTEM_PROMPT_V2
+            base_prompt = SYSTEM_PROMPT_V3
 
         # 注入默认规程上下文
         if self.reg_id:
@@ -268,6 +267,11 @@ class LangGraphAgent(BaseGridCodeAgent):
                 start_time = time.time()
 
                 result = await self._mcp_client.call_tool(tool_name, kwargs)
+
+                # DEBUG: 记录完整的工具响应信息，帮助调试（与 hooks.py 保持一致）
+                print(f"[DEBUG langgraph_agent.py] PostToolUse called: {tool_name}")
+                print(f"[DEBUG langgraph_agent.py] result type: {type(result).__name__}")
+                print(f"[DEBUG langgraph_agent.py] result repr: {repr(result)[:300]}")
 
                 # 计算执行耗时
                 end_time = time.time()
@@ -384,11 +388,8 @@ class LangGraphAgent(BaseGridCodeAgent):
         # 定义 agent 节点
         async def agent_node(state: AgentState) -> dict:
             """Agent 节点：调用 LLM"""
-            # 增加迭代计数并发送事件
+            # 增加迭代计数（仅用于内部跟踪，不再发送迭代事件）
             self._iteration_count += 1
-            if self._iteration_count > 1:
-                # 从第2轮开始发送迭代事件（第1轮已经在 chat 中发送了 thinking 事件）
-                await self._callback.on_event(iteration_event(self._iteration_count))
 
             # 添加系统提示
             messages = state["messages"]
@@ -466,8 +467,8 @@ class LangGraphAgent(BaseGridCodeAgent):
                 self._memory.cache_toc(reg_id, result)
 
         elif tool_name == "smart_search":
-            # 提取搜索结果
-            results = result.get("results", [])
+            # 提取搜索结果（兼容 "result" 和 "results"）
+            results = result.get("result") or result.get("results", [])
             self._memory.add_search_results(results)
 
         elif tool_name == "read_page_range":

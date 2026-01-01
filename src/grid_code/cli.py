@@ -403,9 +403,7 @@ def chat(
         # 创建 Agent
         if agent_type == AgentType.claude:
             from grid_code.agents import ClaudeAgent
-            # Claude Agent 使用全局回调
-            set_status_callback(status_callback)
-            agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config)
+            agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
         elif agent_type == AgentType.pydantic:
             from grid_code.agents import PydanticAIAgent
             agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
@@ -430,6 +428,9 @@ def chat(
                     continue
 
                 # 使用状态显示
+                from rich.markdown import Markdown
+                from rich.panel import Panel
+
                 if quiet:
                     with console.status("思考中..."):
                         response = await agent.chat(user_input)
@@ -437,8 +438,14 @@ def chat(
                     async with status_callback.live_context():
                         response = await agent.chat(user_input)
 
-                console.print(f"\n[bold blue]GridCode:[/bold blue]")
-                console.print(response.content)
+                # 使用 Markdown 渲染输出
+                console.print()
+                console.print(Panel(
+                    Markdown(response.content),
+                    title="[bold blue]GridCode[/bold blue]",
+                    border_style="blue",
+                    padding=(1, 2),
+                ))
 
                 if response.sources:
                     console.print(f"\n[dim]来源: {', '.join(response.sources)}[/dim]")
@@ -500,9 +507,7 @@ def ask(
         # 创建 Agent
         if agent_type == AgentType.claude:
             from grid_code.agents import ClaudeAgent
-            # Claude Agent 使用全局回调
-            set_status_callback(status_callback)
-            agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config)
+            agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
         elif agent_type == AgentType.pydantic:
             from grid_code.agents import PydanticAIAgent
             agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
@@ -513,6 +518,9 @@ def ask(
         try:
             if not json_output:
                 # 非 JSON 模式：使用状态显示
+                from rich.markdown import Markdown
+                from rich.panel import Panel
+
                 if quiet:
                     with console.status("思考中..."):
                         response = await agent.chat(query)
@@ -520,7 +528,14 @@ def ask(
                     async with status_callback.live_context():
                         response = await agent.chat(query)
 
-                console.print(response.content)
+                # 使用 Markdown 渲染最终输出，并添加视觉分隔
+                console.print()  # 空行分隔
+                console.print(Panel(
+                    Markdown(response.content),
+                    title="[bold green]回答[/bold green]",
+                    border_style="green",
+                    padding=(1, 2),
+                ))
 
                 if response.sources:
                     console.print(f"\n[dim]来源: {', '.join(response.sources)}[/dim]")

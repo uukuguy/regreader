@@ -32,7 +32,7 @@ from grid_code.agents.events import (
 )
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.memory import AgentMemory, ContentChunk
-from grid_code.agents.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_SIMPLE, SYSTEM_PROMPT_V2
+from grid_code.agents.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_SIMPLE, SYSTEM_PROMPT_V2, SYSTEM_PROMPT_V3
 from grid_code.agents.result_parser import parse_tool_result
 from grid_code.config import get_settings
 
@@ -195,7 +195,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
         elif settings.prompt_mode == "simple":
             base_prompt = SYSTEM_PROMPT_SIMPLE
         else:  # optimized
-            base_prompt = SYSTEM_PROMPT_V2
+            base_prompt = SYSTEM_PROMPT_V3
 
         if self.reg_id:
             base_prompt += f"\n\n# 当前规程\n默认规程: {self.reg_id}"
@@ -232,6 +232,10 @@ class PydanticAIAgent(BaseGridCodeAgent):
             nonlocal last_tool_end_time
 
             async for event in event_stream:
+                # DEBUG: 记录所有事件类型，帮助排查漏记问题
+                event_type = type(event).__name__
+                logger.debug(f"[EventStream] Event received: {event_type}")
+
                 # 处理文本增量事件（流式输出）
                 if isinstance(event, PartDeltaEvent):
                     if isinstance(event.delta, TextPartDelta):
@@ -259,6 +263,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
                     tool_call_id = event.part.tool_call_id or ""
 
                     logger.debug(f"[EventStream] CALL_START: {tool_name}, id={tool_call_id}")
+                    # print(f"[DEBUG pydantic_agent.py] CALL_START: {tool_name}, id={tool_call_id}")
 
                     now = time.time()
 
@@ -266,7 +271,6 @@ class PydanticAIAgent(BaseGridCodeAgent):
                     thinking_duration_ms = None
                     if last_tool_end_time is not None:
                         thinking_duration_ms = (now - last_tool_end_time) * 1000
-                        logger.debug(f"[EventStream] thinking_duration_ms={thinking_duration_ms:.1f}")
 
                     # 记录开始时间
                     self._tool_start_times[tool_call_id] = now
@@ -280,7 +284,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
                     else:
                         tool_input = tool_args if isinstance(tool_args, dict) else {}
 
-                    # 记录工具调用（带 tool_call_id 以便后续匹配）
+                    # 记录工具调用
                     self._tool_calls.append({
                         "name": tool_name,
                         "input": tool_input,
@@ -296,24 +300,22 @@ class PydanticAIAgent(BaseGridCodeAgent):
                 elif isinstance(event, FunctionToolResultEvent):
                     # 工具调用完成
                     tool_call_id = event.tool_call_id or ""
+                    
+                    # 从结果中提取信息
+                    result_content = event.result.content if hasattr(event.result, "content") else event.result
 
-                    logger.debug(f"[EventStream] CALL_RESULT: id={tool_call_id}, stored_ids={list(self._tool_start_times.keys())}")
+                    # DEBUG: 记录完整的工具响应信息
+                    # print(f"[DEBUG pydantic_agent.py] PostToolUse called: {tool_call_id}")
+                    # print(f"[DEBUG pydantic_agent.py] result_content type: {type(result_content).__name__}")
+                    # print(f"[DEBUG pydantic_agent.py] result_content repr: {repr(result_content)[:300]}")
 
                     # 计算执行耗时
                     start_time = self._tool_start_times.pop(tool_call_id, None)
                     now = time.time()
-                    if start_time is not None:
-                        duration_ms = (now - start_time) * 1000
-                        logger.debug(f"[EventStream] duration_ms={duration_ms:.1f}")
-                    else:
-                        duration_ms = None
-                        logger.debug(f"[EventStream] No start time for tool_call_id={tool_call_id}")
+                    duration_ms = (now - start_time) * 1000 if start_time else None
 
-                    # 记录工具结束时间（用于计算下一个工具的思考耗时）
+                    # 记录工具结束时间
                     last_tool_end_time = now
-
-                    # 从结果中提取信息
-                    result_content = event.result.content if hasattr(event.result, "content") else event.result
 
                     # 获取工具名称和参数
                     tool_name = "unknown"
@@ -324,14 +326,13 @@ class PydanticAIAgent(BaseGridCodeAgent):
                             tool_name = tc.get("name", "unknown")
                             tool_input = tc.get("input", {})
                             thinking_duration_ms = tc.get("thinking_duration_ms")
-                            # 更新工具调用记录的输出
                             tc["output"] = result_content
                             break
 
                     # 使用结果解析器提取详细摘要
                     summary = parse_tool_result(tool_name, result_content)
 
-                    # 发送工具调用完成事件（带详细摘要）
+                    # 发送工具调用完成事件
                     await self._callback.on_event(
                         tool_end_event(
                             tool_name=tool_name,
@@ -339,7 +340,6 @@ class PydanticAIAgent(BaseGridCodeAgent):
                             duration_ms=duration_ms,
                             result_count=summary.result_count,
                             tool_input=tool_input,
-                            # 详细模式新增字段
                             result_type=summary.result_type,
                             chapter_count=summary.chapter_count,
                             page_sources=summary.page_sources,
@@ -348,11 +348,16 @@ class PydanticAIAgent(BaseGridCodeAgent):
                         )
                     )
 
-                    # 提取来源信息
+                    # 提取来源信息并更新记忆
                     self._extract_sources_from_content(result_content)
-
-                    # 更新记忆系统
                     self._update_memory(tool_name, result_content)
+
+                elif event_type == "ModelResponseEvent":
+                    # 检查是否有工具调用但在 FunctionToolCallEvent 中没捕捉到
+                    if hasattr(event, "model_response") and hasattr(event.model_response, "parts"):
+                        for part in event.model_response.parts:
+                            if hasattr(part, "tool_name"):
+                                logger.debug(f"[EventStream] Found ToolCall in ModelResponse: {part.tool_name}")
 
         return event_stream_handler
 
@@ -531,8 +536,8 @@ class PydanticAIAgent(BaseGridCodeAgent):
                 self._memory.cache_toc(reg_id, result)
 
         elif tool_name == "smart_search":
-            # 提取搜索结果
-            results = result.get("results", [])
+            # 提取搜索结果（兼容 "result" 和 "results"）
+            results = result.get("result") or result.get("results", [])
             self._memory.add_search_results(results)
 
         elif tool_name == "read_page_range":

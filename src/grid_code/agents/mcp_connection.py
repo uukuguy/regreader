@@ -205,8 +205,9 @@ class MCPConnectionManager:
 
         用于 ClaudeAgentOptions 的 mcp_servers 参数。
 
-        注意：Claude Agent SDK 目前仅支持 stdio 模式。
-        如果配置为 SSE 模式，会自动回退到 stdio 并记录警告。
+        支持两种传输模式：
+        - stdio: 子进程模式，启动本地 MCP Server
+        - sse: SSE 模式，连接远程 MCP Server
 
         Returns:
             MCP Server 配置字典
@@ -219,11 +220,16 @@ class MCPConnectionManager:
             ... )
         """
         if self.config.transport == "sse":
-            logger.warning(
-                "Claude Agent SDK 不支持 SSE 模式，将使用 stdio 模式。"
-                "如需 SSE，请使用 LangGraph Agent。"
-            )
+            if not self.config.server_url:
+                raise ValueError("SSE 模式需要 server_url")
+            return {
+                self.config.server_name: {
+                    "type": "sse",
+                    "url": self.config.server_url,
+                }
+            }
 
+        # stdio 模式
         return {
             self.config.server_name: {
                 "type": "stdio",

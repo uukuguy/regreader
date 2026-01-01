@@ -22,6 +22,7 @@ from grid_code.agents.events import (
     tool_error_event,
     tool_start_event,
 )
+from grid_code.agents.result_parser import parse_tool_result
 
 
 # ==================== 全局状态回调 ====================
@@ -85,6 +86,20 @@ async def pre_tool_audit_hook(
 
     # 发送状态事件
     event = tool_start_event(tool_name, tool_input, tool_id)
+
+    # 为 read_page_range 添加决策提示（帮助理解为什么选择特定页码）
+    # 去除 MCP 前缀以匹配工具名
+    simple_name = tool_name
+    if "__" in tool_name:
+        parts = tool_name.split("__")
+        simple_name = parts[-1] if len(parts) > 1 else tool_name
+
+    if simple_name == "read_page_range":
+        start_page = tool_input.get("start_page")
+        end_page = tool_input.get("end_page")
+        if start_page and end_page:
+            event.data["decision_hint"] = f"直接定位到 P{start_page}-P{end_page}"
+
     await _status_callback.on_event(event)
 
     # 验证 reg_id 参数（如果存在）
@@ -126,11 +141,11 @@ async def post_tool_audit_hook(
     在每次工具调用完成后执行，用于：
     1. 记录执行结果
     2. 监控错误情况
-    3. 发送状态事件
+    3. 发送状态事件（包含详细的结果摘要）
     4. 统计调用次数
 
     Args:
-        input_data: 包含 tool_name、tool_input、tool_result 的字典
+        input_data: 包含 tool_name、tool_input、tool_response 的字典
         tool_use_id: 工具调用的唯一标识
         context: Hook 上下文
 
@@ -138,9 +153,23 @@ async def post_tool_audit_hook(
         空字典（PostToolUse 通常不修改结果）
     """
     tool_name = input_data.get("tool_name", "unknown")
-    tool_result = input_data.get("tool_result", {})
+    # 注意：Claude Agent SDK 使用 tool_response（不是 tool_result）
+    tool_response = input_data.get("tool_response", "")
     tool_input = input_data.get("tool_input", {})
     tool_id = tool_use_id or tool_name
+
+    # DEBUG: 记录完整的 tool_response 信息，帮助调试
+    print(f"[DEBUG hooks.py] PostToolUse called: {tool_name}")
+    print(f"[DEBUG hooks.py] tool_response type: {type(tool_response).__name__}")
+    print(f"[DEBUG hooks.py] tool_response repr: {repr(tool_response)[:300]}")
+    logger.debug(f"[PostToolUse] input_data keys: {list(input_data.keys())}")
+    logger.debug(f"[PostToolUse] tool_response type: {type(tool_response).__name__}")
+    logger.debug(f"[PostToolUse] tool_response repr: {repr(tool_response)[:500]}")
+
+    # 如果是列表，打印第一个元素的详细信息
+    if isinstance(tool_response, list) and tool_response:
+        first_item = tool_response[0]
+        logger.debug(f"[PostToolUse] first_item type: {type(first_item).__name__}, keys: {list(first_item.keys()) if isinstance(first_item, dict) else 'N/A'}")
 
     # 计算耗时
     start_time = _tool_timers.pop(tool_id, None)
@@ -148,8 +177,8 @@ async def post_tool_audit_hook(
 
     # 检查错误并发送事件
     error_msg = None
-    if isinstance(tool_result, dict) and "error" in tool_result:
-        error_msg = tool_result.get("error", "未知错误")
+    if isinstance(tool_response, dict) and "error" in tool_response:
+        error_msg = tool_response.get("error", "未知错误")
         logger.warning(f"[PostToolUse] {tool_name} 返回错误: {error_msg}")
 
         # 发送错误事件
@@ -157,49 +186,43 @@ async def post_tool_audit_hook(
         await _status_callback.on_event(event)
         return {}
 
-    elif isinstance(tool_result, list) and tool_result and isinstance(tool_result[0], dict):
-        if "error" in tool_result[0]:
-            error_msg = tool_result[0].get("error")
+    elif isinstance(tool_response, list) and tool_response and isinstance(tool_response[0], dict):
+        if "error" in tool_response[0]:
+            error_msg = tool_response[0].get("error")
             logger.warning(f"[PostToolUse] {tool_name} 返回错误: {error_msg}")
 
             event = tool_error_event(tool_name, str(error_msg), tool_id)
             await _status_callback.on_event(event)
             return {}
 
-        logger.debug(f"[PostToolUse] {tool_name} 成功，返回 {len(tool_result)} 条结果")
+    # 使用 parse_tool_result 解析详细结果
+    summary = parse_tool_result(tool_name, tool_response)
 
-        # 提取来源
-        sources: list[str] = []
-        for item in tool_result:
-            _extract_sources_recursive(item, sources)
+    logger.debug(
+        f"[PostToolUse] {tool_name} 完成: "
+        f"result_count={summary.result_count}, "
+        f"result_type={summary.result_type}, "
+        f"page_sources={summary.page_sources}"
+    )
 
-        # 发送完成事件
-        event = tool_end_event(
-            tool_name=tool_name,
-            tool_id=tool_id,
-            duration_ms=duration_ms,
-            result_count=len(tool_result),
-            sources=list(set(sources)),
-            tool_input=tool_input,
-        )
-        await _status_callback.on_event(event)
+    # 提取来源
+    sources: list[str] = []
+    _extract_sources_recursive(tool_response, sources)
 
-    else:
-        logger.debug(f"[PostToolUse] {tool_name} 执行完成")
-
-        # 提取来源
-        sources = []
-        _extract_sources_recursive(tool_result, sources)
-
-        # 发送完成事件
-        event = tool_end_event(
-            tool_name=tool_name,
-            tool_id=tool_id,
-            duration_ms=duration_ms,
-            sources=list(set(sources)),
-            tool_input=tool_input,
-        )
-        await _status_callback.on_event(event)
+    # 发送完成事件（包含详细的结果摘要）
+    event = tool_end_event(
+        tool_name=tool_name,
+        tool_id=tool_id,
+        duration_ms=duration_ms,
+        result_count=summary.result_count,
+        sources=list(set(sources)),
+        tool_input=tool_input,
+        result_type=summary.result_type,
+        chapter_count=summary.chapter_count,
+        page_sources=summary.page_sources,
+        content_preview=summary.content_preview,
+    )
+    await _status_callback.on_event(event)
 
     return {}
 
@@ -216,17 +239,18 @@ async def source_extraction_hook(
     注意：此钩子主要用于日志记录，实际的来源提取在 Agent 主循环中完成。
 
     Args:
-        input_data: 包含 tool_result 的字典
+        input_data: 包含 tool_response 的字典
         tool_use_id: 工具调用的唯一标识
         context: Hook 上下文
 
     Returns:
         空字典
     """
-    tool_result = input_data.get("tool_result", {})
+    # 注意：Claude Agent SDK 使用 tool_response（不是 tool_result）
+    tool_response = input_data.get("tool_response", "")
     sources: list[str] = []
 
-    _extract_sources_recursive(tool_result, sources)
+    _extract_sources_recursive(tool_response, sources)
 
     if sources:
         unique_sources = list(set(sources))

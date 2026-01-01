@@ -4,15 +4,28 @@
 https://github.com/anthropics/claude-agent-sdk-python
 """
 
+import time
 from typing import Any
 
 from loguru import logger
 
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
+from grid_code.agents.callbacks import NullCallback, StatusCallback
+from grid_code.agents.events import (
+    AgentEvent,
+    AgentEventType,
+    response_complete_event,
+    text_delta_event,
+    thinking_delta_event,
+    thinking_event,
+    tool_end_event,
+    tool_start_event,
+)
 from grid_code.agents.mcp_config import get_tool_name
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.memory import AgentMemory
-from grid_code.agents.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_SIMPLE, SYSTEM_PROMPT_V2
+from grid_code.agents.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_SIMPLE, SYSTEM_PROMPT_V2, SYSTEM_PROMPT_V3
+from grid_code.agents.result_parser import parse_tool_result
 from grid_code.agents.session import SessionManager, SessionState
 from grid_code.config import get_settings
 from grid_code.mcp.tool_metadata import TOOL_METADATA
@@ -34,6 +47,8 @@ try:
         ResultMessage,
         # Content block types
         TextBlock,
+        ThinkingBlock,
+        ToolResultBlock,
         ToolUseBlock,
     )
     HAS_CLAUDE_SDK = True
@@ -43,7 +58,9 @@ except ImportError:
     AssistantMessage = None  # type: ignore
     ResultMessage = None  # type: ignore
     TextBlock = None  # type: ignore
+    ThinkingBlock = None  # type: ignore
     ToolUseBlock = None  # type: ignore
+    ToolResultBlock = None  # type: ignore
     ClaudeSDKError = Exception  # type: ignore
     CLINotFoundError = Exception  # type: ignore
     CLIConnectionError = Exception  # type: ignore
@@ -76,6 +93,7 @@ class ClaudeAgent(BaseGridCodeAgent):
         api_key: str | None = None,
         enable_hooks: bool = True,
         mcp_config: MCPConnectionConfig | None = None,
+        status_callback: StatusCallback | None = None,
     ):
         """初始化 Claude Agent
 
@@ -85,6 +103,7 @@ class ClaudeAgent(BaseGridCodeAgent):
             api_key: Anthropic API Key (通过环境变量 ANTHROPIC_API_KEY 设置)
             enable_hooks: 是否启用 Hooks 审计（默认启用）
             mcp_config: MCP 连接配置（可选，默认从全局配置创建）
+            status_callback: 状态回调（可选），用于实时输出 Agent 运行状态
         """
         super().__init__(reg_id)
 
@@ -95,23 +114,26 @@ class ClaudeAgent(BaseGridCodeAgent):
             )
 
         settings = get_settings()
-        self._model = model or settings.llm_model_name
+
+        # ClaudeAgent 使用 Anthropic 专用配置
+        # 模型名称：优先使用传入参数，其次用 ANTHROPIC_MODEL_NAME，留空让 SDK 使用默认值
+        self._model = model or settings.anthropic_model_name or ""
         self._enable_hooks = enable_hooks
 
         # 设置环境变量让 Claude SDK 读取
         import os
 
-        os.environ["ANTHROPIC_API_KEY"] = settings.llm_api_key
-        if settings.llm_base_url and settings.llm_base_url != "https://api.anthropic.com":
-            # 如果有自定义端点，设置 ANTHROPIC_BASE_URL
-            os.environ["ANTHROPIC_BASE_URL"] = settings.llm_base_url
-
-        api_key = settings.llm_api_key
+        # 使用 Anthropic 专用配置
+        api_key = settings.anthropic_api_key
         if not api_key:
             raise ValueError(
-                "未配置 LLM API Key。"
-                "请设置环境变量 OPENAI_API_KEY"
+                "未配置 Anthropic API Key。"
+                "请设置环境变量 ANTHROPIC_API_KEY"
             )
+        os.environ["ANTHROPIC_API_KEY"] = api_key
+
+        if settings.anthropic_base_url:
+            os.environ["ANTHROPIC_BASE_URL"] = settings.anthropic_base_url
 
         # 会话管理器
         self._session_manager = SessionManager()
@@ -122,8 +144,17 @@ class ClaudeAgent(BaseGridCodeAgent):
         # MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
 
+        # 状态回调
+        self._callback = status_callback or NullCallback()
+
+        # 工具调用时间追踪（用于计算耗时）
+        self._tool_start_times: dict[str, float] = {}
+        self._last_tool_end_time: float | None = None
+        self._current_tool_info: dict[str, Any] | None = None
+
+        model_display = self._model or "(SDK default)"
         logger.info(
-            f"ClaudeAgent 初始化完成: model={self._model}, "
+            f"ClaudeAgent 初始化完成: model={model_display}, "
             f"hooks={self._enable_hooks}, tools={len(TOOL_METADATA)}, "
             f"mcp_transport={self._mcp_manager.config.transport}"
         )
@@ -169,7 +200,7 @@ class ClaudeAgent(BaseGridCodeAgent):
         elif settings.prompt_mode == "simple":
             base_prompt = SYSTEM_PROMPT_SIMPLE
         else:  # optimized
-            base_prompt = SYSTEM_PROMPT_V2
+            base_prompt = SYSTEM_PROMPT_V3
 
         if self.reg_id:
             base_prompt += f"\n\n# 当前规程\n默认规程: {self.reg_id}"
@@ -224,10 +255,14 @@ class ClaudeAgent(BaseGridCodeAgent):
             "mcp_servers": self._get_mcp_config(),
             "allowed_tools": self._get_allowed_tools(),
             "disallowed_tools": disallowed,
-            "model": self._model,
             "max_turns": 20,  # 允许多轮工具调用
             "permission_mode": "bypassPermissions",  # 自动执行工具
+            "include_partial_messages": True,  # 启用流式事件
         }
+
+        # 只有当指定了模型时才传递，否则让 SDK 使用默认值
+        if self._model:
+            options_kwargs["model"] = self._model
 
         # 添加 Hooks（如果启用）
         hooks = self._build_hooks()
@@ -256,7 +291,26 @@ class ClaudeAgent(BaseGridCodeAgent):
         session = self._session_manager.get_or_create(session_id)
         session.reset_per_query()
 
+        # 重置工具追踪状态
+        self._tool_start_times = {}
+        self._last_tool_end_time = None
+        self._current_tool_info = None
+
+        # 流式内容追踪（避免重复发送）
+        self._stream_thinking_sent = False
+        self._stream_text_sent = False
+
         final_result = ""
+
+        # 记录开始时间
+        start_time = time.time()
+
+        # 发送思考开始事件
+        await self._callback.on_event(thinking_event(start=True))
+
+        # 设置 Hooks 的状态回调（让 hooks 能够发送详细的工具结果事件）
+        from grid_code.agents.hooks import set_status_callback
+        set_status_callback(self._callback)
 
         try:
             # 使用上下文管理器确保连接正确清理
@@ -266,7 +320,7 @@ class ClaudeAgent(BaseGridCodeAgent):
 
                 # 接收响应
                 async for event in client.receive_response():
-                    self._process_event(event, session)
+                    await self._process_event(event, session)
 
                     # 检查最终结果 (ResultMessage)
                     if ResultMessage is not None and isinstance(event, ResultMessage):
@@ -282,6 +336,7 @@ class ClaudeAgent(BaseGridCodeAgent):
 
         except CLINotFoundError:
             logger.error("Claude Code CLI 未安装")
+            await self._callback.on_event(thinking_event(start=False))
             return AgentResponse(
                 content="错误：Claude Code CLI 未安装。请确保 claude-agent-sdk 已正确安装。",
                 sources=[],
@@ -290,6 +345,7 @@ class ClaudeAgent(BaseGridCodeAgent):
 
         except CLIConnectionError as e:
             logger.error(f"连接 Claude Code 失败: {e}")
+            await self._callback.on_event(thinking_event(start=False))
             return AgentResponse(
                 content=f"连接失败：{str(e)}。请检查网络连接和 API Key 配置。",
                 sources=[],
@@ -300,6 +356,7 @@ class ClaudeAgent(BaseGridCodeAgent):
             exit_code = getattr(e, "exit_code", -1)
             stderr = getattr(e, "stderr", str(e))
             logger.error(f"进程错误 (exit_code={exit_code}): {stderr}")
+            await self._callback.on_event(thinking_event(start=False))
             return AgentResponse(
                 content=f"执行失败 (代码 {exit_code}): {stderr or '未知错误'}",
                 sources=list(set(session.sources)),
@@ -309,6 +366,7 @@ class ClaudeAgent(BaseGridCodeAgent):
         except CLIJSONDecodeError as e:
             line = getattr(e, "line", str(e))
             logger.error(f"JSON 解析失败: {line}")
+            await self._callback.on_event(thinking_event(start=False))
             return AgentResponse(
                 content="响应解析失败：服务返回了无效的 JSON 数据。",
                 sources=[],
@@ -317,6 +375,7 @@ class ClaudeAgent(BaseGridCodeAgent):
 
         except ClaudeSDKError as e:
             logger.error(f"Claude SDK 错误: {e}")
+            await self._callback.on_event(thinking_event(start=False))
             return AgentResponse(
                 content=f"SDK 错误: {str(e)}",
                 sources=list(set(session.sources)),
@@ -325,11 +384,30 @@ class ClaudeAgent(BaseGridCodeAgent):
 
         except Exception as e:
             logger.exception(f"未知错误: {e}")
+            await self._callback.on_event(thinking_event(start=False))
             return AgentResponse(
                 content=f"查询失败: {str(e)}",
                 sources=list(set(session.sources)),
                 tool_calls=session.tool_calls,
             )
+
+        # 发送思考结束事件
+        await self._callback.on_event(thinking_event(start=False))
+
+        # 清理 Hooks 的状态回调
+        set_status_callback(None)
+
+        # 计算总耗时
+        duration_ms = (time.time() - start_time) * 1000
+
+        # 发送响应完成事件
+        await self._callback.on_event(
+            response_complete_event(
+                total_tool_calls=len(session.tool_calls),
+                total_sources=len(set(session.sources)),
+                duration_ms=duration_ms,
+            )
+        )
 
         return AgentResponse(
             content=final_result,
@@ -337,43 +415,284 @@ class ClaudeAgent(BaseGridCodeAgent):
             tool_calls=session.tool_calls,
         )
 
-    def _process_event(self, event: Any, session: SessionState) -> None:
+    async def _process_event(self, event: Any, session: SessionState) -> None:
         """处理 SDK 事件
 
         使用 isinstance() 检查事件类型，符合 SDK 最佳实践。
-        同时更新记忆系统。
+        同时更新记忆系统并发送事件到回调。
+
+        支持的事件类型：
+        - StreamEvent: 流式事件，包含 content_block_delta 等
+        - AssistantMessage: 包含 TextBlock, ThinkingBlock, ToolUseBlock
+        - ToolResultBlock / tool_result: 工具执行结果
         """
+        import json
+
+        # 处理 StreamEvent（流式事件，用于实时输出）
+        if hasattr(event, 'event') and isinstance(getattr(event, 'event', None), dict):
+            inner_event = event.event
+            event_type = inner_event.get('type', '')
+
+            if event_type == 'content_block_delta':
+                delta = inner_event.get('delta', {})
+                delta_type = delta.get('type', '')
+
+                # 思考内容增量
+                if delta_type == 'thinking_delta' and 'thinking' in delta:
+                    thinking_text = delta['thinking']
+                    # DEBUG: 记录思考增量，帮助调试中间推理是否被捕获
+                    preview = thinking_text[:80].replace('\n', ' ') if thinking_text else ''
+                    logger.debug(f"[Thinking Delta] {len(thinking_text)} chars: {preview}...")
+                    await self._callback.on_event(thinking_delta_event(thinking_text))
+                    self._stream_thinking_sent = True
+
+                # 文本内容增量
+                elif delta_type == 'text_delta' and 'text' in delta:
+                    await self._callback.on_event(text_delta_event(delta['text']))
+                    self._stream_text_sent = True
+
+                # 工具输入增量（用于更新工具参数）
+                elif delta_type == 'input_json_delta' and 'partial_json' in delta:
+                    # 累积工具输入（后续可能需要）
+                    pass
+
+            # 内容块开始（可用于发送开始事件）
+            elif event_type == 'content_block_start':
+                content_block = inner_event.get('content_block', {})
+                block_type = content_block.get('type', '')
+                block_index = inner_event.get('index', 0)
+
+                if block_type == 'thinking':
+                    # 思考开始，重置标志
+                    logger.debug(f"[Thinking Block Start] index={block_index}")
+                    self._stream_thinking_sent = False
+                elif block_type == 'text':
+                    # 文本开始，重置标志
+                    self._stream_text_sent = False
+                elif block_type == 'tool_use':
+                    # 工具调用开始
+                    tool_name = content_block.get('name', '')
+                    tool_id = content_block.get('id', '')
+                    if tool_name:
+                        now = time.time()
+                        # 计算思考耗时
+                        thinking_duration_ms = None
+                        if self._last_tool_end_time is not None:
+                            thinking_duration_ms = (now - self._last_tool_end_time) * 1000
+                        self._tool_start_times[tool_id] = now
+
+                        # 记录当前工具信息（用于追踪，hooks 会发送事件）
+                        self._current_tool_info = {
+                            "tool_id": tool_id,
+                            "tool_name": tool_name,
+                            "block_index": block_index,
+                            "thinking_duration_ms": thinking_duration_ms,
+                        }
+
+                        # 初始记录工具调用（hooks 的 pre_tool_audit_hook 会发送 tool_start_event）
+                        session.add_tool_call(name=tool_name, input_data={})
+                        if session.tool_calls:
+                            session.tool_calls[-1]["tool_id"] = tool_id
+                            session.tool_calls[-1]["thinking_duration_ms"] = thinking_duration_ms
+
+                        # 注意：tool_start_event 由 hooks.pre_tool_audit_hook 发送，此处不重复发送
+                        logger.debug(f"Tool call start (stream): {tool_name}, id={tool_id}")
+
+            # 内容块结束
+            # 注意：tool_end_event 由 hooks.post_tool_audit_hook 发送（带有详细结果），此处不重复发送
+            elif event_type == 'content_block_stop':
+                # 清除当前工具信息（工具调用的完整生命周期由 hooks 管理）
+                if self._current_tool_info:
+                    logger.debug(f"Tool call block complete (stream): {self._current_tool_info.get('tool_name', 'unknown')}")
+                    self._current_tool_info = None
+
+            return  # StreamEvent 处理完毕，不继续后续处理
+
         # 处理 AssistantMessage
         if AssistantMessage is not None and isinstance(event, AssistantMessage):
             for block in event.content:
-                # TextBlock - 文本内容
+                # TextBlock - 文本内容（跳过已通过流式发送的）
                 if TextBlock is not None and isinstance(block, TextBlock):
-                    # 文本内容不需要特殊处理，最终结果在 ResultMessage 中
-                    pass
+                    if block.text and not self._stream_text_sent:
+                        await self._callback.on_event(text_delta_event(block.text))
 
-                # ToolUseBlock - 工具调用
+                # ThinkingBlock - 思考内容（跳过已通过流式发送的）
+                elif ThinkingBlock is not None and isinstance(block, ThinkingBlock):
+                    thinking_text = getattr(block, "thinking", None)
+                    if thinking_text and not self._stream_thinking_sent:
+                        await self._callback.on_event(thinking_delta_event(thinking_text))
+
+                # ToolUseBlock - 工具调用开始（完整信息）
                 elif ToolUseBlock is not None and isinstance(block, ToolUseBlock):
-                    session.add_tool_call(
-                        name=block.name,
-                        input_data=block.input,
-                    )
-                    logger.debug(f"Tool call: {block.name}")
+                    tool_name = block.name
+                    tool_input = block.input if isinstance(block.input, dict) else {}
+                    tool_id = getattr(block, "id", "") or ""
 
-        # 从工具结果中提取来源并更新记忆
+                    # 检查是否已经从 content_block_start 记录过
+                    existing_call = None
+                    for tc in reversed(session.tool_calls):
+                        if tc.get("tool_id") == tool_id:
+                            existing_call = tc
+                            break
+
+                    if existing_call:
+                        # 更新已有记录的输入（从 content_block_start 创建的）
+                        existing_call["input"] = tool_input
+                        logger.debug(f"Tool call updated: {tool_name}, id={tool_id}")
+                    else:
+                        # 未从 stream 事件创建，正常记录
+                        now = time.time()
+
+                        # 计算思考耗时
+                        thinking_duration_ms = None
+                        if self._last_tool_end_time is not None:
+                            thinking_duration_ms = (now - self._last_tool_end_time) * 1000
+
+                        # 记录开始时间
+                        self._tool_start_times[tool_id] = now
+
+                        # 记录到会话
+                        session.add_tool_call(name=tool_name, input_data=tool_input)
+                        if session.tool_calls:
+                            session.tool_calls[-1]["tool_id"] = tool_id
+                            session.tool_calls[-1]["thinking_duration_ms"] = thinking_duration_ms
+
+                        # 当 hooks 启用时，pre_tool_audit_hook 会发送 tool_start_event
+                        # 此处不重复发送
+                        if not self._enable_hooks:
+                            await self._callback.on_event(
+                                tool_start_event(tool_name, tool_input, tool_id)
+                            )
+
+                        logger.debug(f"Tool call start: {tool_name}, id={tool_id}")
+
+                # ToolResultBlock - 工具返回结果
+                elif ToolResultBlock is not None and isinstance(block, ToolResultBlock):
+                    await self._handle_tool_result(block, session)
+
+        # 处理独立的 ToolResultBlock（某些 SDK 版本可能直接返回）
+        if ToolResultBlock is not None and isinstance(event, ToolResultBlock):
+            await self._handle_tool_result(event, session)
+
+        # 从工具结果中提取来源并更新记忆（兼容旧格式）
         if hasattr(event, "type") and getattr(event, "type", None) == "tool_result":
             content = getattr(event, "content", None)
             tool_name = getattr(event, "tool_name", None)
+            tool_use_id = getattr(event, "tool_use_id", "")
             if content:
                 self._extract_sources(content, session)
                 # 更新记忆系统
                 if tool_name:
                     self._update_memory(tool_name, content)
+                # 发送工具结束事件
+                await self._emit_tool_end_event(tool_name or "unknown", tool_use_id, content, session)
 
         # 处理 content 属性（可能包含工具结果）
         if hasattr(event, "content"):
             content = getattr(event, "content", None)
             if content and not isinstance(event, AssistantMessage):
                 self._extract_sources(content, session)
+
+    async def _handle_tool_result(self, block: Any, session: SessionState) -> None:
+        """处理工具结果块
+
+        Args:
+            block: ToolResultBlock 实例
+            session: 会话状态
+        """
+        tool_use_id = getattr(block, "tool_use_id", "") or ""
+        content = getattr(block, "content", None)
+
+        # 查找对应的工具调用
+        tool_name = "unknown"
+        tool_input = {}
+        thinking_duration_ms = None
+
+        for tc in reversed(session.tool_calls):
+            if tc.get("tool_id") == tool_use_id:
+                tool_name = tc.get("name", "unknown")
+                tool_input = tc.get("input", {})
+                thinking_duration_ms = tc.get("thinking_duration_ms")
+                tc["output"] = content
+                break
+
+        # 提取来源
+        self._extract_sources(content, session)
+
+        # 更新记忆
+        self._update_memory(tool_name, content)
+
+        # 发送工具结束事件
+        await self._emit_tool_end_event(tool_name, tool_use_id, content, session, thinking_duration_ms)
+
+    async def _emit_tool_end_event(
+        self,
+        tool_name: str,
+        tool_id: str,
+        result: Any,
+        session: SessionState,
+        thinking_duration_ms: float | None = None,
+    ) -> None:
+        """发送工具调用结束事件
+
+        注意：当 hooks 启用时，post_tool_audit_hook 会发送带详细结果的事件，
+        此方法仅用于更新内部状态。事件发送由 hooks 统一处理。
+
+        Args:
+            tool_name: 工具名称
+            tool_id: 工具调用 ID
+            result: 工具返回结果
+            session: 会话状态
+            thinking_duration_ms: 思考耗时（可选）
+        """
+        now = time.time()
+
+        # 计算执行耗时
+        start_time = self._tool_start_times.pop(tool_id, None)
+        if start_time is not None:
+            duration_ms = (now - start_time) * 1000
+        else:
+            duration_ms = 0
+
+        # 记录工具结束时间
+        self._last_tool_end_time = now
+
+        # 如果 hooks 启用，事件由 post_tool_audit_hook 发送（带有详细结果）
+        # 此处不重复发送，仅记录日志
+        if self._enable_hooks:
+            logger.debug(f"Tool call end (via hooks): {tool_name}, duration={duration_ms:.1f}ms")
+            return
+
+        # 当 hooks 未启用时，此处发送事件
+        # 使用结果解析器提取详细摘要
+        summary = parse_tool_result(tool_name, result)
+
+        # 获取工具输入（从 session 中查找）
+        tool_input = {}
+        for tc in reversed(session.tool_calls):
+            if tc.get("tool_id") == tool_id or tc.get("name") == tool_name:
+                tool_input = tc.get("input", {})
+                if thinking_duration_ms is None:
+                    thinking_duration_ms = tc.get("thinking_duration_ms")
+                break
+
+        # 发送工具调用完成事件
+        await self._callback.on_event(
+            tool_end_event(
+                tool_name=tool_name,
+                tool_id=tool_id,
+                duration_ms=duration_ms,
+                result_count=summary.result_count,
+                tool_input=tool_input,
+                result_type=summary.result_type,
+                chapter_count=summary.chapter_count,
+                page_sources=summary.page_sources,
+                content_preview=summary.content_preview,
+                thinking_duration_ms=thinking_duration_ms,
+            )
+        )
+
+        logger.debug(f"Tool call end: {tool_name}, duration={duration_ms:.1f}ms")
 
     def _update_memory(self, tool_name: str, result: Any) -> None:
         """根据工具结果更新记忆系统

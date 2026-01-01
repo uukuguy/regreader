@@ -60,13 +60,15 @@ class StatusColors:
     COUNT = "bold green"
     DURATION = "dim"
     ITERATION = "bold yellow"
-    # 详细模式颜色
-    THINKING_TIME = "dim magenta"
-    EXEC_TIME = "dim cyan"
-    RESULT_TYPE = "dim green"
-    PAGE_SOURCE = "dim blue"
-    CONTENT_PREVIEW = "dim white"
-    STREAMING_TEXT = "italic dim"
+    # 详细模式颜色 - 使用更明亮的颜色
+    THINKING_TIME = "magenta"  # 移除 dim
+    EXEC_TIME = "cyan"  # 移除 dim
+    RESULT_TYPE = "green"  # 移除 dim
+    PAGE_SOURCE = "blue"  # 移除 dim
+    CONTENT_PREVIEW = "white"  # 移除 dim
+    # 思考内容 - 使用明显但不刺眼的颜色
+    STREAMING_TEXT = "italic cyan"  # 使用 cyan 替代 dim
+    THINKING_TEXT = "italic magenta"  # 思考内容使用 magenta
 
 
 # ==================== 核心显示类 ====================
@@ -123,6 +125,7 @@ class AgentStatusDisplay(StatusCallback):
         # 状态存储
         self._current_status: Text | None = None
         self._tool_start_times: dict[str, float] = {}
+        self._tool_thinking_times: dict[str, float] = {}  # 追踪每个工具的思考耗时
         self._iteration_count: int = 0
         self._spinner_frame: int = 0
 
@@ -193,13 +196,18 @@ class AgentStatusDisplay(StatusCallback):
         tool_input = event.data.get("tool_input", {})
         tool_brief = event.data.get("tool_brief", tool_name)
 
+        # 简化工具名（去除 mcp__gridcode__ 前缀）
+        display_name = _strip_tool_prefix(tool_name)
+
         text = Text()
+        # 注意：decision_hint 现在在 on_event() 中单独打印到历史，
+        # 因为这里的输出是 transient 的 spinner，完成后会被清除
         text.append(f"{self._get_spinner_char()} ", style=StatusColors.SPINNER)
 
         if self._verbose:
             # 详细模式：显示工具名和参数
             text.append("调用 ", style=StatusColors.DIM)
-            text.append(f"{tool_name}", style=StatusColors.TOOL_NAME)
+            text.append(f"{display_name}", style=StatusColors.TOOL_NAME)
 
             params_str = self._format_tool_params(tool_input)
             if params_str:
@@ -239,9 +247,12 @@ class AgentStatusDisplay(StatusCallback):
         meta = get_tool_metadata(tool_name)
         brief = meta.brief if meta else tool_name
 
+        # 简化工具名（去除 mcp__gridcode__ 前缀）
+        display_name = _strip_tool_prefix(tool_name)
+
         if self._verbose:
             # 详细模式：工具名(参数) (思考 Xms, 执行 Yms)
-            text.append(f"{tool_name}", style=StatusColors.TOOL_NAME)
+            text.append(f"{display_name}", style=StatusColors.TOOL_NAME)
             if tool_input:
                 params_str = _format_params_simple(tool_input)
                 text.append(f"({params_str})", style=StatusColors.DIM)
@@ -448,10 +459,11 @@ class AgentStatusDisplay(StatusCallback):
             格式化的 Text 对象
         """
         text = Text()
-        text.append(f"{StatusIcons.THINKING} ", style=StatusColors.DIM)
-        # 截断过长的文本
-        preview = text_content[:100] + "..." if len(text_content) > 100 else text_content
-        text.append(preview, style=StatusColors.STREAMING_TEXT)
+        # 使用更明显的图标和颜色
+        text.append(f"{StatusIcons.THINKING} ", style="magenta")
+        # 截断过长的文本，但保留更多内容
+        preview = text_content[:200] + "..." if len(text_content) > 200 else text_content
+        text.append(preview, style=StatusColors.THINKING_TEXT)
         return text
 
     def _format_phase_change(self, phase: str, description: str) -> Text:
@@ -523,17 +535,26 @@ class AgentStatusDisplay(StatusCallback):
             # 存储思考耗时到事件数据（供后续使用）
             event.data["thinking_duration_ms"] = thinking_duration_ms
 
-            # 记录工具开始时间
+            # 记录工具开始时间和思考耗时
             tool_id = event.data.get("tool_id") or event.data["tool_name"]
             self._tool_start_times[tool_id] = now
+            if thinking_duration_ms is not None:
+                self._tool_thinking_times[tool_id] = thinking_duration_ms
 
-            # 如果有流式文本且未提交过，先打印到控制台
             if self._streaming_text and self._verbose:
                 if self._streaming_text != self._last_committed_text:
                     self._print_to_history(self._format_thinking_text(self._streaming_text))
                     self._last_committed_text = self._streaming_text
                 self._streaming_text = ""
                 self._is_streaming = False
+
+            # 如果有决策提示，先打印到历史（因为 spinner 是 transient 的）
+            decision_hint = event.data.get("decision_hint")
+            if decision_hint and self._verbose:
+                hint_text = Text()
+                hint_text.append("⚡ ", style="yellow")
+                hint_text.append(f"{decision_hint}", style="italic yellow")
+                self._print_to_history(hint_text)
 
             # 更新当前状态（spinner）
             self._current_status = self._format_tool_call_start(event)
@@ -544,6 +565,11 @@ class AgentStatusDisplay(StatusCallback):
             start_time = self._tool_start_times.pop(tool_id, None)
             if start_time:
                 event.data["duration_ms"] = (time.time() - start_time) * 1000
+
+            # 恢复思考耗时（从 TOOL_CALL_START 保存的）
+            thinking_duration_ms = self._tool_thinking_times.pop(tool_id, None)
+            if thinking_duration_ms is not None and "thinking_duration_ms" not in event.data:
+                event.data["thinking_duration_ms"] = thinking_duration_ms
 
             # 记录工具结束时间
             self._last_tool_end_time = time.time()
@@ -624,6 +650,8 @@ class AgentStatusDisplay(StatusCallback):
         Yields:
             self: 当前显示器实例
         """
+        from loguru import logger
+
         # 重置状态
         self._current_status = None
         self._tool_start_times = {}
@@ -640,17 +668,39 @@ class AgentStatusDisplay(StatusCallback):
         self._current_phase = None
         self._last_committed_text = ""
 
-        with Live(
-            self._render(),
-            console=self._console,
-            refresh_per_second=10,
-            transient=True,  # 只显示当前状态，完成后清除
-        ) as live:
-            self._live = live
-            try:
-                yield self
-            finally:
-                self._live = None
+        # 临时禁用 DEBUG 级别日志（避免与显示混杂）
+        # 只在详细模式下才禁用，因为详细模式会显示思考内容
+        handler_id = None
+        if self._verbose:
+            # 移除默认 handler，添加一个只显示 WARNING 及以上的 handler
+            logger.remove()
+            handler_id = logger.add(
+                lambda msg: self._console.print(f"[dim]{msg}[/dim]", highlight=False),
+                level="WARNING",
+                format="{message}",
+            )
+
+        try:
+            with Live(
+                self._render(),
+                console=self._console,
+                refresh_per_second=10,
+                transient=True,  # 只显示当前状态，完成后清除
+            ) as live:
+                self._live = live
+                try:
+                    yield self
+                finally:
+                    self._live = None
+        finally:
+            # 恢复默认日志配置
+            if handler_id is not None:
+                logger.remove(handler_id)
+                logger.add(
+                    lambda msg: print(msg, end=""),
+                    level="DEBUG",
+                    format="{time:HH:mm:ss} | {level: <8} | {message}",
+                )
 
     def print_final(self) -> None:
         """打印最终状态（非 Live 模式）
@@ -755,3 +805,21 @@ def _format_params_simple(params: dict[str, Any], max_len: int = 60) -> str:
     if len(result) > max_len:
         result = result[:max_len] + "..."
     return result
+
+
+def _strip_tool_prefix(tool_name: str) -> str:
+    """去除工具名称的 MCP 前缀
+
+    将 mcp__gridcode__get_toc 转换为 get_toc
+
+    Args:
+        tool_name: 完整工具名称
+
+    Returns:
+        简化的工具名称
+    """
+    if tool_name.startswith("mcp__"):
+        parts = tool_name.split("__")
+        if len(parts) >= 3:
+            return parts[-1]
+    return tool_name

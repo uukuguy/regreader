@@ -84,22 +84,50 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         return self._model is not None
 
     def load(self) -> None:
-        """加载模型"""
+        """加载模型
+
+        优先使用本地缓存，如果不存在则自动下载（不使用 HF token）。
+        """
         if self._model is not None:
             return
 
         logger.info(f"加载 SentenceTransformer 模型: {self._model_name}")
         from sentence_transformers import SentenceTransformer
+        import os
 
-        model_kwargs = {}
         if self._local_files_only:
-            model_kwargs["local_files_only"] = True
-
-        self._model = SentenceTransformer(
-            self._model_name,
-            device=self._device,
-            **model_kwargs,
-        )
+            # 优先尝试本地加载
+            try:
+                self._model = SentenceTransformer(
+                    self._model_name,
+                    device=self._device,
+                    local_files_only=True,
+                )
+                logger.info("从本地缓存加载模型成功")
+            except OSError:
+                # 本地不存在，自动下载（清除可能过期的 token）
+                logger.info("本地缓存不存在，正在下载模型...")
+                old_token = os.environ.pop("HF_TOKEN", None)
+                old_hf_token = os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+                try:
+                    self._model = SentenceTransformer(
+                        self._model_name,
+                        device=self._device,
+                        local_files_only=False,
+                    )
+                    logger.info("模型下载完成")
+                finally:
+                    # 恢复环境变量
+                    if old_token:
+                        os.environ["HF_TOKEN"] = old_token
+                    if old_hf_token:
+                        os.environ["HUGGING_FACE_HUB_TOKEN"] = old_hf_token
+        else:
+            self._model = SentenceTransformer(
+                self._model_name,
+                device=self._device,
+                local_files_only=False,
+            )
 
         # 配置 prompts（如果有查询前缀）
         if self._query_instruction:
