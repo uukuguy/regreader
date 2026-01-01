@@ -53,7 +53,7 @@ class StatusColors:
     SUCCESS = "green"
     ERROR = "red"
     WARNING = "yellow"
-    DIM = "dim"
+    DIM = "gray" # "dim"
     TOOL_NAME = "bold cyan"
     PARAM_KEY = "dim cyan"
     PARAM_VALUE = "white"
@@ -68,7 +68,7 @@ class StatusColors:
     CONTENT_PREVIEW = "white"  # 移除 dim
     # 思考内容 - 使用明显但不刺眼的颜色
     STREAMING_TEXT = "italic cyan"  # 使用 cyan 替代 dim
-    THINKING_TEXT = "italic magenta"  # 思考内容使用 magenta
+    THINKING_TEXT = "bold white" # "italic magenta"  # 思考内容使用 magenta
 
 
 # ==================== 核心显示类 ====================
@@ -543,6 +543,7 @@ class AgentStatusDisplay(StatusCallback):
 
             if self._streaming_text and self._verbose:
                 if self._streaming_text != self._last_committed_text:
+                    self._print_to_history("\n")
                     self._print_to_history(self._format_thinking_text(self._streaming_text))
                     self._last_committed_text = self._streaming_text
                 self._streaming_text = ""
@@ -623,6 +624,7 @@ class AgentStatusDisplay(StatusCallback):
             # 清理流式文本状态（避免重复添加）
             if self._streaming_text and self._verbose:
                 if self._streaming_text != self._last_committed_text:
+                    self._print_to_history("\n")
                     self._print_to_history(self._format_thinking_text(self._streaming_text))
                     self._last_committed_text = self._streaming_text
                 self._streaming_text = ""

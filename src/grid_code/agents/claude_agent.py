@@ -118,22 +118,26 @@ class ClaudeAgent(BaseGridCodeAgent):
         # ClaudeAgent 使用 Anthropic 专用配置
         # 模型名称：优先使用传入参数，其次用 ANTHROPIC_MODEL_NAME，留空让 SDK 使用默认值
         self._model = model or settings.anthropic_model_name or ""
+        print(f"{settings.anthropic_model_name=}")
+        print(f"[ClaudeAgent] Using model: {self._model or '(SDK default)'}")
         self._enable_hooks = enable_hooks
 
         # 设置环境变量让 Claude SDK 读取
         import os
 
-        # 使用 Anthropic 专用配置
-        api_key = settings.anthropic_api_key
-        if not api_key:
-            raise ValueError(
-                "未配置 Anthropic API Key。"
-                "请设置环境变量 ANTHROPIC_API_KEY"
-            )
-        os.environ["ANTHROPIC_API_KEY"] = api_key
+        # # 使用 Anthropic 专用配置
+        # api_key = settings.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY", "")
+        # if not api_key:
+        #     raise ValueError(
+        #         "未配置 Anthropic API Key。"
+        #         "请设置环境变量 ANTHROPIC_API_KEY"
+        #     )
+        # os.environ["ANTHROPIC_API_KEY"] = api_key
 
-        if settings.anthropic_base_url:
-            os.environ["ANTHROPIC_BASE_URL"] = settings.anthropic_base_url
+        # base_url = settings.anthropic_base_url or os.getenv("ANTHROPIC_BASE_URL", "")
+        # if base_url:
+        #     # os.environ["ANTHROPIC_BASE_URL"] = base_url
+        #     pass
 
         # 会话管理器
         self._session_manager = SessionManager()

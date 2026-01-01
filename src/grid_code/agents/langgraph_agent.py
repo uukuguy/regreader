@@ -269,9 +269,9 @@ class LangGraphAgent(BaseGridCodeAgent):
                 result = await self._mcp_client.call_tool(tool_name, kwargs)
 
                 # DEBUG: 记录完整的工具响应信息，帮助调试（与 hooks.py 保持一致）
-                print(f"[DEBUG langgraph_agent.py] PostToolUse called: {tool_name}")
-                print(f"[DEBUG langgraph_agent.py] result type: {type(result).__name__}")
-                print(f"[DEBUG langgraph_agent.py] result repr: {repr(result)[:300]}")
+                # print(f"[DEBUG langgraph_agent.py] PostToolUse called: {tool_name}")
+                # print(f"[DEBUG langgraph_agent.py] result type: {type(result).__name__}")
+                # print(f"[DEBUG langgraph_agent.py] result repr: {repr(result)[:300]}")
 
                 # 计算执行耗时
                 end_time = time.time()

@@ -159,12 +159,12 @@ async def post_tool_audit_hook(
     tool_id = tool_use_id or tool_name
 
     # DEBUG: 记录完整的 tool_response 信息，帮助调试
-    print(f"[DEBUG hooks.py] PostToolUse called: {tool_name}")
-    print(f"[DEBUG hooks.py] tool_response type: {type(tool_response).__name__}")
-    print(f"[DEBUG hooks.py] tool_response repr: {repr(tool_response)[:300]}")
-    logger.debug(f"[PostToolUse] input_data keys: {list(input_data.keys())}")
-    logger.debug(f"[PostToolUse] tool_response type: {type(tool_response).__name__}")
-    logger.debug(f"[PostToolUse] tool_response repr: {repr(tool_response)[:500]}")
+    # print(f"[DEBUG hooks.py] PostToolUse called: {tool_name}")
+    # print(f"[DEBUG hooks.py] tool_response type: {type(tool_response).__name__}")
+    # print(f"[DEBUG hooks.py] tool_response repr: {repr(tool_response)[:300]}")
+    # logger.debug(f"[PostToolUse] input_data keys: {list(input_data.keys())}")
+    # logger.debug(f"[PostToolUse] tool_response type: {type(tool_response).__name__}")
+    # logger.debug(f"[PostToolUse] tool_response repr: {repr(tool_response)[:500]}")
 
     # 如果是列表，打印第一个元素的详细信息
     if isinstance(tool_response, list) and tool_response:
