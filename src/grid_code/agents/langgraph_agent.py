@@ -32,12 +32,14 @@ from pydantic import BaseModel, Field
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
 from grid_code.agents.callbacks import NullCallback, StatusCallback
 from grid_code.agents.events import (
+    answer_generation_end_event,
     response_complete_event,
     text_delta_event,
     thinking_event,
     tool_end_event,
     tool_start_event,
 )
+from grid_code.agents.llm_timing import LLMTimingCollector
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.memory import AgentMemory
 from grid_code.agents.prompts import (
@@ -120,9 +122,18 @@ class LangGraphAgent(BaseGridCodeAgent):
             # Ollama 需要 /v1 后缀
             if not llm_base_url.endswith("/v1"):
                 llm_base_url = llm_base_url.rstrip("/") + "/v1"
+
+            # 创建 LLM 时间收集器（用于精确测量 API 调用时间）
+            self._timing_collector = LLMTimingCollector(callback=status_callback)
+
             # 关键修复：httpx 默认配置与 Ollama 不兼容，需要显式创建 transport
+            # 同时注入时间收集 hooks
             self._ollama_http_client = httpx.AsyncClient(
-                transport=httpx.AsyncHTTPTransport()
+                transport=httpx.AsyncHTTPTransport(),
+                event_hooks={
+                    "request": [self._timing_collector.on_request],
+                    "response": [self._timing_collector.on_response],
+                },
             )
             self._llm = ChatOpenAI(
                 model=self._model_name,
@@ -135,6 +146,7 @@ class LangGraphAgent(BaseGridCodeAgent):
             logger.info(f"Using Ollama backend: model={self._model_name}, base_url={llm_base_url}")
         else:
             self._ollama_http_client = None
+            self._timing_collector = None  # 非 Ollama 后端暂不支持 API 时间测量
             self._llm = ChatOpenAI(
                 model=self._model_name,
                 api_key=settings.llm_api_key,
@@ -289,6 +301,21 @@ class LangGraphAgent(BaseGridCodeAgent):
                     thinking_duration_ms = (now - self._last_tool_end_time) * 1000
                     logger.debug(f"[LangGraph] thinking_duration_ms={thinking_duration_ms:.1f}")
 
+                # 获取 API 调用统计（自上一步骤以来的累计）
+                api_duration_ms = None
+                api_call_count = None
+                if self._timing_collector:
+                    step_metrics = self._timing_collector.get_step_metrics()
+                    if step_metrics.api_calls > 0:
+                        api_duration_ms = step_metrics.api_duration_ms
+                        api_call_count = step_metrics.api_calls
+                        logger.debug(
+                            f"[LangGraph] Thinking phase API: "
+                            f"{api_call_count} calls, {api_duration_ms:.0f}ms"
+                        )
+                    # 重置步骤统计，为下一步骤准备
+                    self._timing_collector.start_step()
+
                 # 发送工具调用开始事件
                 await self._callback.on_event(tool_start_event(tool_name, kwargs))
 
@@ -309,12 +336,14 @@ class LangGraphAgent(BaseGridCodeAgent):
                 # 更新上一工具结束时间
                 self._last_tool_end_time = end_time
 
-                # 追踪工具调用
+                # 追踪工具调用（包含 API 统计）
                 self._tool_calls.append({
                     "name": tool_name,
                     "input": kwargs,
                     "output": result,
                     "thinking_duration_ms": thinking_duration_ms,
+                    "api_duration_ms": api_duration_ms,
+                    "api_call_count": api_call_count,
                 })
 
                 # 提取来源
@@ -325,7 +354,7 @@ class LangGraphAgent(BaseGridCodeAgent):
                 # 使用结果解析器提取详细摘要
                 summary = parse_tool_result(tool_name, result)
 
-                # 发送工具调用完成事件（带详细摘要）
+                # 发送工具调用完成事件（带详细摘要和 API 统计）
                 await self._callback.on_event(
                     tool_end_event(
                         tool_name=tool_name,
@@ -339,6 +368,8 @@ class LangGraphAgent(BaseGridCodeAgent):
                         page_sources=summary.page_sources,
                         content_preview=summary.content_preview,
                         thinking_duration_ms=thinking_duration_ms,
+                        api_duration_ms=api_duration_ms,
+                        api_call_count=api_call_count,
                     )
                 )
 
@@ -602,7 +633,28 @@ class LangGraphAgent(BaseGridCodeAgent):
             await self._callback.on_event(thinking_event(start=False))
 
             # 计算总耗时
-            duration_ms = (time.time() - start_time) * 1000
+            end_time = time.time()
+            duration_ms = (end_time - start_time) * 1000
+
+            # 获取最后一步的 API 统计（生成最终答案时的 LLM 调用）
+            final_api_duration_ms = None
+            final_api_call_count = None
+            if self._timing_collector:
+                step_metrics = self._timing_collector.get_step_metrics()
+                if step_metrics.api_calls > 0:
+                    final_api_duration_ms = step_metrics.api_duration_ms
+                    final_api_call_count = step_metrics.api_calls
+
+            # 发送答案生成完成事件（如果有工具调用，最后一步是生成最终答案）
+            if self._tool_calls and self._last_tool_end_time is not None:
+                answer_thinking_ms = (end_time - self._last_tool_end_time) * 1000
+                await self._callback.on_event(
+                    answer_generation_end_event(
+                        thinking_duration_ms=answer_thinking_ms,
+                        api_duration_ms=final_api_duration_ms,
+                        api_call_count=final_api_call_count,
+                    )
+                )
 
             # 发送响应完成事件
             await self._callback.on_event(
@@ -610,6 +662,8 @@ class LangGraphAgent(BaseGridCodeAgent):
                     total_tool_calls=len(self._tool_calls),
                     total_sources=len(set(self._sources)),
                     duration_ms=duration_ms,
+                    final_api_duration_ms=final_api_duration_ms,
+                    final_api_call_count=final_api_call_count,
                 )
             )
 
@@ -635,7 +689,7 @@ class LangGraphAgent(BaseGridCodeAgent):
         """重置对话历史
 
         生成新的 thread_id，开始新的会话。
-        同时重置记忆系统。
+        同时重置记忆系统和时间收集器。
         """
         self._thread_id = self._generate_thread_id()
         self._tool_calls = []
@@ -643,6 +697,8 @@ class LangGraphAgent(BaseGridCodeAgent):
         self._last_tool_end_time = None
         if self._memory:
             self._memory.reset()  # 重置记忆系统
+        if self._timing_collector:
+            self._timing_collector.reset()  # 重置时间收集器
         logger.debug(f"Session reset, new thread_id: {self._thread_id}")
 
     def new_session(self) -> str:

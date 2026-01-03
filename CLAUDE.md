@@ -291,6 +291,12 @@ GRIDCODE_VECTOR_INDEX_BACKEND=lancedb # lancedb, qdrant
 GRIDCODE_FTS_WEIGHT=0.4
 GRIDCODE_VECTOR_WEIGHT=0.6
 GRIDCODE_SEARCH_TOP_K=10
+
+# LLM API Timing & Observability
+GRIDCODE_TIMING_BACKEND=httpx        # httpx (CLI display) or otel (production monitoring)
+GRIDCODE_OTEL_EXPORTER_TYPE=console  # console, otlp, jaeger, zipkin
+GRIDCODE_OTEL_SERVICE_NAME=gridcode-agent
+GRIDCODE_OTEL_ENDPOINT=http://localhost:4317  # For OTLP/Jaeger/Zipkin exporters
 ```
 
 ## Testing Standards

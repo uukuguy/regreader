@@ -5,8 +5,10 @@
 
 增强功能：
 - 双时间显示（思考耗时 + 执行耗时）
+- API 时间显示（通过 httpx hooks 精确测量的 HTTP 往返时间）
 - 详细结果摘要（结果类型、章节数、页码、内容预览）
 - 流式文本输出（模型推理过程）
+- 完成统计（总耗时、思考次数/耗时、API 次数/耗时、工具次数、来源数）
 """
 
 import time
@@ -61,8 +63,9 @@ class StatusColors:
     DURATION = "dim"
     ITERATION = "bold yellow"
     # 详细模式颜色 - 使用更明亮的颜色
-    THINKING_TIME = "magenta"  # 移除 dim
-    EXEC_TIME = "cyan"  # 移除 dim
+    THINKING_TIME = "yellow"  # 思考时间 - 黄色（步骤间总时间）
+    API_TIME = "magenta"  # API时间 - 紫红色（httpx测量的HTTP往返）
+    EXEC_TIME = "cyan"  # 执行时间 - 青色
     RESULT_TYPE = "green"  # 移除 dim
     PAGE_SOURCE = "blue"  # 移除 dim
     CONTENT_PREVIEW = "white"  # 移除 dim
@@ -88,18 +91,18 @@ class AgentStatusDisplay(StatusCallback):
 
     💭 让我先查看规程的目录结构...
 
-    ✓ get_toc(reg_id="angui_2024") (思考 234ms, 执行 45ms)
+    ✓ get_toc(reg_id="angui_2024") (思考 1.7s, API 1.5s, 执行 9ms)
         📊 12 条结果 (chapters)
         📝 第1章 总则, 第2章 运行管理...
 
     💭 我需要在第3章中搜索安全距离相关内容...
 
-    ✓ smart_search(query="安全距离") (思考 156ms, 执行 892ms)
+    ✓ smart_search(query="安全距离") (思考 63.2s, API 62.5s/3次, 执行 1.4s)
         📊 8 条结果 (search_results)，涉及 3 个章节
         📄 来源: P85, P86, P92, P95
         📝 安全距离不应小于... | 作业人员与带电...
 
-    → 共调用 2 个工具，5 个来源，耗时 1.3s
+    → 统计: 总耗时 106.6s | 思考 74.0s/3次 | API 73.5s/6次 | 工具 3次 | 来源 5个
     """
 
     def __init__(
@@ -126,12 +129,22 @@ class AgentStatusDisplay(StatusCallback):
         self._current_status: Text | None = None
         self._tool_start_times: dict[str, float] = {}
         self._tool_thinking_times: dict[str, float] = {}  # 追踪每个工具的思考耗时
+        self._tool_llm_times: dict[str, float] = {}  # 追踪每个工具的LLM调用耗时
         self._iteration_count: int = 0
         self._spinner_frame: int = 0
 
         # 时间追踪（用于计算思考耗时）
         self._last_tool_end_time: float | None = None
         self._query_start_time: float | None = None
+
+        # LLM调用耗时追踪（思考时间）
+        self._llm_call_start_time: float | None = None  # 当前LLM调用开始时间
+        self._total_llm_duration_ms: float = 0  # 累计LLM调用耗时（思考时间）
+        self._llm_call_count: int = 0  # LLM调用次数（思考次数）
+
+        # API调用耗时追踪（通过 httpx hooks 精确测量）
+        self._total_api_duration_ms: float = 0  # 累计API调用耗时
+        self._total_api_call_count: int = 0  # API调用次数
 
         # 流式文本状态
         self._streaming_text: str = ""
@@ -233,6 +246,11 @@ class AgentStatusDisplay(StatusCallback):
         result_summary = event.data.get("result_summary", "")
         tool_input = event.data.get("tool_input", {})
         thinking_duration_ms = event.data.get("thinking_duration_ms")
+        llm_duration_ms = event.data.get("llm_duration_ms")
+
+        # API 调用统计（通过 httpx hooks 精确测量）
+        api_duration_ms = event.data.get("api_duration_ms")
+        api_call_count = event.data.get("api_call_count")
 
         # 详细模式新增字段
         result_type = event.data.get("result_type")
@@ -251,17 +269,32 @@ class AgentStatusDisplay(StatusCallback):
         display_name = _strip_tool_prefix(tool_name)
 
         if self._verbose:
-            # 详细模式：工具名(参数) (思考 Xms, 执行 Yms)
+            # 详细模式：工具名(参数) (思考 Xms, API Yms[/N次], 执行 Zms)
             text.append(f"{display_name}", style=StatusColors.TOOL_NAME)
             if tool_input:
                 params_str = _format_params_simple(tool_input)
                 text.append(f"({params_str})", style=StatusColors.DIM)
 
-            # 双时间显示
+            # 三时间显示：思考时间 + API时间 + 执行时间
             text.append(" (", style=StatusColors.DIM)
-            if thinking_duration_ms is not None:
+
+            # 思考时间（步骤间总时间）
+            if llm_duration_ms is not None:
+                text.append(f"思考 {self._format_duration(llm_duration_ms)}", style=StatusColors.THINKING_TIME)
+                text.append(", ", style=StatusColors.DIM)
+            elif thinking_duration_ms is not None:
+                # 兼容：如果没有llm_duration_ms但有thinking_duration_ms
                 text.append(f"思考 {self._format_duration(thinking_duration_ms)}", style=StatusColors.THINKING_TIME)
                 text.append(", ", style=StatusColors.DIM)
+
+            # API时间（精确的HTTP往返时间）
+            if api_duration_ms is not None:
+                text.append(f"API {self._format_duration(api_duration_ms)}", style=StatusColors.API_TIME)
+                if api_call_count is not None and api_call_count > 1:
+                    text.append(f"/{api_call_count}次", style=StatusColors.API_TIME)
+                text.append(", ", style=StatusColors.DIM)
+
+            # 执行时间
             text.append(f"执行 {self._format_duration(duration_ms)}", style=StatusColors.EXEC_TIME)
             text.append(")", style=StatusColors.DIM)
 
@@ -438,14 +471,34 @@ class AgentStatusDisplay(StatusCallback):
 
         text = Text()
         text.append(f"\n{StatusIcons.INFO} ", style=StatusColors.DIM)
-        text.append(f"共调用 {total_tools} 个工具", style=StatusColors.DIM)
+        text.append("统计: ", style="bold")
 
-        if total_sources > 0:
-            text.append(f"，{total_sources} 个来源", style=StatusColors.DIM)
-
+        # 总耗时
         if duration > 0:
             duration_sec = duration / 1000
-            text.append(f"，耗时 {duration_sec:.1f}s", style=StatusColors.DURATION)
+            text.append(f"总耗时 {duration_sec:.1f}s", style=StatusColors.DURATION)
+
+        # 思考时间统计（步骤间总时间）
+        if self._total_llm_duration_ms > 0:
+            llm_sec = self._total_llm_duration_ms / 1000
+            text.append(" | ", style=StatusColors.DIM)
+            text.append(f"思考 {llm_sec:.1f}s/{self._llm_call_count}次", style=StatusColors.THINKING_TIME)
+
+        # API调用统计（精确的HTTP往返时间）
+        if self._total_api_duration_ms > 0:
+            api_sec = self._total_api_duration_ms / 1000
+            text.append(" | ", style=StatusColors.DIM)
+            text.append(f"API {api_sec:.1f}s/{self._total_api_call_count}次", style=StatusColors.API_TIME)
+
+        # 工具调用统计
+        if total_tools > 0:
+            text.append(" | ", style=StatusColors.DIM)
+            text.append(f"工具 {total_tools}次", style=StatusColors.EXEC_TIME)
+
+        # 来源统计
+        if total_sources > 0:
+            text.append(" | ", style=StatusColors.DIM)
+            text.append(f"来源 {total_sources}个", style=StatusColors.PAGE_SOURCE)
 
         return text
 
@@ -483,6 +536,53 @@ class AgentStatusDisplay(StatusCallback):
             text.append(f" - {description}", style=StatusColors.DIM)
         return text
 
+    def _format_answer_generation_start(self) -> Text:
+        """格式化答案生成开始状态
+
+        Returns:
+            格式化的 Text 对象
+        """
+        text = Text()
+        text.append(f"{self._get_spinner_char()} ", style=StatusColors.SPINNER)
+        text.append("生成最终答案...", style=StatusColors.DIM)
+        return text
+
+    def _format_answer_generation_end(self, event: AgentEvent) -> Text:
+        """格式化答案生成完成状态
+
+        Args:
+            event: 答案生成完成事件
+
+        Returns:
+            格式化的 Text 对象
+        """
+        thinking_duration_ms = event.data.get("thinking_duration_ms")
+        api_duration_ms = event.data.get("api_duration_ms")
+        api_call_count = event.data.get("api_call_count")
+
+        text = Text()
+        text.append(f"{StatusIcons.SUCCESS} ", style=StatusColors.SUCCESS)
+        text.append("答案生成", style=StatusColors.SUCCESS)
+
+        # 显示时间信息
+        text.append(" (", style=StatusColors.DIM)
+
+        # 思考时间
+        if thinking_duration_ms is not None:
+            text.append(f"思考 {self._format_duration(thinking_duration_ms)}", style=StatusColors.THINKING_TIME)
+
+        # API时间
+        if api_duration_ms is not None:
+            if thinking_duration_ms is not None:
+                text.append(", ", style=StatusColors.DIM)
+            text.append(f"API {self._format_duration(api_duration_ms)}", style=StatusColors.API_TIME)
+            if api_call_count is not None and api_call_count > 1:
+                text.append(f"/{api_call_count}次", style=StatusColors.API_TIME)
+
+        text.append(")", style=StatusColors.DIM)
+
+        return text
+
     def _render(self) -> Text:
         """渲染当前状态（只渲染当前状态，不含历史）
 
@@ -516,30 +616,54 @@ class AgentStatusDisplay(StatusCallback):
             # 记录查询开始时间
             if self._query_start_time is None:
                 self._query_start_time = time.time()
+                # 重置思考时间统计
+                self._total_llm_duration_ms = 0
+                self._llm_call_count = 0
+                # 重置API调用统计
+                self._total_api_duration_ms = 0
+                self._total_api_call_count = 0
+            # 记录LLM调用开始时间
+            self._llm_call_start_time = time.time()
             self._current_status = self._format_thinking(True)
 
         elif event.event_type == AgentEventType.THINKING_END:
-            # 思考结束，清除当前状态（不添加到历史）
+            # 思考结束，计算LLM调用耗时（如果有开始时间且没有工具调用）
+            if self._llm_call_start_time is not None:
+                llm_duration = (time.time() - self._llm_call_start_time) * 1000
+                self._total_llm_duration_ms += llm_duration
+                self._llm_call_count += 1
+                self._llm_call_start_time = None
             self._current_status = None
 
         elif event.event_type == AgentEventType.TOOL_CALL_START:
+            # 计算LLM调用耗时（从LLM开始到工具调用开始）
+            llm_duration_ms = None
+            now = time.time()
+            if self._llm_call_start_time is not None:
+                llm_duration_ms = (now - self._llm_call_start_time) * 1000
+                self._total_llm_duration_ms += llm_duration_ms
+                self._llm_call_count += 1
+                self._llm_call_start_time = None  # 重置，等待下次THINKING_START
+
             # 计算思考耗时（从上一工具结束到本工具开始）
             thinking_duration_ms = None
-            now = time.time()
             if self._last_tool_end_time is not None:
                 thinking_duration_ms = (now - self._last_tool_end_time) * 1000
             elif self._query_start_time is not None:
                 # 第一个工具：从查询开始算起
                 thinking_duration_ms = (now - self._query_start_time) * 1000
 
-            # 存储思考耗时到事件数据（供后续使用）
+            # 存储耗时到事件数据（供后续使用）
             event.data["thinking_duration_ms"] = thinking_duration_ms
+            event.data["llm_duration_ms"] = llm_duration_ms
 
-            # 记录工具开始时间和思考耗时
+            # 记录工具开始时间和耗时
             tool_id = event.data.get("tool_id") or event.data["tool_name"]
             self._tool_start_times[tool_id] = now
             if thinking_duration_ms is not None:
                 self._tool_thinking_times[tool_id] = thinking_duration_ms
+            if llm_duration_ms is not None:
+                self._tool_llm_times[tool_id] = llm_duration_ms
 
             if self._streaming_text and self._verbose:
                 if self._streaming_text != self._last_committed_text:
@@ -572,8 +696,23 @@ class AgentStatusDisplay(StatusCallback):
             if thinking_duration_ms is not None and "thinking_duration_ms" not in event.data:
                 event.data["thinking_duration_ms"] = thinking_duration_ms
 
-            # 记录工具结束时间
-            self._last_tool_end_time = time.time()
+            # 恢复LLM调用耗时（从 TOOL_CALL_START 保存的）
+            llm_duration_ms = self._tool_llm_times.pop(tool_id, None)
+            if llm_duration_ms is not None and "llm_duration_ms" not in event.data:
+                event.data["llm_duration_ms"] = llm_duration_ms
+
+            # 累计 API 调用统计（来自 httpx hooks 精确测量）
+            api_duration_ms = event.data.get("api_duration_ms")
+            api_call_count = event.data.get("api_call_count")
+            if api_duration_ms is not None:
+                self._total_api_duration_ms += api_duration_ms
+            if api_call_count is not None:
+                self._total_api_call_count += api_call_count
+
+            # 记录工具结束时间，同时作为下一次LLM调用的开始时间
+            now = time.time()
+            self._last_tool_end_time = now
+            self._llm_call_start_time = now  # 工具执行完成后，LLM继续推理
 
             # 直接打印工具结果（不累积到历史）
             self._print_to_history(self._format_tool_call_end(event))
@@ -582,7 +721,9 @@ class AgentStatusDisplay(StatusCallback):
         elif event.event_type == AgentEventType.TOOL_CALL_ERROR:
             self._print_to_history(self._format_tool_call_error(event))
             self._current_status = None
-            self._last_tool_end_time = time.time()
+            now = time.time()
+            self._last_tool_end_time = now
+            self._llm_call_start_time = now  # 错误后LLM继续推理
 
         elif event.event_type == AgentEventType.ITERATION_START:
             iteration = event.data.get("iteration", 1)
@@ -620,6 +761,32 @@ class AgentStatusDisplay(StatusCallback):
                     self._current_phase = phase
                     self._print_to_history(self._format_phase_change(phase, description))
 
+        elif event.event_type == AgentEventType.ANSWER_GENERATION_START:
+            # 答案生成开始（仅详细模式显示 spinner）
+            if self._verbose:
+                self._current_status = self._format_answer_generation_start()
+
+        elif event.event_type == AgentEventType.ANSWER_GENERATION_END:
+            # 答案生成完成
+            # 累计 API 调用统计
+            api_duration_ms = event.data.get("api_duration_ms")
+            api_call_count = event.data.get("api_call_count")
+            if api_duration_ms is not None:
+                self._total_api_duration_ms += api_duration_ms
+            if api_call_count is not None:
+                self._total_api_call_count += api_call_count
+
+            # 累计思考时间
+            thinking_duration_ms = event.data.get("thinking_duration_ms")
+            if thinking_duration_ms is not None:
+                self._total_llm_duration_ms += thinking_duration_ms
+                self._llm_call_count += 1
+
+            # 详细模式下显示答案生成完成状态
+            if self._verbose:
+                self._print_to_history(self._format_answer_generation_end(event))
+            self._current_status = None
+
         elif event.event_type == AgentEventType.RESPONSE_COMPLETE:
             # 清理流式文本状态（避免重复添加）
             if self._streaming_text and self._verbose:
@@ -630,11 +797,35 @@ class AgentStatusDisplay(StatusCallback):
                 self._streaming_text = ""
                 self._is_streaming = False
 
+            # 累加最后一步的 API 统计（生成最终答案时的 LLM 调用）
+            final_api_duration_ms = event.data.get("final_api_duration_ms")
+            final_api_call_count = event.data.get("final_api_call_count")
+            if final_api_duration_ms is not None:
+                self._total_api_duration_ms += final_api_duration_ms
+            if final_api_call_count is not None:
+                self._total_api_call_count += final_api_call_count
+
             # 只在详细模式下显示摘要
+            # 修复：不再限制 total_tools > 0，只要有任何活动（工具调用、LLM调用、API调用）就显示
             if self._verbose:
                 total_tools = event.data.get("total_tool_calls", 0)
-                if total_tools > 0:
+                # 有工具调用、LLM思考、或API调用时都显示摘要
+                has_activity = (
+                    total_tools > 0
+                    or self._llm_call_count > 0
+                    or self._total_api_call_count > 0
+                )
+                if has_activity:
                     self._print_to_history(self._format_summary(event))
+
+            # 重置查询状态，为下一次查询做准备
+            self._query_start_time = None
+            self._last_tool_end_time = None
+            self._llm_call_start_time = None
+            self._total_llm_duration_ms = 0
+            self._llm_call_count = 0
+            self._total_api_duration_ms = 0
+            self._total_api_call_count = 0
 
         # 更新 Live 显示
         if self._live:

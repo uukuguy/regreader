@@ -1,0 +1,36 @@
+model_list:
+  - model_name: "*"
+    litellm_params:
+      api_key: os.environ/OPENAI_API_KEY 
+      api_base: os.environ/OPENAI_BASE_URL
+      model: os.environ/OPENAI_MODEL_NAME
+      # ------ SiliconFlow ------
+      # api_base: os.environ/OPENAI_BASE_URL
+      # api_base: https://api.siliconflow.cn/v1
+      # 40.4s 
+      # model: openai/Pro/deepseek-ai/DeepSeek-V3.2
+      # 26s
+      # model: openai/Qwen/Qwen3-Coder-480B-A35B-Instruct
+      # 25.4s
+      # model: openai/Pro/zai-org/GLM-4.7
+      # 40.5s
+      # model: openai/Pro/moonshotai/Kimi-K2-Instruct-0905
+      #
+      # ------ OpenRouter ------
+      # api_base: https://openrouter.ai/api/v1
+      # 29.0s
+      # model: openai/deepseek/deepseek-v3.2
+      # 33.5s
+      # model: openai/z-ai/glm-4.7
+    model_info:
+      supports_function_calling: true
+
+router_settings:
+  # 强制将所有传入请求（包括 anthropic 格式）路由到 model_list
+  enable_pre_call_checks: true
+
+general_settings:
+  # 关键设置：强制覆盖客户端传来的任何 key，改用配置文件里的 SiliconFlow Key
+  allow_user_auth: false
+  # 关键：开启此项，LiteLLM 才会解析并转换格式，而不是简单的透明转发
+  drop_params: true

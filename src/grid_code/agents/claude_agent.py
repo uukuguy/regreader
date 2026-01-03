@@ -232,25 +232,35 @@ class ClaudeAgent(BaseGridCodeAgent):
         """构建 Hooks 配置
 
         返回 PreToolUse 和 PostToolUse 的钩子列表。
+        根据配置决定是否启用 OTel 追踪。
         """
         if not self._enable_hooks or HookMatcher is None:
             return None
 
-        # 延迟导入避免循环依赖
-        from grid_code.agents.hooks import (
-            post_tool_audit_hook,
-            pre_tool_audit_hook,
-            source_extraction_hook,
+        settings = get_settings()
+
+        # 检查是否启用 OTel 追踪
+        enable_otel = settings.timing_backend == "otel"
+
+        # 使用组合 hooks 工厂函数
+        from grid_code.agents.otel_hooks import get_combined_hooks
+
+        combined = get_combined_hooks(
+            enable_audit=True,  # 始终启用审计 hooks
+            enable_otel=enable_otel,
+            otel_service_name=settings.otel_service_name,
+            otel_exporter_type=settings.otel_exporter_type,
+            otel_endpoint=settings.otel_endpoint,
         )
 
-        return {
-            "PreToolUse": [
-                HookMatcher(hooks=[pre_tool_audit_hook]),
-            ],
-            "PostToolUse": [
-                HookMatcher(hooks=[post_tool_audit_hook, source_extraction_hook]),
-            ],
-        }
+        # 转换为 HookMatcher 格式
+        result = {}
+        if combined.get("PreToolUse"):
+            result["PreToolUse"] = [HookMatcher(hooks=combined["PreToolUse"])]
+        if combined.get("PostToolUse"):
+            result["PostToolUse"] = [HookMatcher(hooks=combined["PostToolUse"])]
+
+        return result if result else None
 
     def _build_options(self) -> ClaudeAgentOptions:
         """构建 Agent 选项"""

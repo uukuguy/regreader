@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+export ANTHROPIC_BASE_URL=http://localhost:4000
+export ANTHROPIC_API_KEY=sk-1234
+export ANTHROPIC_AUTH_TOKEN=sk-1234
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 

@@ -1,0 +1,16 @@
+model_list:
+  # 1) 工具路由层（小模型）
+  - model_name: qwen3-router
+    litellm_params:
+      model: ollama_chat/qwen3:4b-instruct
+      api_base: http://localhost:11434
+    model_info:
+      supports_function_calling: true
+
+  # 2) 最终总结层（大模型）
+  - model_name: qwen3-main
+    litellm_params:
+      model: ollama_chat/Qwen3-Coder-30B-A3B-Instruct:Q4_K_M
+      api_base: http://localhost:11434
+    model_info:
+      supports_function_calling: true

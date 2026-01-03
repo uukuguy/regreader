@@ -258,6 +258,7 @@ Core implementation complete. Remaining work:
 - [x] Phase 2: FTS5 + LanceDB indexing (with pluggable backends)
 - [x] Phase 3: MCP Server with SSE transport
 - [x] Phase 4-6: Three agent implementations
+- [x] LLM API timing & observability (httpx + OpenTelemetry)
 - [ ] End-to-end testing with real regulation documents
 - [ ] Performance benchmarking across index backends
 

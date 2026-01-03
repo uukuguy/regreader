@@ -166,6 +166,26 @@ class GridCodeSettings(BaseSettings):
         description="是否启用高级分析工具（find_similar_content, compare_sections）",
     )
 
+    # 时间追踪配置
+    timing_backend: str = Field(
+        default="httpx",
+        description="时间追踪后端: httpx（CLI 显示用）, otel（OpenTelemetry 追踪）",
+    )
+
+    # OpenTelemetry 配置
+    otel_exporter_type: str = Field(
+        default="console",
+        description="OTel 导出器类型: console, otlp, jaeger, zipkin",
+    )
+    otel_service_name: str = Field(
+        default="gridcode-agent",
+        description="OTel 服务名称（用于追踪标识）",
+    )
+    otel_endpoint: str | None = Field(
+        default=None,
+        description="OTel 导出端点（OTLP/Jaeger/Zipkin 服务器地址）",
+    )
+
     # 索引后端配置
     keyword_index_backend: str = Field(
         default="fts5",

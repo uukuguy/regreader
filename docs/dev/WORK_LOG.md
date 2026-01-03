@@ -1,5 +1,227 @@
 # GridCode 开发工作日志 (dev 分支)
 
+## 2026-01-04 LLM API 时间追踪与 OpenTelemetry 集成
+
+### 会话概述
+
+实现了双轨 LLM API 时间追踪架构，支持 httpx hooks（CLI 显示）和 OpenTelemetry（生产环境监控）两种后端，并解决了最后答案生成步骤的 LLM 调用未显示问题。
+
+### 背景问题
+
+用户报告了以下问题：
+1. 最后一步生成答案时，虽然有 LLM API 调用，但 CLI 没有明确显示
+2. 需要评估 OpenTelemetry 方案用于生产环境追踪
+3. 希望支持 httpx 和 OTel 双轨追踪，可通过配置切换
+
+### 完成的工作
+
+#### Phase 1: 答案生成事件
+
+**events.py 更新**
+- 添加 `ANSWER_GENERATION_START` 和 `ANSWER_GENERATION_END` 事件类型
+- 创建 `answer_generation_start_event()` 和 `answer_generation_end_event()` 工厂函数
+
+**pydantic_agent.py / langgraph_agent.py 更新**
+- 在工具调用完成后发送 `ANSWER_GENERATION_START` 事件
+- 在最终答案生成完成后发送 `ANSWER_GENERATION_END` 事件，包含思考耗时和 API 调用信息
+
+**display.py 更新**
+- 添加 `_format_answer_generation_start()` 和 `_format_answer_generation_end()` 方法
+- 修复汇总条件：现在只要有任何活动（工具调用/LLM调用/API调用）就显示汇总
+
+#### Phase 2: 双轨时间追踪架构
+
+**新建 `src/grid_code/agents/timing/` 模块**
+
+```
+timing/
+├── __init__.py          # 工厂函数和导出
+├── base.py              # 抽象接口 TimingBackend
+├── httpx_timing.py      # HttpxTimingBackend (CLI 显示用)
+└── otel_timing.py       # OTelTimingBackend (生产监控)
+```
+
+**base.py - 抽象接口**
+```python
+class TimingBackend(ABC):
+    @abstractmethod
+    def configure_httpx_client(self, client) -> client: ...
+    @abstractmethod
+    async def on_llm_call_start(self, **kwargs) -> None: ...
+    @abstractmethod
+    async def on_llm_call_end(self, duration_ms, **kwargs) -> None: ...
+    def start_step(self) -> None: ...
+    def get_step_metrics(self) -> StepMetrics: ...
+    def get_total_metrics(self) -> dict: ...
+```
+
+**httpx_timing.py - httpx 事件钩子实现**
+- 使用 `event_hooks` 拦截 HTTP 请求/响应
+- 精确测量每次 LLM API 调用的 TTFT（首字节时间）和总耗时
+- 保留 `LLMTimingCollector` 别名确保向后兼容
+
+**otel_timing.py - OpenTelemetry 实现**
+- 使用 `opentelemetry-instrumentation-httpx` 自动追踪
+- 支持多种导出器：console, otlp, jaeger, zipkin
+- 创建结构化 spans 包含模型名称、tokens 等属性
+
+**工厂函数**
+```python
+def create_timing_backend(backend_type: str = "httpx", **kwargs) -> TimingBackend
+def create_timing_backend_from_config(callback=None) -> TimingBackend
+```
+
+#### Phase 2.5: 配置更新
+
+**config.py 新增配置项**
+```python
+timing_backend: str = "httpx"           # httpx 或 otel
+otel_exporter_type: str = "console"     # console, otlp, jaeger, zipkin
+otel_service_name: str = "gridcode-agent"
+otel_endpoint: str | None = None        # OTLP/Jaeger/Zipkin 端点
+```
+
+**pyproject.toml 新增可选依赖**
+```toml
+otel = ["opentelemetry-api>=1.27.0", "opentelemetry-sdk>=1.27.0", "opentelemetry-instrumentation-httpx>=0.48b0"]
+otel-otlp = [...]   # + opentelemetry-exporter-otlp-proto-grpc
+otel-jaeger = [...] # + opentelemetry-exporter-jaeger
+otel-zipkin = [...] # + opentelemetry-exporter-zipkin
+```
+
+#### Phase 3: Claude Agent SDK OTel 集成
+
+**新建 `src/grid_code/agents/otel_hooks.py`**
+
+为 Claude Agent SDK 的 hooks 机制提供 OTel 支持：
+
+```python
+async def otel_pre_tool_hook(input_data, tool_use_id, context) -> dict:
+    """工具调用开始时创建 span"""
+
+async def otel_post_tool_hook(input_data, tool_use_id, context) -> dict:
+    """工具调用结束时结束 span"""
+
+def get_otel_hooks(service_name, exporter_type, endpoint) -> dict:
+    """获取 OTel hooks 配置"""
+
+def get_combined_hooks(enable_audit, enable_otel, ...) -> dict:
+    """获取组合的 hooks 配置（审计 + OTel）"""
+```
+
+**claude_agent.py 更新**
+
+修改 `_build_hooks()` 方法使用组合 hooks 工厂：
+
+```python
+def _build_hooks(self):
+    settings = get_settings()
+    enable_otel = settings.timing_backend == "otel"
+
+    from grid_code.agents.otel_hooks import get_combined_hooks
+    combined = get_combined_hooks(
+        enable_audit=True,
+        enable_otel=enable_otel,
+        otel_service_name=settings.otel_service_name,
+        otel_exporter_type=settings.otel_exporter_type,
+        otel_endpoint=settings.otel_endpoint,
+    )
+    # 转换为 HookMatcher 格式...
+```
+
+### 修改的文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `src/grid_code/agents/events.py` | 添加 ANSWER_GENERATION 事件 |
+| `src/grid_code/agents/pydantic_agent.py` | 发送答案生成事件 |
+| `src/grid_code/agents/langgraph_agent.py` | 发送答案生成事件 |
+| `src/grid_code/agents/display.py` | 处理答案生成事件，修复汇总条件 |
+| `src/grid_code/agents/timing/__init__.py` | 新建 - 工厂函数 |
+| `src/grid_code/agents/timing/base.py` | 新建 - 抽象接口 |
+| `src/grid_code/agents/timing/httpx_timing.py` | 新建 - httpx 后端 |
+| `src/grid_code/agents/timing/otel_timing.py` | 新建 - OTel 后端 |
+| `src/grid_code/agents/llm_timing.py` | 更新为兼容层 |
+| `src/grid_code/agents/otel_hooks.py` | 新建 - Claude SDK OTel hooks |
+| `src/grid_code/agents/claude_agent.py` | 使用组合 hooks |
+| `src/grid_code/config.py` | 添加 OTel 配置项 |
+| `pyproject.toml` | 添加 otel 可选依赖 |
+
+### 使用示例
+
+```bash
+# 使用 httpx 后端（默认，CLI 显示）
+export GRIDCODE_TIMING_BACKEND=httpx
+gridcode chat -r angui_2024
+
+# 使用 OTel 后端（控制台输出）
+export GRIDCODE_TIMING_BACKEND=otel
+export GRIDCODE_OTEL_EXPORTER_TYPE=console
+gridcode chat -r angui_2024
+
+# 使用 OTel 后端（OTLP 导出到 Jaeger）
+pip install grid-code[otel-otlp]
+export GRIDCODE_TIMING_BACKEND=otel
+export GRIDCODE_OTEL_EXPORTER_TYPE=otlp
+export GRIDCODE_OTEL_ENDPOINT=http://localhost:4317
+gridcode chat -r angui_2024
+```
+
+### 架构设计
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Agent Layer                              │
+├─────────────────────────────────────────────────────────────┤
+│  PydanticAIAgent  │  LangGraphAgent  │  ClaudeAgent         │
+│       │                   │                 │                │
+│       ▼                   ▼                 ▼                │
+│  ┌─────────────────────────────┐    ┌─────────────────┐     │
+│  │     TimingBackend           │    │   SDK Hooks     │     │
+│  │  ┌─────────┬──────────┐    │    │ ┌─────────────┐ │     │
+│  │  │ httpx   │   otel   │    │    │ │ otel_hooks  │ │     │
+│  │  │ hooks   │ instrumt │    │    │ └─────────────┘ │     │
+│  │  └─────────┴──────────┘    │    └─────────────────┘     │
+│  └─────────────────────────────┘                            │
+├─────────────────────────────────────────────────────────────┤
+│                    Display/Callback                          │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  StatusDisplay: ANSWER_GENERATION_START/END events  │    │
+│  └─────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 验证结果
+
+```
+Testing imports...
+✓ timing module
+✓ llm_timing backward compatibility
+✓ otel_hooks (OTEL_AVAILABLE=True)
+✓ get_combined_hooks (audit only)
+✓ claude_agent
+✓ config (timing_backend=httpx)
+
+All imports successful!
+```
+
+### 技术亮点
+
+1. **双轨架构**：同时支持 httpx 和 OTel 两种追踪方式，可通过配置切换
+2. **向后兼容**：保留 `LLMTimingCollector` 别名，旧代码无需修改
+3. **可插拔导出**：OTel 支持 console/otlp/jaeger/zipkin 四种导出方式
+4. **统一接口**：所有后端实现相同的 `TimingBackend` 抽象接口
+5. **组合 Hooks**：Claude SDK 可同时启用审计和 OTel hooks
+
+### 后续建议
+
+1. 为 pydantic_agent 和 langgraph_agent 添加 OTel timing 后端支持
+2. 考虑添加 Prometheus metrics 导出
+3. 添加 trace context propagation 支持分布式追踪
+4. 为 timing 模块添加单元测试
+
+---
+
 ## 2026-01-04 Ollama 后端支持与 httpx 传输修复
 
 ### 会话概述

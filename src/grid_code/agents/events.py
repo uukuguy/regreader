@@ -41,6 +41,13 @@ class AgentEventType(Enum):
     THINKING_DELTA = auto()      # 思考增量（模型内部推理）
     PHASE_CHANGE = auto()        # 阶段变化（分析问题 → 查找目录 → 检索章节）
 
+    # === LLM API 调用阶段 ===
+    LLM_API_CALL = auto()        # LLM API 调用完成（精确测量 HTTP 往返时间）
+
+    # === 答案生成阶段 ===
+    ANSWER_GENERATION_START = auto()  # 开始生成最终答案（最后一轮 LLM 调用）
+    ANSWER_GENERATION_END = auto()    # 答案生成完成
+
 
 @dataclass
 class AgentEvent:
@@ -76,6 +83,8 @@ class AgentEvent:
         - chapter_count: int    涉及章节数
         - page_sources: list[int] 来源页码列表
         - content_preview: str  内容预览
+        - api_duration_ms: float  API 调用累计耗时（毫秒）
+        - api_call_count: int     API 调用次数
 
     TOOL_CALL_ERROR:
         - tool_name: str
@@ -100,6 +109,20 @@ class AgentEvent:
     PHASE_CHANGE:
         - phase: str            阶段名称
         - description: str      阶段描述
+
+    LLM_API_CALL:
+        - duration_ms: float    API 调用耗时（毫秒）
+        - prompt_tokens: int    输入 token 数（如有）
+        - completion_tokens: int 输出 token 数（如有）
+        - endpoint: str         API 端点 URL
+
+    ANSWER_GENERATION_START:
+        (无额外数据字段)
+
+    ANSWER_GENERATION_END:
+        - thinking_duration_ms: float  思考耗时（毫秒）
+        - api_duration_ms: float       API 调用累计耗时（毫秒）
+        - api_call_count: int          API 调用次数
     """
 
     event_type: AgentEventType
@@ -168,6 +191,9 @@ def tool_end_event(
     page_sources: list[int] | None = None,
     content_preview: str | None = None,
     thinking_duration_ms: float | None = None,
+    # API 调用统计（通过 httpx hooks 精确测量）
+    api_duration_ms: float | None = None,
+    api_call_count: int | None = None,
 ) -> AgentEvent:
     """创建工具调用完成事件
 
@@ -184,6 +210,8 @@ def tool_end_event(
         page_sources: 来源页码列表
         content_preview: 内容预览
         thinking_duration_ms: 思考耗时（从上一工具结束到本工具开始）
+        api_duration_ms: API 调用累计耗时（毫秒）
+        api_call_count: API 调用次数
 
     Returns:
         AgentEvent 实例
@@ -203,6 +231,8 @@ def tool_end_event(
             "page_sources": page_sources or [],
             "content_preview": content_preview,
             "thinking_duration_ms": thinking_duration_ms,
+            "api_duration_ms": api_duration_ms,
+            "api_call_count": api_call_count,
         },
     )
 
@@ -265,6 +295,9 @@ def response_complete_event(
     total_tool_calls: int = 0,
     total_sources: int = 0,
     duration_ms: float = 0,
+    # 最后一步的 API 调用统计（生成最终答案时的 LLM 调用）
+    final_api_duration_ms: float | None = None,
+    final_api_call_count: int | None = None,
 ) -> AgentEvent:
     """创建响应完成事件
 
@@ -272,6 +305,8 @@ def response_complete_event(
         total_tool_calls: 总工具调用次数
         total_sources: 总来源数量
         duration_ms: 总耗时（毫秒）
+        final_api_duration_ms: 最后一步 API 调用耗时（毫秒）
+        final_api_call_count: 最后一步 API 调用次数
 
     Returns:
         AgentEvent 实例
@@ -282,6 +317,8 @@ def response_complete_event(
             "total_tool_calls": total_tool_calls,
             "total_sources": total_sources,
             "duration_ms": duration_ms,
+            "final_api_duration_ms": final_api_duration_ms,
+            "final_api_call_count": final_api_call_count,
         },
     )
 
@@ -337,5 +374,76 @@ def phase_change_event(phase: str, description: str = "") -> AgentEvent:
         data={
             "phase": phase,
             "description": description,
+        },
+    )
+
+
+def llm_api_call_event(
+    duration_ms: float,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    endpoint: str = "",
+) -> AgentEvent:
+    """创建 LLM API 调用完成事件
+
+    通过 httpx hooks 精确测量的 HTTP 往返时间。
+
+    Args:
+        duration_ms: API 调用耗时（毫秒）
+        prompt_tokens: 输入 token 数（如 API 返回）
+        completion_tokens: 输出 token 数（如 API 返回）
+        endpoint: API 端点 URL
+
+    Returns:
+        AgentEvent 实例
+    """
+    return AgentEvent(
+        event_type=AgentEventType.LLM_API_CALL,
+        data={
+            "duration_ms": duration_ms,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "endpoint": endpoint,
+        },
+    )
+
+
+def answer_generation_start_event() -> AgentEvent:
+    """创建答案生成开始事件
+
+    在最后一轮 LLM 调用（生成最终答案）开始时触发。
+
+    Returns:
+        AgentEvent 实例
+    """
+    return AgentEvent(
+        event_type=AgentEventType.ANSWER_GENERATION_START,
+        data={},
+    )
+
+
+def answer_generation_end_event(
+    thinking_duration_ms: float,
+    api_duration_ms: float | None = None,
+    api_call_count: int | None = None,
+) -> AgentEvent:
+    """创建答案生成完成事件
+
+    在最后一轮 LLM 调用（生成最终答案）完成时触发。
+
+    Args:
+        thinking_duration_ms: 思考耗时（毫秒）
+        api_duration_ms: API 调用累计耗时（毫秒）
+        api_call_count: API 调用次数
+
+    Returns:
+        AgentEvent 实例
+    """
+    return AgentEvent(
+        event_type=AgentEventType.ANSWER_GENERATION_END,
+        data={
+            "thinking_duration_ms": thinking_duration_ms,
+            "api_duration_ms": api_duration_ms,
+            "api_call_count": api_call_count,
         },
     )

@@ -23,6 +23,7 @@ from grid_code.agents.callbacks import NullCallback, StatusCallback
 from grid_code.agents.events import (
     AgentEvent,
     AgentEventType,
+    answer_generation_end_event,
     iteration_event,
     response_complete_event,
     text_delta_event,
@@ -30,6 +31,7 @@ from grid_code.agents.events import (
     tool_end_event,
     tool_start_event,
 )
+from grid_code.agents.llm_timing import LLMTimingCollector
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.memory import AgentMemory, ContentChunk
 from grid_code.agents.prompts import (
@@ -157,9 +159,16 @@ class PydanticAIAgent(BaseGridCodeAgent):
             if not ollama_base.endswith("/v1"):
                 ollama_base = ollama_base.rstrip("/") + "/v1"
 
-            # 创建自定义 httpx client（解决 502 问题）
+            # 创建 LLM 时间收集器（用于精确测量 API 调用时间）
+            self._timing_collector = LLMTimingCollector(callback=status_callback)
+
+            # 创建自定义 httpx client（解决 502 问题 + 注入时间收集 hooks）
             self._ollama_http_client = httpx.AsyncClient(
-                transport=httpx.AsyncHTTPTransport()
+                transport=httpx.AsyncHTTPTransport(),
+                event_hooks={
+                    "request": [self._timing_collector.on_request],
+                    "response": [self._timing_collector.on_response],
+                },
             )
 
             ollama_model = OpenAIChatModel(
@@ -181,6 +190,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
             self._model = f"openai:{model_name}"
             self._model_name = self._model
             self._ollama_http_client = None
+            self._timing_collector = None  # 非 Ollama 后端暂不支持 API 时间测量
             logger.debug(f"Using model: {self._model_name}, provider: {provider}")
 
         # 获取 MCP 连接管理器
@@ -213,6 +223,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
         self._tool_calls: list[dict] = []
         self._sources: list[str] = []
         self._tool_start_times: dict[str, float] = {}  # tool_call_id -> start_time
+        self._last_tool_end_time: float | None = None  # 最后一个工具结束时间
 
         # 连接状态
         self._connected = False
@@ -271,15 +282,11 @@ class PydanticAIAgent(BaseGridCodeAgent):
         - 追踪思考耗时（从上一工具结束到本工具开始）
         - 解析详细结果摘要（结果类型、章节数、页码、内容预览）
         """
-        # 使用闭包变量追踪上一工具结束时间
-        last_tool_end_time: float | None = None
 
         async def event_stream_handler(
             ctx: RunContext,
             event_stream: AsyncIterable[AgentStreamEvent],
         ):
-            nonlocal last_tool_end_time
-
             async for event in event_stream:
                 # DEBUG: 记录所有事件类型，帮助排查漏记问题
                 event_type = type(event).__name__
@@ -318,8 +325,23 @@ class PydanticAIAgent(BaseGridCodeAgent):
 
                     # 计算思考耗时（从上一工具结束到本工具开始）
                     thinking_duration_ms = None
-                    if last_tool_end_time is not None:
-                        thinking_duration_ms = (now - last_tool_end_time) * 1000
+                    if self._last_tool_end_time is not None:
+                        thinking_duration_ms = (now - self._last_tool_end_time) * 1000
+
+                    # 获取 API 调用统计（自上一步骤以来的累计）
+                    api_duration_ms = None
+                    api_call_count = None
+                    if self._timing_collector:
+                        step_metrics = self._timing_collector.get_step_metrics()
+                        if step_metrics.api_calls > 0:
+                            api_duration_ms = step_metrics.api_duration_ms
+                            api_call_count = step_metrics.api_calls
+                            logger.debug(
+                                f"[EventStream] Thinking phase API: "
+                                f"{api_call_count} calls, {api_duration_ms:.0f}ms"
+                            )
+                        # 重置步骤统计，为下一步骤准备
+                        self._timing_collector.start_step()
 
                     # 记录开始时间
                     self._tool_start_times[tool_call_id] = now
@@ -333,12 +355,14 @@ class PydanticAIAgent(BaseGridCodeAgent):
                     else:
                         tool_input = tool_args if isinstance(tool_args, dict) else {}
 
-                    # 记录工具调用
+                    # 记录工具调用（包含 API 统计）
                     self._tool_calls.append({
                         "name": tool_name,
                         "input": tool_input,
                         "tool_call_id": tool_call_id,
                         "thinking_duration_ms": thinking_duration_ms,
+                        "api_duration_ms": api_duration_ms,
+                        "api_call_count": api_call_count,
                     })
 
                     # 发送工具调用开始事件
@@ -349,7 +373,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
                 elif isinstance(event, FunctionToolResultEvent):
                     # 工具调用完成
                     tool_call_id = event.tool_call_id or ""
-                    
+
                     # 从结果中提取信息
                     result_content = event.result.content if hasattr(event.result, "content") else event.result
 
@@ -363,25 +387,29 @@ class PydanticAIAgent(BaseGridCodeAgent):
                     now = time.time()
                     duration_ms = (now - start_time) * 1000 if start_time else None
 
-                    # 记录工具结束时间
-                    last_tool_end_time = now
+                    # 记录工具结束时间（使用实例变量，供答案生成阶段使用）
+                    self._last_tool_end_time = now
 
-                    # 获取工具名称和参数
+                    # 获取工具名称和参数（包含 API 统计）
                     tool_name = "unknown"
                     tool_input = {}
                     thinking_duration_ms = None
+                    api_duration_ms = None
+                    api_call_count = None
                     for tc in reversed(self._tool_calls):
                         if tc.get("tool_call_id") == tool_call_id:
                             tool_name = tc.get("name", "unknown")
                             tool_input = tc.get("input", {})
                             thinking_duration_ms = tc.get("thinking_duration_ms")
+                            api_duration_ms = tc.get("api_duration_ms")
+                            api_call_count = tc.get("api_call_count")
                             tc["output"] = result_content
                             break
 
                     # 使用结果解析器提取详细摘要
                     summary = parse_tool_result(tool_name, result_content)
 
-                    # 发送工具调用完成事件
+                    # 发送工具调用完成事件（包含 API 统计）
                     await self._callback.on_event(
                         tool_end_event(
                             tool_name=tool_name,
@@ -394,6 +422,8 @@ class PydanticAIAgent(BaseGridCodeAgent):
                             page_sources=summary.page_sources,
                             content_preview=summary.content_preview,
                             thinking_duration_ms=thinking_duration_ms,
+                            api_duration_ms=api_duration_ms,
+                            api_call_count=api_call_count,
                         )
                     )
 
@@ -443,6 +473,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
         self._tool_calls = []
         self._sources = []
         self._tool_start_times = {}
+        self._last_tool_end_time = None  # 重置最后工具结束时间
 
         # 创建依赖
         deps = AgentDependencies(reg_id=self.reg_id)
@@ -501,7 +532,29 @@ class PydanticAIAgent(BaseGridCodeAgent):
             await self._callback.on_event(thinking_event(start=False))
 
             # 计算总耗时
-            duration_ms = (time.time() - start_time) * 1000
+            end_time = time.time()
+            duration_ms = (end_time - start_time) * 1000
+
+            # 获取最后一步的 API 统计（生成最终答案时的 LLM 调用）
+            final_api_duration_ms = None
+            final_api_call_count = None
+            if self._timing_collector:
+                step_metrics = self._timing_collector.get_step_metrics()
+                if step_metrics.api_calls > 0:
+                    final_api_duration_ms = step_metrics.api_duration_ms
+                    final_api_call_count = step_metrics.api_calls
+
+            # 如果有工具调用，发送答案生成事件
+            # 这表示最后一轮 LLM 调用（生成最终答案）的时间统计
+            if self._tool_calls and self._last_tool_end_time is not None:
+                answer_thinking_ms = (end_time - self._last_tool_end_time) * 1000
+                await self._callback.on_event(
+                    answer_generation_end_event(
+                        thinking_duration_ms=answer_thinking_ms,
+                        api_duration_ms=final_api_duration_ms,
+                        api_call_count=final_api_call_count,
+                    )
+                )
 
             # 发送响应完成事件
             await self._callback.on_event(
@@ -509,6 +562,8 @@ class PydanticAIAgent(BaseGridCodeAgent):
                     total_tool_calls=len(self._tool_calls),
                     total_sources=len(set(self._sources)),
                     duration_ms=duration_ms,
+                    final_api_duration_ms=final_api_duration_ms,
+                    final_api_call_count=final_api_call_count,
                 )
             )
 
@@ -645,8 +700,11 @@ class PydanticAIAgent(BaseGridCodeAgent):
         self._tool_calls = []
         self._sources = []
         self._tool_start_times = {}
+        self._last_tool_end_time = None
         if self._memory:
             self._memory.reset()
+        if self._timing_collector:
+            self._timing_collector.reset()
         logger.debug("Conversation history and memory reset")
 
     def get_message_count(self) -> int:

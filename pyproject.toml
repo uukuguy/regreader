@@ -55,6 +55,31 @@ flag = [
     "FlagEmbedding>=1.2.0",
 ]
 
+# OpenTelemetry 追踪后端
+otel = [
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+]
+otel-otlp = [
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",
+]
+otel-jaeger = [
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+    "opentelemetry-exporter-jaeger>=1.21.0",
+]
+otel-zipkin = [
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+    "opentelemetry-exporter-zipkin>=1.27.0",
+]
+
 # 安装所有可选索引后端
 all-indexes = [
     "tantivy>=0.22.0",
