@@ -28,6 +28,7 @@ from grid_code.storage.models import (
     DocumentStructure,
     PageContent,
     SearchResult,
+    TocItem,
     TocTree,
 )
 
@@ -60,12 +61,19 @@ class GridCodeTools:
             self._table_search = TableHybridSearch()
         return self._table_search
 
-    def get_toc(self, reg_id: str) -> dict:
+    def get_toc(
+        self,
+        reg_id: str,
+        max_depth: int = 3,
+        expand_section: str | None = None,
+    ) -> dict:
         """
         获取规程目录树
 
         Args:
             reg_id: 规程标识（如 'angui_2024'）
+            max_depth: 返回的目录层级深度（1-6，默认3级）
+            expand_section: 要完整展开的章节编号（如 '2.1.4'），该分支不受深度限制
 
         Returns:
             目录树结构，包含标题、页码范围等信息
@@ -74,7 +82,80 @@ class GridCodeTools:
             RegulationNotFoundError: 规程不存在
         """
         toc = self.page_store.load_toc(reg_id)
+
+        # 如果需要截断，使用截断逻辑
+        if max_depth < 6 or expand_section:
+            return self._truncate_toc(toc, max_depth, expand_section)
+
         return toc.model_dump()
+
+    def _truncate_toc(
+        self,
+        toc: TocTree,
+        max_depth: int,
+        expand_section: str | None,
+    ) -> dict:
+        """
+        截断目录树到指定深度
+
+        Args:
+            toc: 完整目录树
+            max_depth: 最大深度（1-6）
+            expand_section: 要展开的章节编号
+
+        Returns:
+            截断后的目录树字典
+        """
+
+        def truncate_item(item: TocItem, current_depth: int, in_expand_path: bool) -> dict:
+            """递归截断单个目录项"""
+            # 判断是否在展开路径中
+            should_expand = in_expand_path
+
+            # 检查当前项是否匹配 expand_section 或其子节点
+            if expand_section:
+                # item.title 格式类似 "2.1. 章节标题" 或 "2.1.4 章节标题"
+                item_section = item.title.split(" ")[0] if " " in item.title else item.title
+                # 移除末尾的点（如 "2.1." -> "2.1"）
+                item_section = item_section.rstrip(".")
+
+                # 检查是否匹配或是展开章节的子节点
+                if item_section == expand_section or item_section.startswith(f"{expand_section}."):
+                    should_expand = True
+                # 检查是否是 expand_section 的祖先
+                if expand_section.startswith(f"{item_section}."):
+                    should_expand = True
+
+            result: dict = {
+                "title": item.title,
+                "level": item.level,
+                "page_start": item.page_start,
+            }
+
+            if item.page_end is not None:
+                result["page_end"] = item.page_end
+
+            if item.children:
+                if should_expand or current_depth < max_depth:
+                    result["children"] = [
+                        truncate_item(child, current_depth + 1, should_expand)
+                        for child in item.children
+                    ]
+                else:
+                    # 超出深度限制，只返回子节点数量
+                    result["children_count"] = len(item.children)
+                    result["children"] = []
+            else:
+                result["children"] = []
+
+            return result
+
+        return {
+            "reg_id": toc.reg_id,
+            "title": toc.title,
+            "total_pages": toc.total_pages,
+            "items": [truncate_item(item, 1, False) for item in toc.items],
+        }
 
     def smart_search(
         self,

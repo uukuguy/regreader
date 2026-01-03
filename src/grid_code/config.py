@@ -149,6 +149,10 @@ class GridCodeSettings(BaseSettings):
         default="optimized",
         description="Agent 提示词模式: full（完整版）, optimized（优化版，默认）, simple（最简版）",
     )
+    enable_agent_memory: bool = Field(
+        default=False,
+        description="是否启用 Agent 记忆系统（目录缓存 + 相关内容记忆）",
+    )
 
     # MCP 工具集配置
     enable_advanced_tools: bool = Field(

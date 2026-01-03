@@ -147,7 +147,8 @@ class ClaudeAgent(BaseGridCodeAgent):
         self._session_manager = SessionManager()
 
         # 记忆系统（目录缓存 + 相关内容记忆）
-        self._memory = AgentMemory()
+        self._enable_memory = settings.enable_agent_memory
+        self._memory = AgentMemory() if self._enable_memory else None
 
         # MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
@@ -214,15 +215,16 @@ class ClaudeAgent(BaseGridCodeAgent):
         if self.reg_id:
             base_prompt += f"\n\n# 当前规程\n默认规程: {self.reg_id}"
 
-        # 注入目录缓存提示
-        toc_hint = self._memory.get_toc_cache_hint()
-        if toc_hint:
-            base_prompt += toc_hint
+        # 注入目录缓存提示（仅在启用记忆时）
+        if self._memory:
+            toc_hint = self._memory.get_toc_cache_hint()
+            if toc_hint:
+                base_prompt += toc_hint
 
-        # 注入已获取的相关内容
-        memory_context = self._memory.get_memory_context()
-        if memory_context:
-            base_prompt += f"\n\n{memory_context}"
+            # 注入已获取的相关内容
+            memory_context = self._memory.get_memory_context()
+            if memory_context:
+                base_prompt += f"\n\n{memory_context}"
 
         return base_prompt
 
@@ -710,6 +712,10 @@ class ClaudeAgent(BaseGridCodeAgent):
             tool_name: 工具名称（如 mcp__gridcode__get_toc）
             result: 工具返回结果
         """
+        # 记忆系统未启用时跳过
+        if not self._memory:
+            return
+
         import json
 
         # 解析 JSON 字符串
@@ -812,13 +818,15 @@ class ClaudeAgent(BaseGridCodeAgent):
             session_id: 要重置的会话 ID，如果为 None 则重置默认会话
         """
         self._session_manager.reset(session_id)
-        self._memory.clear_query_context()  # 清除查询上下文，保留目录缓存
+        if self._memory:
+            self._memory.clear_query_context()  # 清除查询上下文，保留目录缓存
         logger.debug(f"Session reset: {session_id or 'default'}")
 
     async def reset_all(self):
         """重置所有会话"""
         self._session_manager.reset_all()
-        self._memory.reset()  # 完全重置记忆（包括目录缓存）
+        if self._memory:
+            self._memory.reset()  # 完全重置记忆（包括目录缓存）
         logger.debug("All sessions reset")
 
     def get_sessions(self) -> list[str]:

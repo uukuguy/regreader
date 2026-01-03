@@ -7,12 +7,79 @@
 - 高级分析工具（2个）：默认禁用，通过配置开关启用
 """
 
+import json
+import time
+from functools import wraps
+from typing import Any, Callable
+
+from loguru import logger
 from mcp.server.fastmcp import FastMCP
 
 from grid_code.config import get_settings
 from grid_code.exceptions import GridCodeError
 from grid_code.mcp.tool_metadata import TOOL_METADATA, get_enabled_tools
 from grid_code.mcp.tools import GridCodeTools
+
+
+def _format_args(args: dict[str, Any], max_len: int = 100) -> str:
+    """格式化参数用于日志显示"""
+    if not args:
+        return "{}"
+    try:
+        s = json.dumps(args, ensure_ascii=False)
+        if len(s) > max_len:
+            return s[:max_len] + "..."
+        return s
+    except Exception:
+        return str(args)[:max_len]
+
+
+def _format_result(result: Any, max_len: int = 200) -> str:
+    """格式化结果用于日志显示"""
+    if result is None:
+        return "None"
+    if isinstance(result, list):
+        return f"[{len(result)} items]"
+    if isinstance(result, dict):
+        if "error" in result:
+            return f"{{error: {result['error']}}}"
+        keys = list(result.keys())[:5]
+        return f"{{keys: {keys}{'...' if len(result) > 5 else ''}}}"
+    try:
+        s = str(result)
+        if len(s) > max_len:
+            return s[:max_len] + "..."
+        return s
+    except Exception:
+        return "<unable to format>"
+
+
+def log_tool_call(func: Callable) -> Callable:
+    """装饰器：记录工具调用的详细日志"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        tool_name = func.__name__
+        start_time = time.time()
+
+        # 记录调用开始
+        logger.info(f"🔧 Tool Call: {tool_name}")
+        logger.debug(f"   Parameters: {_format_args(kwargs)}")
+
+        try:
+            result = func(*args, **kwargs)
+            duration_ms = (time.time() - start_time) * 1000
+
+            # 记录调用成功
+            logger.info(f"✅ Tool Done: {tool_name} ({duration_ms:.1f}ms)")
+            logger.debug(f"   Result: {_format_result(result)}")
+
+            return result
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            logger.error(f"❌ Tool Error: {tool_name} ({duration_ms:.1f}ms) - {e}")
+            raise
+
+    return wrapper
 
 
 def create_mcp_server(
@@ -47,19 +114,26 @@ def create_mcp_server(
     # ==================== 基础工具（4个，始终启用） ====================
 
     @mcp.tool(meta=TOOL_METADATA["list_regulations"].to_dict())
+    @log_tool_call
     def list_regulations() -> list[dict]:
         """列出所有已入库的规程。"""
         return tools.list_regulations()
 
     @mcp.tool(meta=TOOL_METADATA["get_toc"].to_dict())
-    def get_toc(reg_id: str) -> dict:
+    @log_tool_call
+    def get_toc(
+        reg_id: str,
+        max_depth: int = 3,
+        expand_section: str | None = None,
+    ) -> dict:
         """获取规程目录树。"""
         try:
-            return tools.get_toc(reg_id)
+            return tools.get_toc(reg_id, max_depth, expand_section)
         except GridCodeError as e:
             return {"error": str(e)}
 
     @mcp.tool(meta=TOOL_METADATA["smart_search"].to_dict())
+    @log_tool_call
     def smart_search(
         query: str,
         reg_id: str,
@@ -77,6 +151,7 @@ def create_mcp_server(
             return [{"error": str(e)}]
 
     @mcp.tool(meta=TOOL_METADATA["read_page_range"].to_dict())
+    @log_tool_call
     def read_page_range(
         reg_id: str,
         start_page: int,
@@ -91,6 +166,7 @@ def create_mcp_server(
     # ==================== 多跳推理工具（3个，始终启用） ====================
 
     @mcp.tool(meta=TOOL_METADATA["search_tables"].to_dict())
+    @log_tool_call
     def search_tables(
         query: str,
         reg_id: str,
@@ -105,6 +181,7 @@ def create_mcp_server(
             return [{"error": str(e)}]
 
     @mcp.tool(meta=TOOL_METADATA["lookup_annotation"].to_dict())
+    @log_tool_call
     def lookup_annotation(
         reg_id: str,
         annotation_id: str,
@@ -117,6 +194,7 @@ def create_mcp_server(
             return {"error": str(e)}
 
     @mcp.tool(meta=TOOL_METADATA["resolve_reference"].to_dict())
+    @log_tool_call
     def resolve_reference(
         reg_id: str,
         reference_text: str,
@@ -130,6 +208,7 @@ def create_mcp_server(
     # ==================== 上下文扩展工具（1个，始终启用） ====================
 
     @mcp.tool(meta=TOOL_METADATA["get_table_by_id"].to_dict())
+    @log_tool_call
     def get_table_by_id(
         reg_id: str,
         table_id: str,
@@ -145,6 +224,7 @@ def create_mcp_server(
 
     if enable_advanced_tools:
         @mcp.tool(meta=TOOL_METADATA["find_similar_content"].to_dict())
+        @log_tool_call
         def find_similar_content(
             reg_id: str,
             query_text: str | None = None,
@@ -161,6 +241,7 @@ def create_mcp_server(
                 return [{"error": str(e)}]
 
         @mcp.tool(meta=TOOL_METADATA["compare_sections"].to_dict())
+        @log_tool_call
         def compare_sections(
             reg_id: str,
             section_a: str,

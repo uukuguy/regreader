@@ -488,3 +488,7 @@ mcp-verify-v: ## Verify MCP service with detailed output
 SSE_URL ?= http://localhost:8080/sse
 mcp-verify-sse: ## Verify MCP service via SSE (requires 'make serve' running)
 	$(UV) run gridcode mcp-tools --live --sse $(SSE_URL) --verify -v
+
+# Litellm Proxy
+start-litellm-proxy:
+	bash litellm/start-litellm-proxy.sh

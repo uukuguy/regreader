@@ -164,7 +164,8 @@ class PydanticAIAgent(BaseGridCodeAgent):
         self._message_history: list[ModelMessage] = []
 
         # 记忆系统（目录缓存 + 相关内容记忆）
-        self._memory = AgentMemory()
+        self._enable_memory = settings.enable_agent_memory
+        self._memory = AgentMemory() if self._enable_memory else None
 
         # 工具调用记录（单次查询）
         self._tool_calls: list[dict] = []
@@ -205,15 +206,16 @@ class PydanticAIAgent(BaseGridCodeAgent):
         if self.reg_id:
             base_prompt += f"\n\n# 当前规程\n默认规程: {self.reg_id}"
 
-        # 注入目录缓存提示
-        toc_hint = self._memory.get_toc_cache_hint()
-        if toc_hint:
-            base_prompt += toc_hint
+        # 注入目录缓存提示（仅在启用记忆时）
+        if self._memory:
+            toc_hint = self._memory.get_toc_cache_hint()
+            if toc_hint:
+                base_prompt += toc_hint
 
-        # 注入已获取的相关内容
-        memory_context = self._memory.get_memory_context()
-        if memory_context:
-            base_prompt += f"\n\n{memory_context}"
+            # 注入已获取的相关内容
+            memory_context = self._memory.get_memory_context()
+            if memory_context:
+                base_prompt += f"\n\n{memory_context}"
 
         return base_prompt
 
@@ -524,6 +526,10 @@ class PydanticAIAgent(BaseGridCodeAgent):
             tool_name: 工具名称
             result: 工具返回结果
         """
+        # 记忆系统未启用时跳过
+        if not self._memory:
+            return
+
         # 解析 JSON 字符串
         if isinstance(result, str):
             try:
@@ -568,7 +574,8 @@ class PydanticAIAgent(BaseGridCodeAgent):
         self._tool_calls = []
         self._sources = []
         self._tool_start_times = {}
-        self._memory.reset()
+        if self._memory:
+            self._memory.reset()
         logger.debug("Conversation history and memory reset")
 
     def get_message_count(self) -> int:

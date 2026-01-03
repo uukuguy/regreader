@@ -150,7 +150,8 @@ class LangGraphAgent(BaseGridCodeAgent):
         self._iteration_count: int = 0
 
         # 记忆系统（目录缓存 + 相关内容记忆）
-        self._memory = AgentMemory()
+        self._enable_memory = settings.enable_agent_memory
+        self._memory = AgentMemory() if self._enable_memory else None
 
         # 追踪上一工具结束时间（用于计算思考耗时）
         self._last_tool_end_time: float | None = None
@@ -206,15 +207,16 @@ class LangGraphAgent(BaseGridCodeAgent):
                 f"调用工具时如未指定 reg_id，请使用此默认值。"
             )
 
-        # 注入目录缓存提示
-        toc_hint = self._memory.get_toc_cache_hint()
-        if toc_hint:
-            base_prompt += toc_hint
+        # 注入目录缓存提示（仅在启用记忆时）
+        if self._memory:
+            toc_hint = self._memory.get_toc_cache_hint()
+            if toc_hint:
+                base_prompt += toc_hint
 
-        # 注入已获取的相关内容
-        memory_context = self._memory.get_memory_context()
-        if memory_context:
-            base_prompt += f"\n\n{memory_context}"
+            # 注入已获取的相关内容
+            memory_context = self._memory.get_memory_context()
+            if memory_context:
+                base_prompt += f"\n\n{memory_context}"
 
         return base_prompt
 
@@ -455,6 +457,10 @@ class LangGraphAgent(BaseGridCodeAgent):
             tool_name: 工具名称
             result: 工具返回结果
         """
+        # 记忆系统未启用时跳过
+        if not self._memory:
+            return
+
         # 解析 JSON 字符串
         if isinstance(result, str):
             try:
@@ -613,7 +619,8 @@ class LangGraphAgent(BaseGridCodeAgent):
         self._tool_calls = []
         self._sources = []
         self._last_tool_end_time = None
-        self._memory.reset()  # 重置记忆系统
+        if self._memory:
+            self._memory.reset()  # 重置记忆系统
         logger.debug(f"Session reset, new thread_id: {self._thread_id}")
 
     def new_session(self) -> str:

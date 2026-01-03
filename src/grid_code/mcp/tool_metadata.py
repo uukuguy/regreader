@@ -196,9 +196,16 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "get_toc": ToolMetadata(
         name="get_toc",
         brief="获取规程目录树",
-        description="获取规程的完整目录结构，用于了解规程章节组织、确定搜索范围",
+        description=(
+            "获取规程的目录结构。"
+            "【重要】首次调用必须使用默认深度（max_depth=3），不要设置更大值！"
+            "只有在需要查看特定章节的详细子结构时，才使用 expand_section 参数展开该分支。"
+            "直接使用 max_depth>3 会导致返回数据过大超出限制。"
+        ),
         params_doc={
             "reg_id": "规程标识",
+            "max_depth": "返回深度（1-6，默认3）。【警告】不要随意增大此值！",
+            "expand_section": "要完整展开的章节编号（如「2.1.4」），仅在需要查看特定章节详情时使用",
         },
         category=ToolCategory.BASE,
         phase=0,
@@ -207,7 +214,11 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
         next_tools=["smart_search", "search_tables"],
         use_cases=["了解规程结构", "确定搜索范围"],
         cli_command="toc",
-        expected_params={"reg_id": "string"},
+        expected_params={
+            "reg_id": "string",
+            "max_depth": "integer",
+            "expand_section": "string|null",
+        },
     ),
     "smart_search": ToolMetadata(
         name="smart_search",
@@ -420,6 +431,8 @@ TOOL_WORKFLOWS: dict[str, list[str]] = {
 # ==================== 使用建议 ====================
 
 TOOL_TIPS: list[str] = [
+    "【重要】get_toc 首次调用必须用默认深度（max_depth=3），不要设置更大值",
+    "需要查看特定章节详情时，用 expand_section 参数展开该分支，而非增大 max_depth",
     "先用 get_toc 了解规程结构，确定搜索范围",
     "smart_search 时务必指定 chapter_scope 参数缩小范围",
     "搜索结果不完整时用 read_page_range 获取完整上下文",
