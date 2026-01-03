@@ -150,6 +150,12 @@ class GridCodeSettings(BaseSettings):
         description="Agent 提示词模式: full（完整版）, optimized（优化版，默认）, simple（最简版）",
     )
 
+    # MCP 工具集配置
+    enable_advanced_tools: bool = Field(
+        default=False,
+        description="是否启用高级分析工具（find_similar_content, compare_sections）",
+    )
+
     # 索引后端配置
     keyword_index_backend: str = Field(
         default="fts5",

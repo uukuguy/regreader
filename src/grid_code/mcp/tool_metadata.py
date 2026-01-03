@@ -4,6 +4,10 @@
 1. CLI 分类展示工具列表
 2. MCP Server 添加结构化 meta 信息
 3. 智能体理解工具使用方式
+
+工具集设计原则：
+- 核心工具（8个）：智能体检索安规必备，始终启用
+- 可选工具（2个）：高级分析功能，默认禁用，配置开关启用
 """
 
 from dataclasses import dataclass, field
@@ -18,25 +22,46 @@ class ToolCategory(str, Enum):
     MULTI_HOP = "multi-hop"
     CONTEXT = "context"
     DISCOVERY = "discovery"
-    NAVIGATION = "navigation"
+
+
+# ==================== 工具集定义 ====================
+
+# 核心工具（8个，始终启用）
+CORE_TOOLS: list[str] = [
+    # 基础工具（4个）
+    "list_regulations",  # 入口：列出可用规程
+    "get_toc",  # 导航：获取目录结构
+    "smart_search",  # 检索：混合搜索
+    "read_page_range",  # 阅读：获取页面内容
+    # 多跳工具（3个）
+    "search_tables",  # 表格：搜索表格
+    "lookup_annotation",  # 多跳：追踪注释
+    "resolve_reference",  # 多跳：解析引用
+    # 扩展工具（1个）
+    "get_table_by_id",  # 表格：获取完整跨页表格
+]
+
+# 高级分析工具（默认禁用，配置开关启用）
+ADVANCED_TOOLS: list[str] = [
+    "find_similar_content",  # 高级：查找相似内容
+    "compare_sections",  # 高级：比较章节
+]
 
 
 # 分类中文名称映射
 CATEGORY_NAMES: dict[ToolCategory, str] = {
     ToolCategory.BASE: "基础工具",
-    ToolCategory.MULTI_HOP: "核心多跳",
-    ToolCategory.CONTEXT: "上下文",
-    ToolCategory.DISCOVERY: "发现",
-    ToolCategory.NAVIGATION: "导航",
+    ToolCategory.MULTI_HOP: "多跳推理",
+    ToolCategory.CONTEXT: "上下文扩展",
+    ToolCategory.DISCOVERY: "高级分析",
 }
 
 # 分类描述映射
 CATEGORY_DESCRIPTIONS: dict[ToolCategory, str] = {
-    ToolCategory.BASE: "核心查询和读取功能，通常作为起点使用",
+    ToolCategory.BASE: "核心查询和读取功能，通常作为检索起点",
     ToolCategory.MULTI_HOP: "处理注释、表格、引用等需要多步跳转的场景",
-    ToolCategory.CONTEXT: "扩展搜索结果的上下文，获取更完整的信息",
-    ToolCategory.DISCOVERY: "发现相关内容，进行比较分析",
-    ToolCategory.NAVIGATION: "了解可用工具和使用方式",
+    ToolCategory.CONTEXT: "获取完整表格内容",
+    ToolCategory.DISCOVERY: "发现相关内容，进行比较分析（可选）",
 }
 
 # 分类显示顺序
@@ -45,30 +70,25 @@ CATEGORY_ORDER: list[ToolCategory] = [
     ToolCategory.MULTI_HOP,
     ToolCategory.CONTEXT,
     ToolCategory.DISCOVERY,
-    ToolCategory.NAVIGATION,
 ]
 
-# 分类信息（用于 get_tool_guide）
+# 分类信息（用于系统提示词）
 CATEGORY_INFO: dict[str, dict[str, str]] = {
     "base": {
         "name": "基础工具",
-        "description": "核心查询和读取功能，通常作为起点使用",
+        "description": "核心查询和读取功能，通常作为检索起点",
     },
     "multi-hop": {
-        "name": "核心多跳",
+        "name": "多跳推理",
         "description": "处理注释、表格、引用等需要多步跳转的场景",
     },
     "context": {
-        "name": "上下文",
-        "description": "扩展搜索结果的上下文，获取更完整的信息",
+        "name": "上下文扩展",
+        "description": "获取完整表格内容",
     },
     "discovery": {
-        "name": "发现",
-        "description": "发现相关内容，进行比较分析",
-    },
-    "navigation": {
-        "name": "导航",
-        "description": "了解可用工具和使用方式",
+        "name": "高级分析",
+        "description": "发现相关内容，进行比较分析（可选）",
     },
 }
 
@@ -144,7 +164,19 @@ class ToolMetadata:
 # ==================== 工具元数据注册表 ====================
 
 TOOL_METADATA: dict[str, ToolMetadata] = {
-    # === 基础工具 ===
+    # === 基础工具（4个） ===
+    "list_regulations": ToolMetadata(
+        name="list_regulations",
+        brief="列出已入库规程",
+        category=ToolCategory.BASE,
+        phase=0,
+        priority=1,
+        prerequisites=[],
+        next_tools=["get_toc"],
+        use_cases=["了解可用规程", "确定规程范围"],
+        cli_command="list",
+        expected_params={},
+    ),
     "get_toc": ToolMetadata(
         name="get_toc",
         brief="获取规程目录树",
@@ -152,19 +184,19 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
         phase=0,
         priority=1,
         prerequisites=[],
-        next_tools=["smart_search", "read_chapter_content"],
+        next_tools=["smart_search", "search_tables"],
         use_cases=["了解规程结构", "确定搜索范围"],
         cli_command="toc",
         expected_params={"reg_id": "string"},
     ),
     "smart_search": ToolMetadata(
         name="smart_search",
-        brief="混合检索",
+        brief="混合检索（关键词+语义）",
         category=ToolCategory.BASE,
         phase=0,
         priority=1,
         prerequisites=["get_toc"],
-        next_tools=["read_page_range", "get_block_with_context"],
+        next_tools=["read_page_range", "lookup_annotation", "resolve_reference"],
         use_cases=["查找相关内容", "混合检索"],
         cli_command="search",
         expected_params={
@@ -183,8 +215,8 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
         phase=0,
         priority=2,
         prerequisites=["smart_search"],
-        next_tools=[],
-        use_cases=["阅读完整页面", "查看跨页表格"],
+        next_tools=["lookup_annotation", "resolve_reference"],
+        use_cases=["阅读完整页面", "获取完整上下文"],
         cli_command="read-pages",
         expected_params={
             "reg_id": "string",
@@ -192,75 +224,7 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
             "end_page": "integer",
         },
     ),
-    "list_regulations": ToolMetadata(
-        name="list_regulations",
-        brief="列出已入库规程",
-        category=ToolCategory.BASE,
-        phase=0,
-        priority=1,
-        prerequisites=[],
-        next_tools=["get_toc"],
-        use_cases=["了解可用规程"],
-        cli_command="list",
-        expected_params={},
-    ),
-    "get_chapter_structure": ToolMetadata(
-        name="get_chapter_structure",
-        brief="获取章节结构",
-        category=ToolCategory.BASE,
-        phase=0,
-        priority=2,
-        prerequisites=["get_toc"],
-        next_tools=["read_chapter_content"],
-        use_cases=["获取章节树"],
-        cli_command="chapter-structure",
-        expected_params={"reg_id": "string"},
-    ),
-    "get_page_chapter_info": ToolMetadata(
-        name="get_page_chapter_info",
-        brief="获取页面章节信息",
-        category=ToolCategory.BASE,
-        phase=0,
-        priority=3,
-        prerequisites=[],
-        next_tools=[],
-        use_cases=["了解页面所属章节"],
-        cli_command="page-info",
-        expected_params={"reg_id": "string", "page_num": "integer"},
-    ),
-    "read_chapter_content": ToolMetadata(
-        name="read_chapter_content",
-        brief="读取章节内容",
-        category=ToolCategory.BASE,
-        phase=0,
-        priority=2,
-        prerequisites=["get_chapter_structure"],
-        next_tools=[],
-        use_cases=["阅读完整章节"],
-        cli_command="read-chapter",
-        expected_params={
-            "reg_id": "string",
-            "section_number": "string",
-            "include_children": "boolean",
-        },
-    ),
-    # === 核心多跳 ===
-    "lookup_annotation": ToolMetadata(
-        name="lookup_annotation",
-        brief="查找注释内容",
-        category=ToolCategory.MULTI_HOP,
-        phase=1,
-        priority=2,
-        prerequisites=["smart_search"],
-        next_tools=[],
-        use_cases=["查找注释内容", "理解表格脚注"],
-        cli_command="lookup-annotation",
-        expected_params={
-            "reg_id": "string",
-            "annotation_id": "string",
-            "page_hint": "integer|null",
-        },
-    ),
+    # === 多跳推理工具（3个） ===
     "search_tables": ToolMetadata(
         name="search_tables",
         brief="搜索表格",
@@ -268,15 +232,31 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
         phase=1,
         priority=2,
         prerequisites=["get_toc"],
-        next_tools=["get_table_by_id"],
+        next_tools=["get_table_by_id", "lookup_annotation"],
         use_cases=["查找特定表格", "表格内容搜索"],
         cli_command="search-tables",
         expected_params={
             "query": "string",
             "reg_id": "string",
             "chapter_scope": "string|null",
-            "search_cells": "boolean",
+            "search_mode": "string",
             "limit": "integer",
+        },
+    ),
+    "lookup_annotation": ToolMetadata(
+        name="lookup_annotation",
+        brief="追踪注释内容",
+        category=ToolCategory.MULTI_HOP,
+        phase=1,
+        priority=2,
+        prerequisites=["smart_search", "search_tables"],
+        next_tools=[],
+        use_cases=["查找注释内容", "理解表格脚注", "追踪「见注X」"],
+        cli_command="lookup-annotation",
+        expected_params={
+            "reg_id": "string",
+            "annotation_id": "string",
+            "page_hint": "integer|null",
         },
     ),
     "resolve_reference": ToolMetadata(
@@ -286,37 +266,21 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
         phase=1,
         priority=2,
         prerequisites=["smart_search"],
-        next_tools=["read_page_range", "read_chapter_content"],
-        use_cases=["解析交叉引用"],
+        next_tools=["read_page_range"],
+        use_cases=["解析「见第X章」", "解析「参见表Y」"],
         cli_command="resolve-reference",
         expected_params={"reg_id": "string", "reference_text": "string"},
     ),
-    # === 上下文 ===
-    "search_annotations": ToolMetadata(
-        name="search_annotations",
-        brief="搜索所有注释",
-        category=ToolCategory.CONTEXT,
-        phase=2,
-        priority=3,
-        prerequisites=[],
-        next_tools=["lookup_annotation"],
-        use_cases=["搜索所有注释"],
-        cli_command="search-annotations",
-        expected_params={
-            "reg_id": "string",
-            "pattern": "string|null",
-            "annotation_type": "string|null",
-        },
-    ),
+    # === 上下文扩展工具（1个） ===
     "get_table_by_id": ToolMetadata(
         name="get_table_by_id",
-        brief="获取完整表格",
+        brief="获取完整表格（含跨页合并）",
         category=ToolCategory.CONTEXT,
         phase=2,
         priority=2,
         prerequisites=["search_tables"],
-        next_tools=[],
-        use_cases=["获取完整表格"],
+        next_tools=["lookup_annotation"],
+        use_cases=["获取完整表格", "跨页表格合并"],
         cli_command="get-table",
         expected_params={
             "reg_id": "string",
@@ -324,23 +288,7 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
             "include_merged": "boolean",
         },
     ),
-    "get_block_with_context": ToolMetadata(
-        name="get_block_with_context",
-        brief="获取内容块上下文",
-        category=ToolCategory.CONTEXT,
-        phase=2,
-        priority=2,
-        prerequisites=["smart_search"],
-        next_tools=[],
-        use_cases=["扩展上下文"],
-        cli_command="get-block-context",
-        expected_params={
-            "reg_id": "string",
-            "block_id": "string",
-            "context_blocks": "integer",
-        },
-    ),
-    # === 发现 ===
+    # === 高级分析工具（2个，可选） ===
     "find_similar_content": ToolMetadata(
         name="find_similar_content",
         brief="查找相似内容",
@@ -349,7 +297,7 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
         priority=3,
         prerequisites=["smart_search"],
         next_tools=[],
-        use_cases=["查找相似内容"],
+        use_cases=["查找相似内容", "发现相关条款"],
         cli_command="find-similar",
         expected_params={
             "reg_id": "string",
@@ -365,9 +313,9 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
         category=ToolCategory.DISCOVERY,
         phase=3,
         priority=3,
-        prerequisites=["get_chapter_structure"],
+        prerequisites=["get_toc"],
         next_tools=[],
-        use_cases=["比较章节"],
+        use_cases=["比较章节", "差异分析"],
         cli_command="compare-sections",
         expected_params={
             "reg_id": "string",
@@ -376,45 +324,33 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
             "include_tables": "boolean",
         },
     ),
-    # === 导航 ===
-    "get_tool_guide": ToolMetadata(
-        name="get_tool_guide",
-        brief="获取工具使用指南",
-        category=ToolCategory.NAVIGATION,
-        phase=0,
-        priority=1,
-        prerequisites=[],
-        next_tools=["get_toc", "list_regulations"],
-        use_cases=["了解可用工具", "获取使用指南"],
-        cli_command=None,
-        expected_params={
-            "category": "string|null",
-            "include_workflows": "boolean",
-        },
-    ),
 }
 
 
 # ==================== 工作流定义 ====================
 
 TOOL_WORKFLOWS: dict[str, list[str]] = {
-    "查找表格内容": ["get_toc", "search_tables", "get_table_by_id"],
-    "理解注释引用": ["smart_search", "lookup_annotation"],
-    "阅读章节": ["get_chapter_structure", "read_chapter_content"],
-    "解析交叉引用": ["smart_search", "resolve_reference", "read_page_range"],
-    "扩展搜索上下文": ["smart_search", "get_block_with_context"],
-    "查找相关规定": ["smart_search", "find_similar_content"],
+    "简单查询": ["get_toc", "smart_search", "read_page_range"],
+    "表格查询": ["get_toc", "search_tables", "get_table_by_id", "lookup_annotation"],
+    "引用追踪": ["get_toc", "smart_search", "resolve_reference", "read_page_range"],
+    "深度探索": [
+        "get_toc",
+        "smart_search",
+        "read_page_range",
+        "lookup_annotation",
+        "resolve_reference",
+    ],
 }
 
 # ==================== 使用建议 ====================
 
 TOOL_TIPS: list[str] = [
-    "先用 get_toc 或 list_regulations 了解规程结构",
-    "搜索结果不完整时用 get_block_with_context 扩展上下文",
-    "跨页表格需用 get_table_by_id 获取完整内容",
-    "遇到「见注X」时用 lookup_annotation 获取注释",
+    "先用 get_toc 了解规程结构，确定搜索范围",
+    "smart_search 时务必指定 chapter_scope 参数缩小范围",
+    "搜索结果不完整时用 read_page_range 获取完整上下文",
+    "遇到「见注X」时用 lookup_annotation 追踪注释",
     "遇到「见第X章」时用 resolve_reference 解析引用",
-    "用 find_similar_content 发现相关条款",
+    "跨页表格需用 get_table_by_id 获取完整内容",
 ]
 
 
@@ -473,3 +409,31 @@ def get_category_info() -> list[dict[str, Any]]:
         for cat in CATEGORY_ORDER
         if cat in tools_by_cat
     ]
+
+
+def get_enabled_tools(include_advanced: bool = False) -> list[str]:
+    """获取启用的工具列表
+
+    Args:
+        include_advanced: 是否包含高级分析工具，默认 False
+
+    Returns:
+        启用的工具名称列表
+    """
+    tools = CORE_TOOLS.copy()
+    if include_advanced:
+        tools.extend(ADVANCED_TOOLS)
+    return tools
+
+
+def get_enabled_tool_metadata(include_advanced: bool = False) -> dict[str, ToolMetadata]:
+    """获取启用的工具元数据
+
+    Args:
+        include_advanced: 是否包含高级分析工具，默认 False
+
+    Returns:
+        工具名称到元数据的映射（仅包含启用的工具）
+    """
+    enabled = get_enabled_tools(include_advanced)
+    return {name: meta for name, meta in TOOL_METADATA.items() if name in enabled}
