@@ -1,11 +1,17 @@
 """MCP Server 模块
 
-提供 MCP Server 创建、客户端连接、工具适配器等功能。
+提供 MCP Server 创建、客户端连接、工具适配器、提示词生成等功能。
 """
 
 from .adapter import GridCodeMCPToolsAdapter
 from .client import GridCodeMCPClient
 from .factory import ToolsContext, create_tools
+from .prompt_generator import (
+    generate_multihop_triggers,
+    generate_tips_section,
+    generate_tool_section,
+    generate_workflow_section,
+)
 from .protocol import GridCodeToolsProtocol
 from .server import create_mcp_server
 from .tool_metadata import (
@@ -46,4 +52,9 @@ __all__ = [
     "get_tools_by_category",
     "get_tool_metadata",
     "get_category_info",
+    # Prompt Generator
+    "generate_tool_section",
+    "generate_workflow_section",
+    "generate_tips_section",
+    "generate_multihop_triggers",
 ]

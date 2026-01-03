@@ -95,7 +95,13 @@ CATEGORY_INFO: dict[str, dict[str, str]] = {
 
 @dataclass
 class ToolMetadata:
-    """MCP 工具元数据"""
+    """MCP 工具元数据 - 单一数据源
+
+    用于：
+    1. CLI 分类展示工具列表
+    2. MCP Server 添加结构化 meta 信息
+    3. 动态生成系统提示词的工具段落
+    """
 
     name: str
     """工具名称"""
@@ -105,6 +111,14 @@ class ToolMetadata:
 
     category: ToolCategory
     """工具分类"""
+
+    # 新增：完整描述（用于提示词和 MCP）
+    description: str = ""
+    """完整功能描述（用于系统提示词生成）"""
+
+    # 新增：参数说明（用于提示词生成）
+    params_doc: dict[str, str] = field(default_factory=dict)
+    """参数说明: {参数名: 描述}"""
 
     phase: int = 0
     """阶段: 0=基础, 1/2/3=对应 Phase"""
@@ -168,6 +182,8 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "list_regulations": ToolMetadata(
         name="list_regulations",
         brief="列出已入库规程",
+        description="列出系统中已入库的所有规程，用于了解可用规程范围",
+        params_doc={},
         category=ToolCategory.BASE,
         phase=0,
         priority=1,
@@ -180,6 +196,10 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "get_toc": ToolMetadata(
         name="get_toc",
         brief="获取规程目录树",
+        description="获取规程的完整目录结构，用于了解规程章节组织、确定搜索范围",
+        params_doc={
+            "reg_id": "规程标识",
+        },
         category=ToolCategory.BASE,
         phase=0,
         priority=1,
@@ -192,6 +212,15 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "smart_search": ToolMetadata(
         name="smart_search",
         brief="混合检索（关键词+语义）",
+        description="混合检索，结合关键词和语义检索。建议先用 get_toc 确定章节范围后再搜索",
+        params_doc={
+            "query": "搜索查询词，应简洁明确",
+            "reg_id": "规程标识",
+            "chapter_scope": "限定章节范围（如「第六章」），强烈建议指定以提高精度",
+            "limit": "返回结果数量限制",
+            "block_types": "限定内容类型（text/table/heading/list）",
+            "section_number": "限定章节编号（如「2.1.4」）",
+        },
         category=ToolCategory.BASE,
         phase=0,
         priority=1,
@@ -211,6 +240,12 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "read_page_range": ToolMetadata(
         name="read_page_range",
         brief="读取页面范围",
+        description="读取指定页面范围的完整内容，自动处理跨页表格拼接，单次最多读取 10 页",
+        params_doc={
+            "reg_id": "规程标识",
+            "start_page": "起始页码",
+            "end_page": "结束页码",
+        },
         category=ToolCategory.BASE,
         phase=0,
         priority=2,
@@ -228,6 +263,14 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "search_tables": ToolMetadata(
         name="search_tables",
         brief="搜索表格",
+        description="搜索表格内容，支持关键词/语义/混合三种搜索模式",
+        params_doc={
+            "query": "搜索查询词",
+            "reg_id": "规程标识",
+            "chapter_scope": "限定章节范围",
+            "search_mode": "搜索模式: keyword/semantic/hybrid（默认hybrid）",
+            "limit": "返回结果数量限制",
+        },
         category=ToolCategory.MULTI_HOP,
         phase=1,
         priority=2,
@@ -246,6 +289,12 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "lookup_annotation": ToolMetadata(
         name="lookup_annotation",
         brief="追踪注释内容",
+        description="追踪「见注X」「方案A」等注释的完整内容。支持变体匹配：注1/注①/注一、方案A/方案甲",
+        params_doc={
+            "reg_id": "规程标识",
+            "annotation_id": "注释标识（如「注1」「方案A」）",
+            "page_hint": "页码提示，可加速搜索",
+        },
         category=ToolCategory.MULTI_HOP,
         phase=1,
         priority=2,
@@ -262,6 +311,11 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "resolve_reference": ToolMetadata(
         name="resolve_reference",
         brief="解析交叉引用",
+        description="解析「见第X章」「参见表Y」等交叉引用，返回目标位置信息",
+        params_doc={
+            "reg_id": "规程标识",
+            "reference_text": "引用文本（如「见第六章」「参见表6-2」）",
+        },
         category=ToolCategory.MULTI_HOP,
         phase=1,
         priority=2,
@@ -275,6 +329,12 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "get_table_by_id": ToolMetadata(
         name="get_table_by_id",
         brief="获取完整表格（含跨页合并）",
+        description="获取跨页表格的完整内容，自动合并分页的表格数据",
+        params_doc={
+            "reg_id": "规程标识",
+            "table_id": "表格标识",
+            "include_merged": "是否包含合并后的完整内容",
+        },
         category=ToolCategory.CONTEXT,
         phase=2,
         priority=2,
@@ -292,6 +352,14 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "find_similar_content": ToolMetadata(
         name="find_similar_content",
         brief="查找相似内容",
+        description="基于语义相似度查找相关内容，用于发现相关条款",
+        params_doc={
+            "reg_id": "规程标识",
+            "query_text": "查询文本",
+            "source_block_id": "源内容块标识（与 query_text 二选一）",
+            "limit": "返回结果数量限制",
+            "exclude_same_page": "是否排除同页结果",
+        },
         category=ToolCategory.DISCOVERY,
         phase=3,
         priority=3,
@@ -310,6 +378,13 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "compare_sections": ToolMetadata(
         name="compare_sections",
         brief="比较章节",
+        description="比较两个章节的内容差异，用于差异分析",
+        params_doc={
+            "reg_id": "规程标识",
+            "section_a": "章节A编号",
+            "section_b": "章节B编号",
+            "include_tables": "是否包含表格内容",
+        },
         category=ToolCategory.DISCOVERY,
         phase=3,
         priority=3,

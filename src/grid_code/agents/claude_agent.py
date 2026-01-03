@@ -24,7 +24,11 @@ from grid_code.agents.events import (
 from grid_code.agents.mcp_config import get_tool_name
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.agents.memory import AgentMemory
-from grid_code.agents.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_SIMPLE, SYSTEM_PROMPT_V2, SYSTEM_PROMPT_V3
+from grid_code.agents.prompts import (
+    get_full_prompt,
+    get_optimized_prompt_with_domain,
+    get_simple_prompt,
+)
 from grid_code.agents.result_parser import parse_tool_result
 from grid_code.agents.session import SessionManager, SessionState
 from grid_code.config import get_settings
@@ -198,13 +202,14 @@ class ClaudeAgent(BaseGridCodeAgent):
         同时注入记忆上下文（目录缓存提示 + 已获取的相关内容）
         """
         settings = get_settings()
+        include_advanced = getattr(settings, "enable_advanced_tools", False)
 
         if settings.prompt_mode == "full":
-            base_prompt = SYSTEM_PROMPT
+            base_prompt = get_full_prompt(include_advanced)
         elif settings.prompt_mode == "simple":
-            base_prompt = SYSTEM_PROMPT_SIMPLE
+            base_prompt = get_simple_prompt()
         else:  # optimized
-            base_prompt = SYSTEM_PROMPT_V3
+            base_prompt = get_optimized_prompt_with_domain(include_advanced)
 
         if self.reg_id:
             base_prompt += f"\n\n# 当前规程\n默认规程: {self.reg_id}"
