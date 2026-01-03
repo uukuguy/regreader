@@ -83,11 +83,11 @@ class GridCodeTools:
         """
         toc = self.page_store.load_toc(reg_id)
 
-        # 硬性限制：没有指定 expand_section 时，max_depth 最大为 3
-        # 这是为了防止某些模型不遵守提示中的警告，导致输出过大
-        if not expand_section and max_depth > 3:
+        # 硬性限制：max_depth 最大为 3（防止输出过大）
+        # expand_section 指定的分支在 _truncate_toc 中会被完整展开，不受此限制
+        if max_depth > 3:
             logger.warning(
-                f"get_toc: max_depth={max_depth} 被强制限制为 3（未指定 expand_section）"
+                f"get_toc: max_depth={max_depth} 被强制限制为 3"
             )
             max_depth = 3
 
