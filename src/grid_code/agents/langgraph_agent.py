@@ -17,6 +17,8 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
+import httpx
+
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
@@ -109,21 +111,41 @@ class LangGraphAgent(BaseGridCodeAgent):
 
         settings = get_settings()
         self._model_name = model or settings.llm_model_name
+        self._is_ollama = settings.is_ollama_backend()
 
         # 统一使用 OpenAI 兼容接口（与 pydantic_agent 一致）
         # 因为大多数模型服务都提供 OpenAI 兼容接口
-        self._llm = ChatOpenAI(
-            model=self._model_name,
-            api_key=settings.llm_api_key,
-            base_url=settings.llm_base_url,
-            max_tokens=4096,
-            streaming=True,  # 启用流式输出
-        )
-
-        logger.debug(
-            f"LLM initialized: model={self._model_name}, "
-            f"base_url={settings.llm_base_url}"
-        )
+        llm_base_url = settings.llm_base_url
+        if self._is_ollama:
+            # Ollama 需要 /v1 后缀
+            if not llm_base_url.endswith("/v1"):
+                llm_base_url = llm_base_url.rstrip("/") + "/v1"
+            # 关键修复：httpx 默认配置与 Ollama 不兼容，需要显式创建 transport
+            self._ollama_http_client = httpx.AsyncClient(
+                transport=httpx.AsyncHTTPTransport()
+            )
+            self._llm = ChatOpenAI(
+                model=self._model_name,
+                api_key=settings.llm_api_key or "ollama",  # Ollama 不需要真实 API key
+                base_url=llm_base_url,
+                max_tokens=4096,
+                streaming=True,
+                http_async_client=self._ollama_http_client,
+            )
+            logger.info(f"Using Ollama backend: model={self._model_name}, base_url={llm_base_url}")
+        else:
+            self._ollama_http_client = None
+            self._llm = ChatOpenAI(
+                model=self._model_name,
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_base_url,
+                max_tokens=4096,
+                streaming=True,
+            )
+            logger.debug(
+                f"LLM initialized: model={self._model_name}, "
+                f"base_url={settings.llm_base_url}"
+            )
 
         # MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
@@ -665,6 +687,11 @@ class LangGraphAgent(BaseGridCodeAgent):
             self._langchain_tools = []
             self._graph = None
             logger.debug("MCP client disconnected")
+
+        # 关闭 Ollama httpx client
+        if self._ollama_http_client is not None:
+            await self._ollama_http_client.aclose()
+            self._ollama_http_client = None
 
     async def __aenter__(self) -> "LangGraphAgent":
         """异步上下文管理器入口"""

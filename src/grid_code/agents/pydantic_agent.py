@@ -53,6 +53,11 @@ try:
         TextPartDelta,
         ThinkingPartDelta,
     )
+    # Ollama 支持
+    import httpx
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+    from pydantic_ai.profiles.openai import OpenAIModelProfile
 
     HAS_PYDANTIC_AI = True
 except ImportError:
@@ -64,6 +69,9 @@ except ImportError:
     AgentStreamEvent = None  # type: ignore
     FunctionToolCallEvent = None  # type: ignore
     FunctionToolResultEvent = None  # type: ignore
+    OpenAIChatModel = None  # type: ignore
+    OpenAIProvider = None  # type: ignore
+    OpenAIModelProfile = None  # type: ignore
     logger.warning("pydantic-ai not installed or outdated. Run: pip install 'pydantic-ai>=1.0.0'")
 
 
@@ -130,16 +138,50 @@ class PydanticAIAgent(BaseGridCodeAgent):
         provider = settings.get_llm_provider()
         model_name = model or settings.llm_model_name
 
-        # 对于 Pydantic AI，统一使用 openai 兼容接口
-        # 因为大多数国产模型都提供 OpenAI 兼容接口
-        self._model_name = f"openai:{model_name}"
-        logger.debug(f"Using model: {self._model_name}, provider: {provider}")
+        # 检测是否为 Ollama 后端
+        self._is_ollama = settings.is_ollama_backend()
+        self._ollama_disable_streaming = settings.ollama_disable_streaming
 
         # 设置环境变量（Pydantic AI 从环境变量读取）
         import os
 
         os.environ["OPENAI_API_KEY"] = settings.llm_api_key
         os.environ["OPENAI_BASE_URL"] = settings.llm_base_url
+
+        # 根据后端类型创建模型
+        if self._is_ollama:
+            # Ollama 专用配置：使用 OpenAIChatModel + OpenAIProvider + 自定义 httpx client
+            # 关键修复：httpx 默认配置与 Ollama 不兼容，需要显式创建 transport
+            # 参考：https://github.com/encode/httpx/issues/XXX
+            ollama_base = settings.llm_base_url
+            if not ollama_base.endswith("/v1"):
+                ollama_base = ollama_base.rstrip("/") + "/v1"
+
+            # 创建自定义 httpx client（解决 502 问题）
+            self._ollama_http_client = httpx.AsyncClient(
+                transport=httpx.AsyncHTTPTransport()
+            )
+
+            ollama_model = OpenAIChatModel(
+                model_name=model_name,
+                provider=OpenAIProvider(
+                    base_url=ollama_base,
+                    api_key="ollama",  # Ollama 不需要真实 API key
+                    http_client=self._ollama_http_client,
+                ),
+                profile=OpenAIModelProfile(
+                    openai_supports_strict_tool_definition=False,
+                ),
+            )
+            self._model = ollama_model
+            self._model_name = f"ollama:{model_name}"
+            logger.info(f"Using Ollama backend: {model_name}, base_url={ollama_base}")
+        else:
+            # 其他 OpenAI 兼容后端
+            self._model = f"openai:{model_name}"
+            self._model_name = self._model
+            self._ollama_http_client = None
+            logger.debug(f"Using model: {self._model_name}, provider: {provider}")
 
         # 获取 MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
@@ -149,7 +191,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
 
         # 创建 Agent（带 MCP toolsets）
         self._agent = Agent(
-            self._model_name,
+            self._model,
             deps_type=AgentDependencies,
             toolsets=[self._mcp_server],
         )
@@ -415,13 +457,42 @@ class PydanticAIAgent(BaseGridCodeAgent):
         await self._callback.on_event(thinking_event(start=True))
 
         try:
-            # 运行 Agent（传入消息历史和事件处理器）
-            result = await self._agent.run(
-                message,
-                deps=deps,
-                message_history=self._message_history if self._message_history else None,
-                event_stream_handler=event_handler,
-            )
+            # Ollama 流式策略：
+            # 1. 如果配置了禁用流式，直接使用非流式模式
+            # 2. 否则尝试流式，失败时降级到非流式
+            use_streaming = not (self._is_ollama and self._ollama_disable_streaming)
+
+            if use_streaming:
+                try:
+                    # 尝试流式调用
+                    result = await self._agent.run(
+                        message,
+                        deps=deps,
+                        message_history=self._message_history if self._message_history else None,
+                        event_stream_handler=event_handler,
+                    )
+                except Exception as streaming_error:
+                    # Ollama 流式失败时降级到非流式
+                    if self._is_ollama:
+                        logger.warning(
+                            f"Ollama streaming failed, falling back to non-streaming: {streaming_error}"
+                        )
+                        result = await self._agent.run(
+                            message,
+                            deps=deps,
+                            message_history=self._message_history if self._message_history else None,
+                            # 不传 event_stream_handler，使用非流式模式
+                        )
+                    else:
+                        raise
+            else:
+                # Ollama 禁用流式时，直接使用非流式模式
+                logger.debug("Ollama streaming disabled, using non-streaming mode")
+                result = await self._agent.run(
+                    message,
+                    deps=deps,
+                    message_history=self._message_history if self._message_history else None,
+                )
 
             # 更新消息历史
             self._message_history = result.all_messages()
@@ -597,12 +668,17 @@ class PydanticAIAgent(BaseGridCodeAgent):
     async def close(self) -> None:
         """关闭 Agent 连接
 
-        断开与 MCP Server 的连接。
+        断开与 MCP Server 的连接，并清理资源。
         """
         if self._connected:
             await self._agent.__aexit__(None, None, None)
             self._connected = False
             logger.debug("Agent disconnected from MCP Server")
+
+        # 关闭 Ollama httpx client
+        if self._ollama_http_client is not None:
+            await self._ollama_http_client.aclose()
+            self._ollama_http_client = None
 
     async def __aenter__(self) -> "PydanticAIAgent":
         """异步上下文管理器入口"""

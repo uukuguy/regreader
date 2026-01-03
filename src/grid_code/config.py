@@ -127,6 +127,12 @@ class GridCodeSettings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_MODEL_NAME", "LLM_MODEL_NAME"),
     )
 
+    # Ollama 专用配置
+    ollama_disable_streaming: bool = Field(
+        default=False,
+        description="Ollama 后端是否禁用流式（某些模型不支持流式+工具）",
+    )
+
     # Anthropic/Claude 专用配置（用于 ClaudeAgent）
     anthropic_api_key: str = Field(
         default="",
@@ -259,6 +265,17 @@ class GridCodeSettings(BaseSettings):
         elif "glm" in model or "deepseek" in model or "qwen" in model or "yi" in model:
             return "openai"
         return "openai"  # 默认使用 OpenAI 兼容接口
+
+    def is_ollama_backend(self) -> bool:
+        """检测是否使用 Ollama 后端
+
+        通过 base_url 中是否包含 Ollama 默认端口(11434)或 'ollama' 关键词来判断。
+
+        Returns:
+            True 如果使用 Ollama 后端
+        """
+        base_url = self.llm_base_url.lower()
+        return ":11434" in base_url or "ollama" in base_url
 
 
 # 全局配置实例（延迟初始化）
