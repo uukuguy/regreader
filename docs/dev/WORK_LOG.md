@@ -1,5 +1,251 @@
 # GridCode 开发工作日志 (dev 分支)
 
+## 2026-01-04 Ollama 后端支持与 httpx 传输修复
+
+### 会话概述
+
+解决了 PydanticAIAgent 和 LangGraphAgent 在使用 Ollama 后端时出现的 502 Bad Gateway 错误。通过深入调试发现根本原因是 httpx 默认传输配置与 Ollama 不兼容，实现了自定义 httpx 客户端方案。
+
+### 背景问题
+
+用户报告 PydanticAIAgent 在使用 Ollama 后端（Qwen3-4B-Instruct-2507:Q8_0）时返回 502 错误：
+- OpenAI API 后端正常工作
+- Ollama 后端在流式和非流式模式下均失败
+- curl 直接调用 Ollama API 正常（包括工具调用）
+
+### 问题调试过程
+
+#### 1. 初步尝试（失败）
+- 尝试使用 `OllamaProvider`：仍然 502
+- 设置 `openai_supports_strict_tool_definition=False`：仍然 502
+- 确保 base_url 包含 `/v1` 后缀：仍然 502
+
+#### 2. 系统测试隔离
+- ✅ curl 直接调用 Ollama - 成功
+- ✅ curl 调用 Ollama + tools - 成功
+- ✅ curl 调用 Ollama + streaming + tools - 成功
+- ❌ pydantic-ai 最小化测试 - 502
+- ❌ OpenAI SDK 直接调用 - 502
+- ❌ httpx 默认配置 - 502
+- ✅ httpx + explicit AsyncHTTPTransport() - 成功！
+- ✅ requests 库 - 成功
+- ✅ Python subprocess + curl - 成功
+
+#### 3. 根本原因确定
+
+**发现**：httpx 的默认传输配置与 Ollama 存在兼容性问题。
+
+**解决方案**：创建显式的 `httpx.AsyncHTTPTransport()`：
+
+```python
+self._ollama_http_client = httpx.AsyncClient(
+    transport=httpx.AsyncHTTPTransport()
+)
+```
+
+### 完成的工作
+
+#### 1. 配置层增强 (`src/grid_code/config.py`)
+
+添加 Ollama 后端检测和配置支持：
+
+```python
+# Ollama 专用配置
+ollama_disable_streaming: bool = Field(
+    default=False,
+    description="Ollama 后端是否禁用流式（某些模型不支持流式+工具）",
+)
+
+def is_ollama_backend(self) -> bool:
+    """检测是否使用 Ollama 后端
+
+    通过 base_url 中是否包含 Ollama 默认端口(11434)或 'ollama' 关键词来判断。
+    """
+    base_url = self.llm_base_url.lower()
+    return ":11434" in base_url or "ollama" in base_url
+```
+
+#### 2. PydanticAIAgent 修复 (`src/grid_code/agents/pydantic_agent.py`)
+
+**核心修改**：
+```python
+if self._is_ollama:
+    # Ollama 专用配置：使用 OpenAIChatModel + OpenAIProvider + 自定义 httpx client
+    # 关键修复：httpx 默认配置与 Ollama 不兼容，需要显式创建 transport
+    ollama_base = settings.llm_base_url
+    if not ollama_base.endswith("/v1"):
+        ollama_base = ollama_base.rstrip("/") + "/v1"
+
+    # 创建自定义 httpx client（解决 502 问题）
+    self._ollama_http_client = httpx.AsyncClient(
+        transport=httpx.AsyncHTTPTransport()
+    )
+
+    ollama_model = OpenAIChatModel(
+        model_name=model_name,
+        provider=OpenAIProvider(
+            base_url=ollama_base,
+            api_key="ollama",  # Ollama 不需要真实 API key
+            http_client=self._ollama_http_client,
+        ),
+        profile=OpenAIModelProfile(
+            openai_supports_strict_tool_definition=False,
+        ),
+    )
+    self._model = ollama_model
+    self._model_name = f"ollama:{model_name}"
+```
+
+**流式降级策略**：
+```python
+# Ollama 流式策略：
+# 1. 如果配置了禁用流式，直接使用非流式模式
+# 2. 否则尝试流式，失败时降级到非流式
+use_streaming = not (self._is_ollama and self._ollama_disable_streaming)
+
+if use_streaming:
+    try:
+        result = await self._agent.run(
+            message, deps=deps,
+            message_history=self._message_history,
+            event_stream_handler=event_handler,
+        )
+    except Exception as streaming_error:
+        if self._is_ollama:
+            logger.warning(
+                f"Ollama streaming failed, falling back to non-streaming: {streaming_error}"
+            )
+            result = await self._agent.run(
+                message, deps=deps,
+                message_history=self._message_history,
+                # 不传 event_stream_handler，使用非流式模式
+            )
+        else:
+            raise
+```
+
+**资源清理**：
+```python
+async def close(self) -> None:
+    """关闭 Agent 连接，并清理资源"""
+    if self._connected:
+        await self._agent.__aexit__(None, None, None)
+        self._connected = False
+
+    # 关闭 Ollama httpx client
+    if self._ollama_http_client is not None:
+        await self._ollama_http_client.aclose()
+        self._ollama_http_client = None
+```
+
+#### 3. LangGraphAgent 修复 (`src/grid_code/agents/langgraph_agent.py`)
+
+应用相同的 httpx transport 修复：
+
+```python
+llm_base_url = settings.llm_base_url
+if self._is_ollama:
+    # Ollama 需要 /v1 后缀
+    if not llm_base_url.endswith("/v1"):
+        llm_base_url = llm_base_url.rstrip("/") + "/v1"
+    # 关键修复：httpx 默认配置与 Ollama 不兼容，需要显式创建 transport
+    self._ollama_http_client = httpx.AsyncClient(
+        transport=httpx.AsyncHTTPTransport()
+    )
+    self._llm = ChatOpenAI(
+        model=self._model_name,
+        api_key=settings.llm_api_key or "ollama",
+        base_url=llm_base_url,
+        max_tokens=4096,
+        streaming=True,
+        http_async_client=self._ollama_http_client,
+    )
+    logger.info(f"Using Ollama backend: model={self._model_name}, base_url={llm_base_url}")
+else:
+    self._ollama_http_client = None
+    self._llm = ChatOpenAI(
+        model=self._model_name,
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url,
+        max_tokens=4096,
+        streaming=True,
+    )
+```
+
+### 修改的文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `src/grid_code/config.py` | 添加 `is_ollama_backend()` 方法和 `ollama_disable_streaming` 配置 |
+| `src/grid_code/agents/pydantic_agent.py` | Ollama 检测、自定义 httpx client、流式降级策略、资源清理 |
+| `src/grid_code/agents/langgraph_agent.py` | Ollama 检测、自定义 httpx client、资源清理 |
+
+### 环境变量配置
+
+支持使用现有的 `OPENAI_*` 环境变量（通过 `validation_alias`）：
+
+```bash
+# Ollama 后端配置（两种方式均可）
+export OPENAI_BASE_URL=http://localhost:11434/v1
+export OPENAI_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
+
+# 或使用 GRIDCODE_ 前缀
+export GRIDCODE_LLM_BASE_URL=http://localhost:11434/v1
+export GRIDCODE_LLM_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
+
+# 可选：禁用流式（某些小模型可能需要）
+export GRIDCODE_OLLAMA_DISABLE_STREAMING=true
+```
+
+Ollama 自动检测规则：
+- base_url 包含 `:11434` → 自动识别为 Ollama
+- base_url 包含 `ollama` 关键词 → 自动识别为 Ollama
+
+### 使用示例
+
+```bash
+# PydanticAIAgent with Ollama
+gridcode chat -r angui_2024 --agent pydantic
+
+# LangGraphAgent with Ollama
+gridcode chat -r angui_2024 --agent langgraph
+
+# 单次查询
+gridcode ask "特高压南阳站稳态过电压控制装置1发生故障时，系统应如何处理？" \
+  -r angui_2024 --agent pydantic -v
+```
+
+### 技术亮点
+
+1. **问题隔离方法论**：
+   - 从应用层（pydantic-ai）→ SDK层（OpenAI SDK）→ HTTP层（httpx）逐层隔离
+   - 对比测试不同 HTTP 客户端（httpx vs requests vs curl）
+   - 最小化复现测试（移除 MCP 工具依赖）
+
+2. **httpx 传输机制理解**：
+   - httpx 默认传输配置在某些场景下存在兼容性问题
+   - 显式创建 `AsyncHTTPTransport()` 可绕过默认配置问题
+   - 适用于 Ollama 等本地部署的 LLM 服务
+
+3. **优雅的降级策略**：
+   - 首先尝试流式，失败时自动降级到非流式
+   - 提供配置选项可直接禁用流式（避免无意义重试）
+   - 保留完整的错误日志便于调试
+
+4. **资源管理**：
+   - 正确实现 httpx client 的生命周期管理
+   - 在 `close()` 方法中清理自定义 httpx 客户端
+   - 避免资源泄漏
+
+### 后续建议
+
+1. 考虑向 httpx 或 pydantic-ai 项目报告此兼容性问题
+2. 监控 Ollama 官方文档更新，确认是否有官方推荐配置
+3. 添加 Ollama 后端的集成测试用例
+4. 考虑支持更多本地部署 LLM 服务（如 LM Studio、LocalAI）
+
+---
+
 ## 2026-01-02 代码分析与文档更新
 
 ### 会话概述

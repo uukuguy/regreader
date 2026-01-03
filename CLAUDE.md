@@ -269,10 +269,19 @@ GRIDCODE_MCP_HOST=127.0.0.1
 GRIDCODE_MCP_PORT=8080
 GRIDCODE_MCP_TRANSPORT=stdio  # or sse
 
-# LLM
+# LLM (supports multiple backends)
 GRIDCODE_LLM_MODEL_NAME=claude-sonnet-4-20250514
 GRIDCODE_LLM_API_KEY=your-api-key
 GRIDCODE_LLM_BASE_URL=https://api.anthropic.com
+
+# Ollama backend (auto-detected, no additional config needed)
+# GRIDCODE_LLM_BASE_URL=http://localhost:11434  # /v1 suffix auto-added
+# GRIDCODE_LLM_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
+# GRIDCODE_OLLAMA_DISABLE_STREAMING=false  # set to true for some models
+
+# Compatible with OPENAI_* environment variables (via validation_alias)
+# OPENAI_BASE_URL=http://localhost:11434/v1
+# OPENAI_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
 
 # Index backends
 GRIDCODE_KEYWORD_INDEX_BACKEND=fts5   # fts5, tantivy, whoosh

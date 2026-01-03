@@ -197,6 +197,33 @@ export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
 gridcode chat --agent langgraph --reg-id angui_2024
 ```
 
+### Ollama Backend (Local LLM)
+
+All agents support Ollama for local LLM deployment:
+
+```bash
+# Option 1: Use OPENAI_* environment variables (recommended)
+export OPENAI_BASE_URL=http://localhost:11434/v1
+export OPENAI_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
+
+# Option 2: Use GRIDCODE_* environment variables
+export GRIDCODE_LLM_BASE_URL=http://localhost:11434
+export GRIDCODE_LLM_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
+
+# Optional: Disable streaming for certain models
+export GRIDCODE_OLLAMA_DISABLE_STREAMING=false
+
+# Start chat (works with all agents)
+gridcode chat --agent pydantic --reg-id angui_2024
+gridcode chat --agent langgraph --reg-id angui_2024
+```
+
+**Auto-detection**: Ollama backend is automatically detected when:
+- `base_url` contains `:11434` (Ollama's default port)
+- `base_url` contains `ollama` keyword
+
+**Note**: The httpx transport fix is automatically applied for Ollama backends to resolve compatibility issues.
+
 ### Architecture Note
 
 All agents access page data through MCP protocol:
