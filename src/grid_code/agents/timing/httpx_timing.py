@@ -50,6 +50,16 @@ class HttpxTimingBackend(TimingBackend):
         # 完成的调用记录
         self._completed: list[LLMCallMetric] = []
 
+    @property
+    def on_request(self):
+        """Public accessor for request hook (for direct event_hooks usage)"""
+        return self._on_request
+
+    @property
+    def on_response(self):
+        """Public accessor for response hook (for direct event_hooks usage)"""
+        return self._on_response
+
     def configure_httpx_client(self, client: "httpx.AsyncClient") -> "httpx.AsyncClient":
         """配置 httpx 客户端以启用时间追踪
 

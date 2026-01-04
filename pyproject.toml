@@ -55,30 +55,23 @@ flag = [
     "FlagEmbedding>=1.2.0",
 ]
 
-# OpenTelemetry 追踪后端
+# OpenTelemetry 追踪后端 (requires >=1.28.0 for pydantic-ai compatibility)
 otel = [
-    "opentelemetry-api>=1.27.0",
-    "opentelemetry-sdk>=1.27.0",
-    "opentelemetry-instrumentation-httpx>=0.48b0",
+    "opentelemetry-api>=1.28.0",
+    "opentelemetry-sdk>=1.28.0",
+    "opentelemetry-instrumentation-httpx>=0.49b0",
 ]
 otel-otlp = [
-    "opentelemetry-api>=1.27.0",
-    "opentelemetry-sdk>=1.27.0",
-    "opentelemetry-instrumentation-httpx>=0.48b0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",
+    "opentelemetry-api>=1.28.0",
+    "opentelemetry-sdk>=1.28.0",
+    "opentelemetry-instrumentation-httpx>=0.49b0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.28.0",
 ]
-otel-jaeger = [
-    "opentelemetry-api>=1.27.0",
-    "opentelemetry-sdk>=1.27.0",
-    "opentelemetry-instrumentation-httpx>=0.48b0",
-    "opentelemetry-exporter-jaeger>=1.21.0",
-]
-otel-zipkin = [
-    "opentelemetry-api>=1.27.0",
-    "opentelemetry-sdk>=1.27.0",
-    "opentelemetry-instrumentation-httpx>=0.48b0",
-    "opentelemetry-exporter-zipkin>=1.27.0",
-]
+# NOTE: otel-jaeger removed - opentelemetry-exporter-jaeger is deprecated (capped at 1.21.0)
+# incompatible with otel-api>=1.28.0
+
+# NOTE: otel-zipkin removed - incompatible with otel-otlp
+# opentelemetry-exporter-zipkin requires protobuf<4.0, but otel-otlp requires protobuf>=5.0
 
 # 安装所有可选索引后端
 all-indexes = [

@@ -105,6 +105,16 @@ class OTelTimingBackend(TimingBackend):
         # 初始化 OpenTelemetry
         self._setup_otel()
 
+    @property
+    def on_request(self):
+        """Public accessor for request hook (for direct event_hooks usage)"""
+        return self._on_request
+
+    @property
+    def on_response(self):
+        """Public accessor for response hook (for direct event_hooks usage)"""
+        return self._on_response
+
     def _setup_otel(self) -> None:
         """设置 OpenTelemetry TracerProvider 和 Exporter"""
         # 创建资源
