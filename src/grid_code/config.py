@@ -86,6 +86,12 @@ class GridCodeSettings(BaseSettings):
         description="嵌入 API 端点（自定义 API 服务器）",
     )
 
+    # OCR 配置
+    ocr_enabled: bool = Field(
+        default=True,
+        description="是否启用 OCR（需要 rapidocr-onnxruntime，如未安装会自动禁用）",
+    )
+
     # MCP Server 配置
     mcp_host: str = Field(
         default="127.0.0.1",

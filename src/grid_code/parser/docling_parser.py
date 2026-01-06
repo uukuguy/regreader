@@ -18,8 +18,16 @@ from docling.datamodel.pipeline_options import (
     PdfPipelineOptions,
     TableFormerMode,
     TableStructureOptions,
-    RapidOcrOptions,
 )
+
+# OCR 可选依赖检测
+try:
+    from docling.datamodel.pipeline_options import RapidOcrOptions
+
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
+    RapidOcrOptions = None  # type: ignore[misc, assignment]
 
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from loguru import logger
@@ -33,8 +41,8 @@ class DoclingParserConfig:
     def __init__(
         self,
         # OCR 配置
-        do_ocr: bool = True,
-        ocr_options = RapidOcrOptions(),
+        do_ocr: bool | None = None,  # None = 自动检测
+        ocr_options=None,  # 延迟初始化
         ocr_lang: list[str] | None = None,
         force_full_page_ocr: bool = False,
         # 表格配置
@@ -57,8 +65,21 @@ class DoclingParserConfig:
         max_num_pages: int | None = None,
         max_file_size: int | None = None,
     ):
+        # OCR 自动检测
+        if do_ocr is None:
+            do_ocr = OCR_AVAILABLE
+        if do_ocr and not OCR_AVAILABLE:
+            logger.warning(
+                "OCR 依赖未安装，自动禁用 OCR。如需 OCR 功能，请安装: pip install grid-code[ocr]"
+            )
+            do_ocr = False
+
         self.do_ocr = do_ocr
-        self.ocr_options = ocr_options
+        # OCR options 延迟初始化
+        if ocr_options is None and OCR_AVAILABLE and do_ocr:
+            self.ocr_options = RapidOcrOptions()
+        else:
+            self.ocr_options = ocr_options
         self.ocr_lang = ocr_lang or ["ch_sim", "en"]
         self.force_full_page_ocr = force_full_page_ocr
 

@@ -131,10 +131,11 @@ def ingest(
     directory: Path = typer.Option(None, "--dir", "-d", help="文档目录路径"),
     reg_id: str = typer.Option(None, "--reg-id", "-r", help="规程标识"),
     file_format: str = typer.Option("docx", "--format", help="文件格式 (docx, pdf)"),
+    no_ocr: bool = typer.Option(False, "--no-ocr", help="禁用 OCR（加快解析速度）"),
 ):
     """转换并入库文档到 GridCode"""
     from grid_code.index import FTSIndex, VectorIndex
-    from grid_code.parser import DoclingParser, PageExtractor, TableRegistryBuilder
+    from grid_code.parser import DoclingParser, DoclingParserConfig, PageExtractor, TableRegistryBuilder
     from grid_code.storage import PageStore
 
     if not file and not directory:
@@ -158,7 +159,9 @@ def ingest(
             console.print(f"[yellow]警告: 目录中没有 {file_format} 文件[/yellow]")
             raise typer.Exit(0)
 
-    parser = DoclingParser()
+    # 配置解析器
+    config = DoclingParserConfig(do_ocr=not no_ocr)
+    parser = DoclingParser(config)
     page_store = PageStore()
     fts_index = FTSIndex()
     vector_index = VectorIndex()
