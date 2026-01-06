@@ -2,6 +2,7 @@
 # Power Grid Regulations Intelligent Retrieval Agent
 
 .PHONY: help install install-dev install-all test test-mcp test-heading lint format check serve serve-stdio chat build clean reindex read-chapter \
+	install-conda install-conda-dev install-conda-all install-conda-ocr serve-conda serve-conda-stdio serve-conda-port \
 	ask ask-json ask-claude ask-pydantic ask-langgraph \
 	toc read-pages chapter-structure page-info lookup-annotation search-tables resolve-reference \
 	search-annotations get-table get-block-context find-similar compare-sections \
@@ -50,12 +51,17 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*##"; printf ""} /^[a-zA-Z_-]+:.*?##/ { printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@echo ""
 	@echo "$(GREEN)Examples:$(NC)"
-	@echo "  make install-dev              # Install with dev dependencies"
+	@echo "  make install-dev              # Install with dev dependencies (uv)"
 	@echo "  make test                     # Run all tests"
 	@echo "  make serve                    # Start MCP server (SSE mode)"
 	@echo "  make chat REG_ID=angui        # Start interactive chat"
 	@echo "  make ask ASK_QUERY=\"母线失压如何处理?\"  # Single query (non-interactive)"
 	@echo "  make ask-json ASK_QUERY=\"...\" # Single query with JSON output"
+	@echo ""
+	@echo "$(GREEN)Conda Environment (for Linux with existing torch):$(NC)"
+	@echo "  make install-conda            # Install in active conda environment"
+	@echo "  make install-conda-dev        # Install with dev dependencies"
+	@echo "  make serve-conda              # Start MCP server (no uv)"
 	@echo ""
 	@echo "$(GREEN)MCP Tools Testing:$(NC)"
 	@echo "  make toc                      # Get regulation TOC"
@@ -98,6 +104,31 @@ install-whoosh: ## Install with Whoosh keyword index (Chinese tokenization)
 
 install-qdrant: ## Install with Qdrant vector index
 	$(UV) sync --extra qdrant
+
+#----------------------------------------------------------------------
+# Conda Environment Installation (for systems with existing torch)
+#----------------------------------------------------------------------
+
+install-conda: ## Install in conda environment (uses system torch)
+	@echo "$(BLUE)Installing GridCode in conda environment...$(NC)"
+	@echo "$(YELLOW)Prerequisite: conda environment with torch already installed$(NC)"
+	pip install -e ".[embedding]"
+	@echo "$(GREEN)Installation complete!$(NC)"
+
+install-conda-dev: ## Install with dev dependencies in conda environment
+	@echo "$(BLUE)Installing GridCode with dev dependencies...$(NC)"
+	pip install -e ".[embedding,dev]"
+	@echo "$(GREEN)Installation complete!$(NC)"
+
+install-conda-all: ## Install with all optional backends in conda environment
+	@echo "$(BLUE)Installing GridCode with all backends...$(NC)"
+	pip install -e ".[embedding,dev,tantivy,whoosh,qdrant]"
+	@echo "$(GREEN)Installation complete!$(NC)"
+
+install-conda-ocr: ## Install with OCR support in conda environment
+	@echo "$(BLUE)Installing GridCode with OCR support...$(NC)"
+	pip install -e ".[embedding,ocr]"
+	@echo "$(GREEN)Installation complete!$(NC)"
 
 #----------------------------------------------------------------------
 # Code Quality
@@ -149,6 +180,19 @@ serve-stdio: ## Start MCP server (stdio mode, for Claude Desktop)
 PORT ?= 8080
 serve-port: ## Start MCP server on custom port (usage: make serve-port PORT=9000)
 	$(UV) run gridcode serve --transport sse --port $(PORT)
+
+#----------------------------------------------------------------------
+# MCP Server (Conda Environment)
+#----------------------------------------------------------------------
+
+serve-conda: ## Start MCP server in conda environment (SSE mode)
+	gridcode serve --transport sse --port 8080
+
+serve-conda-stdio: ## Start MCP server in conda environment (stdio mode)
+	gridcode serve --transport stdio
+
+serve-conda-port: ## Start MCP server on custom port in conda (usage: make serve-conda-port PORT=9000)
+	gridcode serve --transport sse --port $(PORT)
 
 #----------------------------------------------------------------------
 # CLI Commands

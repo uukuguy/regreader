@@ -1165,7 +1165,6 @@ dependencies = [
     { name = "pydantic-ai" },
     { name = "pydantic-settings" },
     { name = "rich" },
-    { name = "sentence-transformers" },
     { name = "typer" },
 ]
 
@@ -1180,6 +1179,9 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
+]
+embedding = [
+    { name = "sentence-transformers" },
 ]
 flag = [
     { name = "flagembedding" },
@@ -1240,14 +1242,14 @@ requires-dist = [
     { name = "rapidocr-onnxruntime", marker = "extra == 'ocr'", specifier = ">=1.4.4" },
     { name = "rich", specifier = ">=13.9.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
-    { name = "sentence-transformers", specifier = ">=3.3.0" },
+    { name = "sentence-transformers", marker = "extra == 'embedding'", specifier = ">=3.3.0" },
     { name = "tantivy", marker = "extra == 'all-indexes'", specifier = ">=0.22.0" },
     { name = "tantivy", marker = "extra == 'tantivy'", specifier = ">=0.22.0" },
     { name = "typer", specifier = ">=0.15.0" },
     { name = "whoosh", marker = "extra == 'all-indexes'", specifier = ">=2.7.4" },
     { name = "whoosh", marker = "extra == 'whoosh'", specifier = ">=2.7.4" },
 ]
-provides-extras = ["ocr", "dev", "tantivy", "whoosh", "qdrant", "flag", "otel", "otel-otlp", "all-indexes"]
+provides-extras = ["embedding", "ocr", "dev", "tantivy", "whoosh", "qdrant", "flag", "otel", "otel-otlp", "all-indexes"]
 
 [[package]]
 name = "griffe"

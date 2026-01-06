@@ -26,11 +26,15 @@ dependencies = [
     "langgraph>=0.2.0", # LangGraph
     "langchain-anthropic>=0.3.0", # LangChain Anthropic
     "langchain-openai>=0.2.0", # LangChain OpenAI
-    # 向量嵌入
-    "sentence-transformers>=3.3.0",
+    # 向量嵌入 (依赖系统已安装的 torch)
 ]
 
 [project.optional-dependencies]
+# 向量嵌入 (需要系统已安装 torch)
+embedding = [
+    "sentence-transformers>=3.3.0",
+]
+
 # OCR 支持 (可选，需要 onnxruntime)
 ocr = [
     "rapidocr-onnxruntime>=1.4.4",
