@@ -112,22 +112,22 @@ install-qdrant: ## Install with Qdrant vector index
 install-conda: ## Install in conda environment (uses system torch)
 	@echo "$(BLUE)Installing GridCode in conda environment...$(NC)"
 	@echo "$(YELLOW)Prerequisite: conda environment with torch already installed$(NC)"
-	pip install -e ".[embedding]"
+	pip install -e ".[embedding]" --no-build-isolation
 	@echo "$(GREEN)Installation complete!$(NC)"
 
 install-conda-dev: ## Install with dev dependencies in conda environment
 	@echo "$(BLUE)Installing GridCode with dev dependencies...$(NC)"
-	pip install -e ".[embedding,dev]"
+	pip install -e ".[embedding,dev]" --no-build-isolation
 	@echo "$(GREEN)Installation complete!$(NC)"
 
 install-conda-all: ## Install with all optional backends in conda environment
 	@echo "$(BLUE)Installing GridCode with all backends...$(NC)"
-	pip install -e ".[embedding,dev,tantivy,whoosh,qdrant]"
+	pip install -e ".[embedding,dev,tantivy,whoosh,qdrant]" --no-build-isolation
 	@echo "$(GREEN)Installation complete!$(NC)"
 
 install-conda-ocr: ## Install with OCR support in conda environment
 	@echo "$(BLUE)Installing GridCode with OCR support...$(NC)"
-	pip install -e ".[embedding,ocr]"
+	pip install -e ".[embedding,ocr]" --no-build-isolation
 	@echo "$(GREEN)Installation complete!$(NC)"
 
 #----------------------------------------------------------------------
