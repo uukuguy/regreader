@@ -108,6 +108,7 @@ install-qdrant: ## Install with Qdrant vector index
 #----------------------------------------------------------------------
 # Conda Environment Installation (for systems with existing torch)
 # Note: docling excluded - ingest can be done on Mac, serve on Linux
+# Uses constraints-conda.txt to prevent rebuilding tiktoken/torch
 #----------------------------------------------------------------------
 
 install-conda: ## Install in conda environment (uses system torch)
@@ -115,32 +116,32 @@ install-conda: ## Install in conda environment (uses system torch)
 	@echo "$(YELLOW)Prerequisite: conda environment with torch, tiktoken already installed$(NC)"
 	@echo "$(YELLOW)Note: docling excluded (ingest on Mac, serve on Linux)$(NC)"
 	@echo "$(YELLOW)Step 1: Installing dependencies...$(NC)"
-	pip install pydantic pydantic-settings lancedb mcp typer rich loguru anthropic claude-agent-sdk "pydantic-ai>=1.0.0" langgraph langchain-anthropic langchain-openai sentence-transformers
+	pip install -c constraints-conda.txt --upgrade-strategy only-if-needed pydantic pydantic-settings lancedb mcp typer rich loguru anthropic claude-agent-sdk "pydantic-ai>=1.0.0" langgraph langchain-anthropic langchain-openai sentence-transformers
 	@echo "$(YELLOW)Step 2: Installing grid-code in editable mode...$(NC)"
 	pip install -e . --no-deps
 	@echo "$(GREEN)Installation complete!$(NC)"
 
 install-conda-dev: ## Install with dev dependencies in conda environment
 	@echo "$(BLUE)Installing GridCode with dev dependencies...$(NC)"
-	pip install pydantic pydantic-settings lancedb mcp typer rich loguru anthropic claude-agent-sdk "pydantic-ai>=1.0.0" langgraph langchain-anthropic langchain-openai sentence-transformers pytest pytest-asyncio ruff
+	pip install -c constraints-conda.txt --upgrade-strategy only-if-needed pydantic pydantic-settings lancedb mcp typer rich loguru anthropic claude-agent-sdk "pydantic-ai>=1.0.0" langgraph langchain-anthropic langchain-openai sentence-transformers pytest pytest-asyncio ruff
 	pip install -e . --no-deps
 	@echo "$(GREEN)Installation complete!$(NC)"
 
 install-conda-all: ## Install with all optional backends in conda environment
 	@echo "$(BLUE)Installing GridCode with all backends...$(NC)"
-	pip install pydantic pydantic-settings lancedb mcp typer rich loguru anthropic claude-agent-sdk "pydantic-ai>=1.0.0" langgraph langchain-anthropic langchain-openai sentence-transformers pytest pytest-asyncio ruff tantivy whoosh jieba qdrant-client
+	pip install -c constraints-conda.txt --upgrade-strategy only-if-needed pydantic pydantic-settings lancedb mcp typer rich loguru anthropic claude-agent-sdk "pydantic-ai>=1.0.0" langgraph langchain-anthropic langchain-openai sentence-transformers pytest pytest-asyncio ruff tantivy whoosh jieba qdrant-client
 	pip install -e . --no-deps
 	@echo "$(GREEN)Installation complete!$(NC)"
 
 install-conda-ocr: ## Install with OCR support in conda environment (requires docling)
 	@echo "$(BLUE)Installing GridCode with OCR support...$(NC)"
-	pip install docling pydantic pydantic-settings lancedb mcp typer rich loguru anthropic claude-agent-sdk "pydantic-ai>=1.0.0" langgraph langchain-anthropic langchain-openai sentence-transformers rapidocr-onnxruntime
+	pip install -c constraints-conda.txt --upgrade-strategy only-if-needed docling pydantic pydantic-settings lancedb mcp typer rich loguru anthropic claude-agent-sdk "pydantic-ai>=1.0.0" langgraph langchain-anthropic langchain-openai sentence-transformers rapidocr-onnxruntime
 	pip install -e . --no-deps
 	@echo "$(GREEN)Installation complete!$(NC)"
 
 install-conda-full: ## Install with docling for ingest support in conda environment
 	@echo "$(BLUE)Installing GridCode with full ingest support...$(NC)"
-	pip install docling pydantic pydantic-settings lancedb mcp typer rich loguru anthropic claude-agent-sdk "pydantic-ai>=1.0.0" langgraph langchain-anthropic langchain-openai sentence-transformers
+	pip install -c constraints-conda.txt --upgrade-strategy only-if-needed docling pydantic pydantic-settings lancedb mcp typer rich loguru anthropic claude-agent-sdk "pydantic-ai>=1.0.0" langgraph langchain-anthropic langchain-openai sentence-transformers
 	pip install -e . --no-deps
 	@echo "$(GREEN)Installation complete!$(NC)"
 

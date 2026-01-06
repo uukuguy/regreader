@@ -1,0 +1,8 @@
+# Constraints for conda environment installation
+# These packages should use the versions already installed in conda
+# to avoid building from source (which requires Rust/C++ compilers)
+
+tiktoken
+torch
+torchvision
+torchaudio
