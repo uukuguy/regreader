@@ -1,8 +1,10 @@
 # Constraints for conda environment installation
-# These packages should use the versions already installed in conda
-# to avoid building from source (which requires Rust/C++ compilers)
+# Pin exact versions to prevent pip from rebuilding packages
+# that require Rust/C++ compilers
 
-tiktoken
+# Check your conda versions with: pip list | grep -E "tiktoken|torch"
+# Update these versions to match your conda environment
+tiktoken==0.9.0
 torch
 torchvision
 torchaudio
