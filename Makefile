@@ -3,6 +3,7 @@
 
 .PHONY: help install install-dev install-all test test-mcp test-heading lint format check serve serve-stdio chat build clean reindex read-chapter \
 	install-conda install-conda-dev install-conda-all install-conda-ocr install-conda-full serve-conda serve-conda-stdio serve-conda-port \
+	chat-conda chat-conda-claude chat-conda-pydantic chat-conda-langgraph ask-conda ask-conda-claude ask-conda-pydantic ask-conda-langgraph list-conda search-conda \
 	ask ask-json ask-claude ask-pydantic ask-langgraph \
 	toc read-pages chapter-structure page-info lookup-annotation search-tables resolve-reference \
 	search-annotations get-table get-block-context find-similar compare-sections \
@@ -60,8 +61,10 @@ help: ## Show this help message
 	@echo ""
 	@echo "$(GREEN)Conda Environment (for Linux with existing torch):$(NC)"
 	@echo "  make install-conda            # Install in active conda environment"
-	@echo "  make install-conda-dev        # Install with dev dependencies"
 	@echo "  make serve-conda              # Start MCP server (no uv)"
+	@echo "  make chat-conda-claude        # Chat with Claude Agent"
+	@echo "  make ask-conda-pydantic       # Single query with Pydantic AI"
+	@echo "  make list-conda               # List regulations"
 	@echo ""
 	@echo "$(GREEN)MCP Tools Testing:$(NC)"
 	@echo "  make toc                      # Get regulation TOC"
@@ -208,6 +211,40 @@ serve-conda-stdio: ## Start MCP server in conda environment (stdio mode)
 
 serve-conda-port: ## Start MCP server on custom port in conda (usage: make serve-conda-port PORT=9000)
 	gridcode serve --transport sse --port $(PORT)
+
+#----------------------------------------------------------------------
+# CLI Commands (Conda Environment)
+#----------------------------------------------------------------------
+
+chat-conda: ## Start chat in conda environment (usage: make chat-conda AGENT=claude)
+	gridcode chat --reg-id $(REG_ID) --agent $(AGENT)
+
+chat-conda-claude: ## Chat with Claude Agent in conda environment
+	gridcode chat --reg-id $(REG_ID) --agent claude
+
+chat-conda-pydantic: ## Chat with Pydantic AI Agent in conda environment
+	gridcode chat --reg-id $(REG_ID) --agent pydantic
+
+chat-conda-langgraph: ## Chat with LangGraph Agent in conda environment
+	gridcode chat --reg-id $(REG_ID) --agent langgraph
+
+ask-conda: ## Single query in conda environment (usage: make ask-conda ASK_QUERY="...")
+	gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT)
+
+ask-conda-claude: ## Single query with Claude Agent in conda environment
+	gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude -v
+
+ask-conda-pydantic: ## Single query with Pydantic AI Agent in conda environment
+	gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic -v
+
+ask-conda-langgraph: ## Single query with LangGraph Agent in conda environment
+	gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph -v
+
+list-conda: ## List regulations in conda environment
+	gridcode list
+
+search-conda: ## Search in conda environment (usage: make search-conda QUERY="...")
+	gridcode search "$(QUERY)" --reg-id $(REG_ID)
 
 #----------------------------------------------------------------------
 # CLI Commands
