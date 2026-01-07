@@ -87,6 +87,7 @@ def create_mcp_server(
     host: str = "127.0.0.1",
     port: int = 8000,
     enable_advanced_tools: bool | None = None,
+    preload_embedding: bool = True,
 ) -> FastMCP:
     """
     创建 MCP Server 实例
@@ -96,6 +97,7 @@ def create_mcp_server(
         host: 监听地址（SSE 模式）
         port: 监听端口（SSE 模式）
         enable_advanced_tools: 是否启用高级分析工具，None 表示从配置读取
+        preload_embedding: 是否预加载嵌入模型（默认 True）
 
     Returns:
         FastMCP 实例
@@ -104,6 +106,15 @@ def create_mcp_server(
     if enable_advanced_tools is None:
         settings = get_settings()
         enable_advanced_tools = settings.enable_advanced_tools
+
+    # 预加载嵌入模型（避免首次查询延迟）
+    if preload_embedding:
+        from grid_code.embedding import get_embedder
+
+        logger.info("🚀 预加载嵌入模型...")
+        embedder = get_embedder()
+        embedder.load()
+        logger.info(f"✅ 嵌入模型加载完成: {embedder.name} ({embedder.model_name})")
 
     # 获取启用的工具列表
     enabled_tools = get_enabled_tools(include_advanced=enable_advanced_tools)
