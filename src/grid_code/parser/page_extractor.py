@@ -55,6 +55,10 @@ class PageExtractor:
         root_node_ids: list[str] = []
         node_stack: list[tuple[int, str]] = []  # (level, node_id)
 
+        # 跟踪上一个 numeric_single 类型的 level-1 章节编号
+        # 用于验证编号是否连续，避免假阳性
+        last_numeric_single_level1: int = 0
+
         for item in doc.texts:
             # 获取页码
             page_num = 1
@@ -68,6 +72,26 @@ class PageExtractor:
             is_section, section_info = self._parse_section_info(item.text)
             if not is_section or section_info is None:
                 continue
+
+            # 对 numeric_single 类型进行顺序验证
+            # 只接受连续递增的编号，避免把章节内的编号列表项误识别为顶级章节
+            if section_info.get("pattern_type") == "numeric_single":
+                try:
+                    current_num = int(section_info["number"])
+                    # 验证编号是否连续: 期望是 last + 1
+                    # 允许第一个章节是 1，或者是上一个章节 + 1
+                    if current_num != last_numeric_single_level1 + 1:
+                        # 编号不连续，跳过此项（可能是章节内的编号列表项）
+                        logger.debug(
+                            f"跳过非连续 numeric_single: {section_info['number']}.{section_info['title'][:20]} "
+                            f"(期望 {last_numeric_single_level1 + 1}，页码 {page_num})"
+                        )
+                        continue
+                    # 更新计数器
+                    last_numeric_single_level1 = current_num
+                except ValueError:
+                    # 编号不是纯数字，跳过
+                    continue
 
             # 创建 ChapterNode
             node_id = self._generate_id("chapter")
@@ -115,6 +139,7 @@ class PageExtractor:
                 - title: 章节标题（纯文本，不含编号）
                 - level: 章节层级 (1-6)
                 - direct_content: 章节号后的直接内容（如有）
+                - pattern_type: 匹配的模式类型 (numeric, numeric_single, chapter, section)
         """
         text = text.strip()
         if not text:
@@ -122,9 +147,15 @@ class PageExtractor:
 
         # 章节编号模式
         patterns = [
-            # 数字编号: "2.1.4 标题..." 或 "2.1.4. 标题..."
-            # 注意：要求至少一个点号，避免把 "500 千伏..." 这样的文本误识别为章节
+            # 多级数字编号（有空格）: "2.1.4 标题..." 或 "2.1.4. 标题..."
+            # 至少两级数字（如 2.1），避免把 "500 千伏..." 误识别
             (r'^(\d+\.\d+(?:\.\d+)*)\.?\s+(.*)$', 'numeric'),
+            # 多级数字编号（无空格）: "2.1.线路" 或 "2.2.1.三峡左岸电厂"
+            # 用于 wengui_2024 等编号后直接跟标题的规程
+            (r'^(\d+(?:\.\d+)+)\.([^\d\s].*)$', 'numeric'),
+            # 单级数字编号: "1.总则" 或 "2.国调直接调度设备范围"
+            # 匹配 "数字.非数字开头的标题"，用于 wengui_2024 等规程
+            (r'^(\d+)\.([^\d\s].*)$', 'numeric_single'),
             # 中文章: "第一章 总则" 或 "第1章 总则"
             (r'^(第[一二三四五六七八九十百千\d]+章)\s*(.*)$', 'chapter'),
             # 中文节: "第一节 概述"
@@ -140,6 +171,9 @@ class PageExtractor:
                 # 计算层级
                 if pattern_type == 'numeric':
                     level = section_num.count('.') + 1
+                elif pattern_type == 'numeric_single':
+                    # 单级数字编号：如 "1.总则" -> level 1
+                    level = 1
                 elif pattern_type == 'chapter':
                     level = 1
                 elif pattern_type == 'section':
@@ -157,6 +191,7 @@ class PageExtractor:
                     "title": title,
                     "level": level,
                     "direct_content": direct_content,
+                    "pattern_type": pattern_type,
                 }
 
         return False, None
@@ -941,6 +976,62 @@ class PageExtractor:
             stack.append((h["level"], item))
 
         return root_items
+
+    def build_toc_from_structure(
+        self, doc_structure: DocumentStructure, total_pages: int
+    ) -> TocTree:
+        """
+        从 DocumentStructure 构建 TocTree
+
+        这确保 TocTree 与 DocumentStructure 使用相同的章节识别逻辑，
+        避免独立解析导致的不一致问题。
+
+        Args:
+            doc_structure: 文档结构（从 extract_document_structure 获取）
+            total_pages: 文档总页数
+
+        Returns:
+            TocTree 目录树
+        """
+
+        def build_toc_item(node: ChapterNode, all_nodes: dict[str, ChapterNode]) -> TocItem:
+            """递归构建 TocItem"""
+            # 计算 page_end: 如果有下一个同级或更高级节点，使用其 page_num - 1
+            page_end: int | None = None
+
+            # 构建子节点
+            children: list[TocItem] = []
+            for child_id in node.children_ids:
+                if child_id in all_nodes:
+                    child_item = build_toc_item(all_nodes[child_id], all_nodes)
+                    children.append(child_item)
+
+            # 格式化标题：包含章节编号
+            title = f"{node.section_number} {node.title}" if node.title else node.section_number
+
+            return TocItem(
+                title=title,
+                level=node.level,
+                page_start=node.page_num,
+                page_end=page_end,
+                children=children,
+            )
+
+        # 从根节点构建 TocItem 列表
+        root_items: list[TocItem] = []
+        for root_id in doc_structure.root_node_ids:
+            if root_id in doc_structure.all_nodes:
+                root_item = build_toc_item(
+                    doc_structure.all_nodes[root_id], doc_structure.all_nodes
+                )
+                root_items.append(root_item)
+
+        return TocTree(
+            reg_id=self.reg_id,
+            title=self.reg_id,
+            total_pages=total_pages,
+            items=root_items,
+        )
 
     def _generate_id(self, prefix: str) -> str:
         """生成唯一 ID"""

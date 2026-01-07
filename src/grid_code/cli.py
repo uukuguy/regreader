@@ -184,7 +184,8 @@ def ingest(
         # 第二阶段：提取页面内容
         with console.status("提取页面内容..."):
             pages = extractor.extract_pages(result, doc_structure)
-            toc = extractor.extract_toc(result)
+            # 从 DocumentStructure 构建 TocTree（确保与章节识别逻辑一致）
+            toc = extractor.build_toc_from_structure(doc_structure, len(pages))
 
         console.print(f"提取完成: {len(pages)} 页")
 
