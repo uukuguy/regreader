@@ -229,16 +229,16 @@ chat-conda-langgraph: ## Chat with LangGraph Agent in conda environment
 	gridcode chat --reg-id $(REG_ID) --agent langgraph
 
 ask-conda: ## Single query in conda environment (usage: make ask-conda ASK_QUERY="...")
-	gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT)
+	gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT)
 
 ask-conda-claude: ## Single query with Claude Agent in conda environment
-	gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude -v
+	gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude -v
 
 ask-conda-pydantic: ## Single query with Pydantic AI Agent in conda environment
-	gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic -v
+	gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic -v
 
 ask-conda-langgraph: ## Single query with LangGraph Agent in conda environment
-	gridcode ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph -v
+	gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph -v
 
 list-conda: ## List regulations in conda environment
 	gridcode list
