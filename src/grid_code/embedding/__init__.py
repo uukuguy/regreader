@@ -111,6 +111,13 @@ def create_embedder(
         if "use_fp16" not in kwargs:
             kwargs["use_fp16"] = getattr(settings, "embedding_use_fp16", True)
 
+        # 设备配置：将 embedding_device 转为 devices 参数
+        if "devices" not in kwargs:
+            device = getattr(settings, "embedding_device", None)
+            if device:
+                # FlagEmbedding 支持 "cuda:0" 或 [0, 1] 格式
+                kwargs["devices"] = device
+
         return FlagEmbedder(
             model_name=model_name,
             dimension=dimension,
