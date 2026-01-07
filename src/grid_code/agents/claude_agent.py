@@ -33,6 +33,7 @@ from grid_code.agents.result_parser import parse_tool_result
 from grid_code.agents.session import SessionManager, SessionState
 from grid_code.config import get_settings
 from grid_code.mcp.tool_metadata import TOOL_METADATA
+from grid_code.storage import PageStore
 
 # Claude Agent SDK imports
 try:
@@ -153,6 +154,11 @@ class ClaudeAgent(BaseGridCodeAgent):
         # MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
 
+        # PageStore 实例（用于获取规程列表）
+        self._page_store = PageStore(settings.pages_dir)
+        # 规程列表缓存（避免重复读取）
+        self._regulations_cache: list[dict] | None = None
+
         # 状态回调
         self._callback = status_callback or NullCallback()
 
@@ -175,6 +181,30 @@ class ClaudeAgent(BaseGridCodeAgent):
     @property
     def model(self) -> str:
         return self._model
+
+    def _get_regulations(self) -> list[dict]:
+        """获取规程列表（带缓存）
+
+        从 PageStore 读取所有规程信息，转换为字典格式供 Prompt 使用。
+        使用缓存避免重复读取文件系统。
+
+        Returns:
+            规程信息列表，每个元素包含 reg_id, title, keywords, scope 等字段
+        """
+        if self._regulations_cache is None:
+            regulations = self._page_store.list_regulations()
+            self._regulations_cache = [
+                {
+                    "reg_id": r.reg_id,
+                    "title": r.title,
+                    "keywords": r.keywords,
+                    "scope": r.scope,
+                    "description": r.description,
+                }
+                for r in regulations
+            ]
+            logger.debug(f"加载规程列表: {len(self._regulations_cache)} 个")
+        return self._regulations_cache
 
     def _get_mcp_config(self) -> dict[str, Any]:
         """获取 MCP 服务器配置
@@ -200,17 +230,20 @@ class ClaudeAgent(BaseGridCodeAgent):
         - optimized: 优化版（默认，减少 token 消耗）
         - simple: 最简版（最快响应）
 
-        同时注入记忆上下文（目录缓存提示 + 已获取的相关内容）
+        同时注入规程列表和记忆上下文（目录缓存提示 + 已获取的相关内容）
         """
         settings = get_settings()
         include_advanced = getattr(settings, "enable_advanced_tools", False)
 
+        # 获取规程列表用于动态生成提示词
+        regulations = self._get_regulations()
+
         if settings.prompt_mode == "full":
-            base_prompt = get_full_prompt(include_advanced)
+            base_prompt = get_full_prompt(include_advanced, regulations)
         elif settings.prompt_mode == "simple":
-            base_prompt = get_simple_prompt()
+            base_prompt = get_simple_prompt()  # simple 模式不注入规程列表
         else:  # optimized
-            base_prompt = get_optimized_prompt_with_domain(include_advanced)
+            base_prompt = get_optimized_prompt_with_domain(include_advanced, regulations)
 
         if self.reg_id:
             base_prompt += f"\n\n# 当前规程\n默认规程: {self.reg_id}"

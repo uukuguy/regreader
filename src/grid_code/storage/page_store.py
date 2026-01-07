@@ -377,6 +377,59 @@ class PageStore:
             data = json.load(f)
             return RegulationInfo.model_validate(data)
 
+    def update_info(
+        self,
+        reg_id: str,
+        *,
+        title: str | None = None,
+        description: str | None = None,
+        keywords: list[str] | None = None,
+        scope: str | None = None,
+    ) -> RegulationInfo:
+        """
+        更新规程元数据（仅更新传入的非 None 字段）
+
+        用于多规程智能选择功能，更新 title/description/keywords/scope 字段。
+
+        Args:
+            reg_id: 规程标识
+            title: 规程标题（从封面提取）
+            description: 规程简介（一句话描述）
+            keywords: 主题关键词列表
+            scope: 适用范围描述
+
+        Returns:
+            更新后的 RegulationInfo
+
+        Raises:
+            RegulationNotFoundError: 规程不存在
+            StorageError: 更新失败
+        """
+        # 加载现有信息
+        info = self.load_info(reg_id)
+
+        # 更新传入的字段
+        if title is not None:
+            info.title = title
+        if description is not None:
+            info.description = description
+        if keywords is not None:
+            info.keywords = keywords
+        if scope is not None:
+            info.scope = scope
+
+        # 保存更新后的信息
+        try:
+            info_path = self._get_info_path(reg_id)
+            with open(info_path, "w", encoding="utf-8") as f:
+                json.dump(info.model_dump(), f, ensure_ascii=False, indent=2)
+
+            logger.info(f"规程 {reg_id} 元数据已更新")
+            return info
+
+        except Exception as e:
+            raise StorageError(f"更新规程 {reg_id} 元数据失败: {e}") from e
+
     def load_document_structure(self, reg_id: str) -> DocumentStructure | None:
         """
         加载文档结构

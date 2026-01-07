@@ -165,21 +165,57 @@ class GridCodeTools:
             "items": [truncate_item(item, 1, False) for item in toc.items],
         }
 
+    def _smart_select_regulations(self, query: str) -> list[str]:
+        """
+        根据查询关键词智能选择规程
+
+        通过匹配规程元数据中的 keywords 字段来选择相关规程。
+        如果没有匹配到任何规程，返回所有规程（降级为全规程搜索）。
+
+        Args:
+            query: 用户查询文本
+
+        Returns:
+            匹配的规程 ID 列表
+        """
+        regulations = self.page_store.list_regulations()
+        matched: list[str] = []
+
+        for reg in regulations:
+            # 匹配 keywords 字段
+            for kw in reg.keywords:
+                if kw in query:
+                    matched.append(reg.reg_id)
+                    logger.debug(f"规程 {reg.reg_id} 匹配关键词: {kw}")
+                    break
+
+        # 如果没有匹配到任何规程，返回所有规程
+        if not matched:
+            logger.info("未匹配到任何规程关键词，降级为全规程搜索")
+            return [r.reg_id for r in regulations]
+
+        logger.info(f"智能选择规程: {matched}")
+        return matched
+
     def smart_search(
         self,
         query: str,
-        reg_id: str,
+        reg_id: str | list[str] | None = None,
         chapter_scope: str | None = None,
         limit: int = 10,
         block_types: list[str] | None = None,
         section_number: str | None = None,
     ) -> list[dict]:
         """
-        智能混合检索（关键词 + 语义）
+        智能混合检索（关键词 + 语义），支持多规程
 
         Args:
             query: 搜索查询（如 "母线失压"）
-            reg_id: 规程标识
+            reg_id: 规程标识，支持多种模式：
+                - str: 单规程搜索（如 "angui_2024"）
+                - list[str]: 多规程搜索（如 ["angui_2024", "wengui_2024"]）
+                - None: 智能选择（根据 query 匹配规程元数据关键词）
+                - "all": 搜索所有已入库规程
             chapter_scope: 限定章节范围（可选，如 "第六章"）
             limit: 返回结果数量限制
             block_types: 限定块类型列表（可选，如 ["text", "table"]）
@@ -187,6 +223,7 @@ class GridCodeTools:
 
         Returns:
             搜索结果列表，每个结果包含:
+            - reg_id: 来源规程标识（新增）
             - page_num: 页码
             - chapter_path: 章节路径
             - snippet: 匹配片段
@@ -194,30 +231,61 @@ class GridCodeTools:
             - source: 来源引用
             - block_id: 块标识
         """
-        # 验证规程存在
-        if not self.page_store.exists(reg_id):
-            raise RegulationNotFoundError(reg_id)
+        # 确定要搜索的规程列表
+        if reg_id is None:
+            # 智能选择模式：根据 query 匹配规程元数据关键词
+            target_reg_ids = self._smart_select_regulations(query)
+        elif reg_id == "all":
+            # 全规程模式：搜索所有已入库规程
+            regulations = self.page_store.list_regulations()
+            target_reg_ids = [r.reg_id for r in regulations]
+        elif isinstance(reg_id, list):
+            # 多规程模式：搜索指定的规程列表
+            target_reg_ids = reg_id
+        else:
+            # 单规程模式：仅搜索指定规程
+            target_reg_ids = [reg_id]
 
-        results = self.hybrid_search.search(
-            query=query,
-            reg_id=reg_id,
-            chapter_scope=chapter_scope,
-            limit=limit,
-            block_types=block_types,
-            section_number=section_number,
-        )
+        # 验证所有规程存在
+        for rid in target_reg_ids:
+            if not self.page_store.exists(rid):
+                raise RegulationNotFoundError(rid)
 
-        return [
-            {
-                "page_num": r.page_num,
-                "chapter_path": r.chapter_path,
-                "snippet": r.snippet,
-                "score": r.score,
-                "source": r.source,
-                "block_id": r.block_id,
-            }
-            for r in results
-        ]
+        # 如果没有可搜索的规程，返回空结果
+        if not target_reg_ids:
+            logger.warning("没有可搜索的规程")
+            return []
+
+        # 收集所有规程的搜索结果
+        all_results: list[dict] = []
+
+        # 计算每个规程的配额（均分 limit）
+        per_reg_limit = max(limit // len(target_reg_ids), 5)  # 至少每个规程返回5条
+
+        for rid in target_reg_ids:
+            results = self.hybrid_search.search(
+                query=query,
+                reg_id=rid,
+                chapter_scope=chapter_scope,
+                limit=per_reg_limit,
+                block_types=block_types,
+                section_number=section_number,
+            )
+
+            for r in results:
+                all_results.append({
+                    "reg_id": rid,  # 新增：来源规程标识
+                    "page_num": r.page_num,
+                    "chapter_path": r.chapter_path,
+                    "snippet": r.snippet,
+                    "score": r.score,
+                    "source": r.source,
+                    "block_id": r.block_id,
+                })
+
+        # 按分数排序并截取 limit 条
+        all_results.sort(key=lambda x: x["score"], reverse=True)
+        return all_results[:limit]
 
     def read_page_range(
         self,

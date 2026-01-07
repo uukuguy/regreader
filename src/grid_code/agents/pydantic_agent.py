@@ -41,6 +41,7 @@ from grid_code.agents.prompts import (
 )
 from grid_code.agents.result_parser import parse_tool_result
 from grid_code.config import get_settings
+from grid_code.storage import PageStore
 
 # Pydantic AI imports
 try:
@@ -196,6 +197,11 @@ class PydanticAIAgent(BaseGridCodeAgent):
         # 获取 MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
 
+        # PageStore 实例（用于获取规程列表）
+        self._page_store = PageStore(settings.pages_dir)
+        # 规程列表缓存（避免重复读取）
+        self._regulations_cache: list[dict] | None = None
+
         # 创建 MCP Server 连接（支持 stdio 和 SSE 模式）
         self._mcp_server = self._mcp_manager.get_pydantic_mcp_server()
 
@@ -236,6 +242,30 @@ class PydanticAIAgent(BaseGridCodeAgent):
             f"mcp_transport={self._mcp_manager.config.transport}"
         )
 
+    def _get_regulations(self) -> list[dict]:
+        """获取规程列表（带缓存）
+
+        从 PageStore 读取所有规程信息，转换为字典格式供 Prompt 使用。
+        使用缓存避免重复读取文件系统。
+
+        Returns:
+            规程信息列表，每个元素包含 reg_id, title, keywords, scope 等字段
+        """
+        if self._regulations_cache is None:
+            regulations = self._page_store.list_regulations()
+            self._regulations_cache = [
+                {
+                    "reg_id": r.reg_id,
+                    "title": r.title,
+                    "keywords": r.keywords,
+                    "scope": r.scope,
+                    "description": r.description,
+                }
+                for r in regulations
+            ]
+            logger.debug(f"加载规程列表: {len(self._regulations_cache)} 个")
+        return self._regulations_cache
+
     def _build_system_prompt(self) -> str:
         """构建系统提示词
 
@@ -244,17 +274,20 @@ class PydanticAIAgent(BaseGridCodeAgent):
         - optimized: 优化版（默认，减少 token 消耗）
         - simple: 最简版（最快响应）
 
-        同时注入记忆上下文（目录缓存提示 + 已获取的相关内容）
+        同时注入规程列表和记忆上下文（目录缓存提示 + 已获取的相关内容）
         """
         settings = get_settings()
         include_advanced = getattr(settings, "enable_advanced_tools", False)
 
+        # 获取规程列表用于动态生成提示词
+        regulations = self._get_regulations()
+
         if settings.prompt_mode == "full":
-            base_prompt = get_full_prompt(include_advanced)
+            base_prompt = get_full_prompt(include_advanced, regulations)
         elif settings.prompt_mode == "simple":
-            base_prompt = get_simple_prompt()
+            base_prompt = get_simple_prompt()  # simple 模式不注入规程列表
         else:  # optimized
-            base_prompt = get_optimized_prompt_with_domain(include_advanced)
+            base_prompt = get_optimized_prompt_with_domain(include_advanced, regulations)
 
         if self.reg_id:
             base_prompt += f"\n\n# 当前规程\n默认规程: {self.reg_id}"

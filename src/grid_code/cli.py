@@ -267,25 +267,155 @@ def list_regulations():
     console.print(table)
 
 
+@app.command("enrich-metadata")
+def enrich_metadata(
+    reg_id: str = typer.Argument(None, help="规程ID，不指定则需要 --all"),
+    all_regs: bool = typer.Option(False, "--all", "-a", help="处理所有规程"),
+    model: str = typer.Option(None, "--model", "-m", help="指定 LLM 模型"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="仅预览生成的元数据，不保存"),
+):
+    """自动生成规程元数据（description, keywords, scope）
+
+    通过分析规程目录和首页内容，使用 LLM 生成描述信息。
+    生成的元数据用于多规程智能检索时的规程自动选择。
+
+    示例:
+        gridcode enrich-metadata angui_2024           # 单个规程
+        gridcode enrich-metadata --all                # 所有规程
+        gridcode enrich-metadata angui_2024 --dry-run # 预览不保存
+    """
+    import json
+
+    from rich.panel import Panel
+
+    from grid_code.services.metadata_service import (
+        format_toc_for_metadata,
+        generate_regulation_metadata,
+    )
+    from grid_code.storage import PageStore
+
+    if not reg_id and not all_regs:
+        console.print("[red]错误: 必须指定规程ID 或使用 --all 选项[/red]")
+        raise typer.Exit(1)
+
+    page_store = PageStore()
+
+    # 确定要处理的规程
+    if all_regs:
+        regulations = page_store.list_regulations()
+        if not regulations:
+            console.print("[yellow]暂无入库的规程[/yellow]")
+            return
+        reg_ids = [r.reg_id for r in regulations]
+        console.print(f"[dim]将处理 {len(reg_ids)} 个规程[/dim]\n")
+    else:
+        if not page_store.exists(reg_id):
+            console.print(f"[red]错误: 规程 {reg_id} 不存在[/red]")
+            raise typer.Exit(1)
+        reg_ids = [reg_id]
+
+    for rid in reg_ids:
+        console.print(f"[bold]处理规程: {rid}[/bold]")
+
+        try:
+            # 1. 获取 TOC
+            toc = page_store.load_toc(rid)
+            toc_items = toc.model_dump().get("items", [])
+            toc_text = format_toc_for_metadata(toc_items)
+
+            # 2. 读取前几页内容
+            first_pages_content = []
+            for page_num in range(1, min(6, toc.total_pages + 1)):
+                try:
+                    page = page_store.load_page(rid, page_num)
+                    first_pages_content.append(f"## 第 {page_num} 页\n{page.content_markdown}")
+                except Exception:
+                    continue
+            first_pages_text = "\n\n".join(first_pages_content)
+
+            # 3. 调用 LLM 生成元数据
+            with console.status(f"调用 LLM 生成元数据..."):
+                metadata = generate_regulation_metadata(
+                    toc_text,
+                    first_pages_text,
+                    model=model,
+                )
+
+            # 4. 显示生成的元数据
+            console.print(Panel(
+                f"[bold]title:[/bold] {metadata['title']}\n\n"
+                f"[bold]description:[/bold] {metadata['description']}\n\n"
+                f"[bold]keywords:[/bold] {', '.join(metadata['keywords'])}\n\n"
+                f"[bold]scope:[/bold] {metadata['scope']}",
+                title=f"[green]生成的元数据[/green]",
+                border_style="green",
+            ))
+
+            # 5. 保存元数据
+            if dry_run:
+                console.print(f"[yellow]--dry-run 模式，未保存[/yellow]")
+            else:
+                page_store.update_info(
+                    rid,
+                    title=metadata["title"],
+                    description=metadata["description"],
+                    keywords=metadata["keywords"],
+                    scope=metadata["scope"],
+                )
+                console.print(f"[green]✓ {rid} 元数据已更新[/green]")
+
+        except Exception as e:
+            console.print(f"[red]✗ {rid} 处理失败: {e}[/red]")
+            if not all_regs:
+                raise typer.Exit(1)
+
+        console.print()
+
+    if not dry_run:
+        console.print(f"[bold green]完成! 共处理 {len(reg_ids)} 个规程[/bold green]")
+
+
 @app.command()
 def search(
     query: str = typer.Argument(..., help="搜索查询"),
-    reg_id: str = typer.Option(None, "--reg-id", "-r", help="限定规程"),
+    reg_id: list[str] = typer.Option(
+        None, "--reg-id", "-r", help="限定规程（可多次指定，如 -r angui_2024 -r wengui_2024）"
+    ),
+    all_regs: bool = typer.Option(False, "--all", "-a", help="搜索所有规程"),
     chapter: str = typer.Option(None, "--chapter", "-c", help="限定章节"),
     limit: int = typer.Option(10, "--limit", "-l", help="结果数量"),
     block_types: str = typer.Option(None, "--types", "-T", help="限定块类型（逗号分隔，如 text,table）"),
     section_number: str = typer.Option(None, "--section", "-s", help="精确匹配章节号（如 2.1.4.1.6）"),
 ):
-    """测试检索功能"""
+    """测试检索功能
+
+    支持多种检索模式：
+    - 智能选择：不指定 -r 且不指定 --all，根据查询关键词匹配规程元数据自动选择
+    - 单规程：-r angui_2024
+    - 多规程：-r angui_2024 -r wengui_2024
+    - 全规程：--all 或 -a
+    """
     # 解析块类型参数
     block_type_list = None
     if block_types:
         block_type_list = [t.strip() for t in block_types.split(",")]
 
     tools = get_tools()
+
+    # 确定搜索的规程范围
+    if all_regs:
+        # 明确搜索所有规程
+        search_reg_id: str | list[str] | None = "all"
+    elif reg_id:
+        # 指定规程（单个或多个）
+        search_reg_id = reg_id[0] if len(reg_id) == 1 else reg_id
+    else:
+        # 智能选择（根据查询关键词匹配规程元数据）
+        search_reg_id = None
+
     results = tools.smart_search(
         query,
-        reg_id=reg_id,
+        reg_id=search_reg_id,
         chapter_scope=chapter,
         limit=limit,
         block_types=block_type_list,
@@ -298,13 +428,36 @@ def search(
 
     console.print(f"\n[bold]找到 {len(results)} 条结果:[/bold]\n")
 
-    for i, result in enumerate(results, 1):
-        console.print(f"[bold cyan]{i}. {result['source']}[/bold cyan]")
-        if result.get("chapter_path"):
-            console.print(f"   章节: {' > '.join(result['chapter_path'])}")
-        console.print(f"   相关度: {result['score']:.4f}")
-        console.print(f"   {result['snippet'][:200]}...")
-        console.print()
+    # 按规程分组显示
+    results_by_reg: dict[str, list] = {}
+    for result in results:
+        result_reg_id = result.get("reg_id", "unknown")
+        if result_reg_id not in results_by_reg:
+            results_by_reg[result_reg_id] = []
+        results_by_reg[result_reg_id].append(result)
+
+    # 如果只有一个规程，不分组显示
+    if len(results_by_reg) == 1:
+        for i, result in enumerate(results, 1):
+            console.print(f"[bold cyan]{i}. {result['source']}[/bold cyan]")
+            if result.get("chapter_path"):
+                console.print(f"   章节: {' > '.join(result['chapter_path'])}")
+            console.print(f"   相关度: {result['score']:.4f}")
+            console.print(f"   {result['snippet'][:200]}...")
+            console.print()
+    else:
+        # 多规程分组显示
+        idx = 1
+        for reg, reg_results in results_by_reg.items():
+            console.print(f"\n[bold magenta]━━━ 规程: {reg} ({len(reg_results)} 条) ━━━[/bold magenta]\n")
+            for result in reg_results:
+                console.print(f"[bold cyan]{idx}. {result['source']}[/bold cyan]")
+                if result.get("chapter_path"):
+                    console.print(f"   章节: {' > '.join(result['chapter_path'])}")
+                console.print(f"   相关度: {result['score']:.4f}")
+                console.print(f"   {result['snippet'][:200]}...")
+                console.print()
+                idx += 1
 
 
 @app.command("read-chapter")

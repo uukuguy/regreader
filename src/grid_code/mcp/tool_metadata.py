@@ -182,14 +182,18 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     "list_regulations": ToolMetadata(
         name="list_regulations",
         brief="列出已入库规程",
-        description="列出系统中已入库的所有规程，用于了解可用规程范围",
+        description=(
+            "列出系统中已入库的所有规程及其元数据（keywords、scope、description）。"
+            "【重要】在不确定应查询哪个规程时，应首先调用此工具了解可用规程范围。"
+            "返回的 keywords 和 scope 字段可帮助判断用户问题应查询哪个或哪些规程。"
+        ),
         params_doc={},
         category=ToolCategory.BASE,
         phase=0,
         priority=1,
         prerequisites=[],
-        next_tools=["get_toc"],
-        use_cases=["了解可用规程", "确定规程范围"],
+        next_tools=["get_toc", "smart_search"],
+        use_cases=["了解可用规程", "确定规程范围", "多规程选择决策"],
         cli_command="list",
         expected_params={},
     ),
@@ -222,11 +226,19 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
     ),
     "smart_search": ToolMetadata(
         name="smart_search",
-        brief="混合检索（关键词+语义）",
-        description="混合检索，结合关键词和语义检索。建议先用 get_toc 确定章节范围后再搜索",
+        brief="混合检索（关键词+语义，支持多规程）",
+        description=(
+            "混合检索，结合关键词和语义检索，支持多规程智能选择。"
+            "reg_id 参数支持四种模式：\n"
+            "- 单规程：reg_id='angui_2024' → 仅搜索指定规程\n"
+            "- 多规程：reg_id=['angui_2024', 'wengui_2024'] → 搜索指定规程列表\n"
+            "- 智能选择：reg_id=None → 根据 query 关键词匹配规程元数据自动选择\n"
+            "- 全规程：reg_id='all' → 搜索所有已入库规程\n"
+            "【建议】不确定时使用 reg_id=None，系统会根据问题关键词自动匹配最相关的规程。"
+        ),
         params_doc={
             "query": "搜索查询词，应简洁明确",
-            "reg_id": "规程标识",
+            "reg_id": "规程标识。支持：单个字符串、字符串列表、None（智能选择）、'all'（全规程）",
             "chapter_scope": "限定章节范围（如「第六章」），强烈建议指定以提高精度",
             "limit": "返回结果数量限制",
             "block_types": "限定内容类型（text/table/heading/list）",
@@ -235,13 +247,13 @@ TOOL_METADATA: dict[str, ToolMetadata] = {
         category=ToolCategory.BASE,
         phase=0,
         priority=1,
-        prerequisites=["get_toc"],
+        prerequisites=["list_regulations", "get_toc"],
         next_tools=["read_page_range", "lookup_annotation", "resolve_reference"],
-        use_cases=["查找相关内容", "混合检索"],
+        use_cases=["查找相关内容", "混合检索", "跨规程检索", "智能规程选择"],
         cli_command="search",
         expected_params={
             "query": "string",
-            "reg_id": "string",
+            "reg_id": "string|array|null",
             "chapter_scope": "string|null",
             "limit": "integer",
             "block_types": "array|null",
@@ -419,6 +431,7 @@ TOOL_WORKFLOWS: dict[str, list[str]] = {
     "简单查询": ["get_toc", "smart_search", "read_page_range"],
     "表格查询": ["get_toc", "search_tables", "get_table_by_id", "lookup_annotation"],
     "引用追踪": ["get_toc", "smart_search", "resolve_reference", "read_page_range"],
+    "跨规程查询": ["list_regulations", "smart_search", "read_page_range"],
     "深度探索": [
         "get_toc",
         "smart_search",
@@ -439,6 +452,9 @@ TOOL_TIPS: list[str] = [
     "遇到「见注X」时用 lookup_annotation 追踪注释",
     "遇到「见第X章」时用 resolve_reference 解析引用",
     "跨页表格需用 get_table_by_id 获取完整内容",
+    "【多规程】不确定查哪个规程时，使用 smart_search(reg_id=None) 智能选择",
+    "【多规程】涉及多个规程的问题，先用 list_regulations 了解各规程的 keywords 和 scope",
+    "【多规程】搜索结果中的 reg_id 字段标识内容来源，便于追溯",
 ]
 
 

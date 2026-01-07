@@ -329,6 +329,11 @@ class RegulationInfo(BaseModel):
     total_pages: int = Field(description="总页数")
     indexed_at: str = Field(description="索引时间（ISO 格式）")
 
+    # 多规程智能选择辅助字段
+    description: str | None = Field(default=None, description="规程简介（一句话描述）")
+    keywords: list[str] = Field(default_factory=list, description="主题关键词，用于智能选择规程")
+    scope: str | None = Field(default=None, description="适用范围描述")
+
 
 # ============================================================================
 # 表格注册表模型（全局表格索引）

@@ -10,7 +10,8 @@
 	build-table-registry table-registry-stats list-cross-page-tables build-table-index \
 	list-mcp search-mcp toc-mcp read-pages-mcp list-mcp-sse search-mcp-sse toc-mcp-sse read-pages-mcp-sse \
 	chat-mcp-sse chat-claude-sse chat-pydantic-sse chat-langgraph-sse \
-	mcp-tools mcp-tools-v mcp-tools-live mcp-verify mcp-verify-v mcp-verify-sse
+	mcp-tools mcp-tools-v mcp-tools-live mcp-verify mcp-verify-v mcp-verify-sse \
+	enrich-metadata enrich-metadata-all search-all search-multi search-smart
 
 # Default target
 .DEFAULT_GOAL := help
@@ -58,6 +59,14 @@ help: ## Show this help message
 	@echo "  make chat REG_ID=angui        # Start interactive chat"
 	@echo "  make ask ASK_QUERY=\"母线失压如何处理?\"  # Single query (non-interactive)"
 	@echo "  make ask-json ASK_QUERY=\"...\" # Single query with JSON output"
+	@echo ""
+	@echo "$(GREEN)Multi-Regulation Search:$(NC)"
+	@echo "  make search-smart QUERY=\"母线失压\"              # Smart selection (auto-detect regulation)"
+	@echo "  make search QUERY=\"母线失压\" REG_ID=angui_2024  # Single regulation"
+	@echo "  make search-multi QUERY=\"稳定控制\" REG_IDS=\"angui_2024,wengui_2024\"  # Multiple"
+	@echo "  make search-all QUERY=\"故障处理\"               # Search all regulations"
+	@echo "  make enrich-metadata REG_ID=angui_2024         # Generate metadata for one"
+	@echo "  make enrich-metadata-all                       # Generate metadata for all"
 	@echo ""
 	@echo "$(GREEN)Conda Environment (for Linux with existing torch):$(NC)"
 	@echo "  make install-conda            # Install in active conda environment"
@@ -295,6 +304,35 @@ list: ## List all ingested regulations
 QUERY ?= 母线失压
 search: ## Search regulations (usage: make search QUERY="母线失压" REG_ID=angui)
 	$(UV) run gridcode $(MCP_FLAGS) search "$(QUERY)" --reg-id $(REG_ID)
+
+#----------------------------------------------------------------------
+# Multi-Regulation Search
+#----------------------------------------------------------------------
+
+search-smart: ## Smart search - auto-detect regulation (usage: make search-smart QUERY="母线失压")
+	$(UV) run gridcode $(MCP_FLAGS) search "$(QUERY)"
+
+REG_IDS ?= angui_2024,wengui_2024
+search-multi: ## Search multiple regulations (usage: make search-multi QUERY="稳定控制" REG_IDS="angui_2024,wengui_2024")
+	@IFS=',' read -ra REGS <<< "$(REG_IDS)"; \
+	REG_ARGS=""; \
+	for reg in "$${REGS[@]}"; do \
+		REG_ARGS="$$REG_ARGS -r $$reg"; \
+	done; \
+	$(UV) run gridcode $(MCP_FLAGS) search "$(QUERY)" $$REG_ARGS
+
+search-all: ## Search all regulations (usage: make search-all QUERY="故障处理")
+	$(UV) run gridcode $(MCP_FLAGS) search "$(QUERY)" --all
+
+#----------------------------------------------------------------------
+# Metadata Enrichment
+#----------------------------------------------------------------------
+
+enrich-metadata: ## Generate metadata for a regulation (usage: make enrich-metadata REG_ID=angui_2024)
+	$(UV) run gridcode enrich-metadata $(REG_ID)
+
+enrich-metadata-all: ## Generate metadata for all regulations
+	$(UV) run gridcode enrich-metadata --all
 
 # REG_ID ?= angui_2024
 # FILE ?= ./data/raw/angui_2024.pdf

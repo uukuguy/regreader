@@ -17,17 +17,82 @@ from grid_code.mcp.prompt_generator import (
 
 # ==================== 静态内容：角色定义 ====================
 
-ROLE_DEFINITION = """# 角色定义
-你是电力系统安规专家助理 GridCode，具备在安规文档中动态"翻书"的能力。
-你的任务是帮助用户查找安规中的相关规定，并提供准确、完整的答案。"""
+ROLE_DEFINITION_BASE = """# 角色定义
+你是电力系统规程专家助理 GridCode，具备在多部规程文档中动态"翻书"的能力。
+你的任务是帮助用户查找规程中的相关规定，并提供准确、完整的答案。"""
 
-ROLE_DEFINITION_SHORT = """你是电力系统安规专家助理 GridCode。
-请使用提供的工具查找安规中的相关规定，并提供准确、完整的答案。"""
+ROLE_DEFINITION_WITH_REGS = """# 角色定义
+你是电力系统规程专家助理 GridCode，具备在多部规程文档中动态"翻书"的能力。
+
+## 可用规程库
+{regulation_list}
+
+根据用户问题中的关键词，选择最相关的规程进行检索。
+当问题可能涉及多个规程时，应主动进行跨规程检索。"""
+
+# 向后兼容
+ROLE_DEFINITION = ROLE_DEFINITION_BASE
+
+ROLE_DEFINITION_SHORT = """你是电力系统规程专家助理 GridCode。
+请使用提供的工具查找规程中的相关规定，并提供准确、完整的答案。"""
+
+
+def format_regulation_list(regulations: list[dict]) -> str:
+    """从规程元数据生成提示词中的规程列表
+
+    Args:
+        regulations: 规程信息列表，每个元素包含 reg_id, title, keywords, scope 等字段
+
+    Returns:
+        Markdown 格式的规程列表
+    """
+    if not regulations:
+        return "（暂无可用规程）"
+
+    lines = []
+    for r in regulations:
+        reg_id = r.get("reg_id", "unknown")
+        title = r.get("title", "未知规程")
+        keywords = r.get("keywords", [])
+        scope = r.get("scope", "")
+
+        # 构建规程描述
+        keywords_str = ", ".join(keywords) if keywords else "无"
+        scope_str = scope if scope else "通用"
+
+        lines.append(
+            f"- **{reg_id}**: {title}\n"
+            f"  - 关键词: {keywords_str}\n"
+            f"  - 适用范围: {scope_str}"
+        )
+
+    return "\n".join(lines)
+
+
+def get_role_definition(regulations: list[dict] | None = None) -> str:
+    """获取角色定义，支持动态注入规程列表
+
+    Args:
+        regulations: 规程信息列表（可选）。如果提供，则生成包含规程列表的角色定义。
+
+    Returns:
+        角色定义字符串
+    """
+    if regulations:
+        regulation_list = format_regulation_list(regulations)
+        return ROLE_DEFINITION_WITH_REGS.format(regulation_list=regulation_list)
+    return ROLE_DEFINITION_BASE
 
 
 # ==================== 静态内容：操作协议 ====================
 
 OPERATION_PROTOCOLS = """# 操作协议（必须严格执行）
+
+## 0. 规程选择原则
+根据用户问题和规程元数据中的关键词/适用范围，智能选择检索范围：
+- 问题关键词匹配单个规程 → 单规程检索（指定 reg_id）
+- 问题关键词匹配多个规程 → 跨规程检索（传入规程列表）
+- 不确定时 → 不传 reg_id，系统自动智能选择或全规程搜索
 
 ## 1. 目录优先原则
 收到问题后，应先调用 get_toc() 查看目录结构，锁定可能的章节范围。
@@ -37,6 +102,7 @@ OPERATION_PROTOCOLS = """# 操作协议（必须严格执行）
 使用 smart_search() 时：
 - 如果已确定章节范围，必须传入 chapter_scope 参数
 - 查询词应简洁明确，如 "母线失压" 而非 "110kV母线失压怎么处理"
+- reg_id 参数支持：单规程（字符串）、多规程（列表）、智能选择（不传或 None）、全规程（"all"）
 
 ## 3. 多跳推理协议
 
@@ -59,6 +125,7 @@ OPERATION_PROTOCOLS = """# 操作协议（必须严格执行）
 3. 检查表格中的注释引用，使用 lookup_annotation() 追踪"""
 
 OPERATION_PROTOCOLS_SHORT = """# 核心工作流
+0. **规程选择**：根据问题关键词选择规程，不确定时不传 reg_id（系统自动选择）
 1. **目录优先**：先 get_toc() 确定范围，禁止盲目全文搜索
 2. **精准定位**：smart_search 时务必指定 chapter_scope 参数
 3. **完整阅读**：搜索结果不完整时用 read_page_range 补充
@@ -167,17 +234,22 @@ description: 用于精准检索和解析电网安全自动装置运行管理规�
 # ==================== 动态生成函数 ====================
 
 
-def get_full_prompt(include_advanced: bool = False) -> str:
+def get_full_prompt(
+    include_advanced: bool = False,
+    regulations: list[dict] | None = None,
+) -> str:
     """生成完整版系统提示词
 
     Args:
         include_advanced: 是否包含高级分析工具
+        regulations: 规程信息列表（可选），用于动态生成规程库描述
 
     Returns:
         完整版系统提示词
     """
+    role_def = get_role_definition(regulations)
     return "\n\n".join([
-        ROLE_DEFINITION,
+        role_def,
         generate_tool_section("full", include_advanced),
         OPERATION_PROTOCOLS,
         generate_workflow_section(),
@@ -187,17 +259,22 @@ def get_full_prompt(include_advanced: bool = False) -> str:
     ])
 
 
-def get_optimized_prompt(include_advanced: bool = False) -> str:
+def get_optimized_prompt(
+    include_advanced: bool = False,
+    regulations: list[dict] | None = None,
+) -> str:
     """生成优化版系统提示词（推荐）
 
     Args:
         include_advanced: 是否包含高级分析工具
+        regulations: 规程信息列表（可选），用于动态生成规程库描述
 
     Returns:
         优化版系统提示词
     """
+    role_def = get_role_definition(regulations) if regulations else ROLE_DEFINITION_SHORT
     return "\n\n".join([
-        ROLE_DEFINITION_SHORT,
+        role_def,
         generate_tool_section("optimized", include_advanced),
         OPERATION_PROTOCOLS_SHORT,
         generate_multihop_triggers(),
@@ -206,17 +283,22 @@ def get_optimized_prompt(include_advanced: bool = False) -> str:
     ])
 
 
-def get_optimized_prompt_with_domain(include_advanced: bool = False) -> str:
+def get_optimized_prompt_with_domain(
+    include_advanced: bool = False,
+    regulations: list[dict] | None = None,
+) -> str:
     """生成带领域知识的优化版系统提示词
 
     Args:
         include_advanced: 是否包含高级分析工具
+        regulations: 规程信息列表（可选），用于动态生成规程库描述
 
     Returns:
         带领域知识的优化版系统提示词
     """
+    role_def = get_role_definition(regulations) if regulations else ROLE_DEFINITION_SHORT
     return "\n\n".join([
-        ROLE_DEFINITION_SHORT,
+        role_def,
         generate_tool_section("optimized", include_advanced),
         OPERATION_PROTOCOLS_SHORT,
         generate_multihop_triggers(),
