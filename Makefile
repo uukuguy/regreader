@@ -250,7 +250,6 @@ search-conda: ## Search in conda environment (usage: make search-conda QUERY="..
 # CLI Commands
 #----------------------------------------------------------------------
 
-REG_ID ?= angui_2024
 AGENT ?= claude
 
 chat: ## Start interactive chat (usage: make chat REG_ID=angui AGENT=claude MODE=mcp-sse)
@@ -266,11 +265,15 @@ chat-langgraph: ## Start chat with LangGraph Agent
 	$(UV) run gridcode $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent langgraph
 
 # Single query execution (non-interactive)
+# ------ angui_2024 ------
 # ASK_QUERY ?= 锦西电厂安控装置的具体配置
 # ASK_QUERY ?= 锦西电厂安控装置的主要功能
 # ASK_QUERY ?= 华北电网500千伏天乐双线停运时，安控系统应采取哪些措施？
 # ASK_QUERY ?= 特高压南阳站稳态过电压控制装置1发生故障时，系统应如何处理？
-ASK_QUERY ?= 长南I线发生故障时，会影响哪些线路和设备？
+# ASK_QUERY ?= 长南I线发生故障时，会影响哪些线路和设备？
+# ------ wengui_2024 ------
+ASK_QUERY ?= 长南Ⅰ线停运会影响哪些断面的限额？
+
 ask: ## Single query to Agent (usage: make ask ASK_QUERY="母线失压如何处理?" AGENT=claude)
 	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT)
 
@@ -293,7 +296,10 @@ QUERY ?= 母线失压
 search: ## Search regulations (usage: make search QUERY="母线失压" REG_ID=angui)
 	$(UV) run gridcode $(MCP_FLAGS) search "$(QUERY)" --reg-id $(REG_ID)
 
-FILE ?= ./data/raw/angui_2024.pdf
+# REG_ID ?= angui_2024
+# FILE ?= ./data/raw/angui_2024.pdf
+REG_ID ?= wengui_2024
+FILE ?= ./data/raw/wengui_2024.pdf
 ingest: ## Ingest a document (usage: make ingest FILE=/path/to/doc.docx REG_ID=angui)
 	@if [ -z "$(FILE)" ]; then \
 		echo "Error: FILE is required. Usage: make ingest FILE=/path/to/doc.docx REG_ID=angui"; \
