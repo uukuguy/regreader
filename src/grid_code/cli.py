@@ -531,6 +531,9 @@ def chat(
     agent_type: AgentType = typer.Option(
         AgentType.claude, "--agent", "-a", help="Agent 类型"
     ),
+    orchestrator: bool = typer.Option(
+        False, "--orchestrator", "-o", help="启用 Orchestrator 模式（Subagent 架构）"
+    ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="详细模式：显示完整工具参数"
     ),
@@ -538,7 +541,10 @@ def chat(
         False, "--quiet", "-q", help="静默模式：只显示最终结果"
     ),
 ):
-    """与 Agent 对话（交互模式）"""
+    """与 Agent 对话（交互模式）
+
+    使用 --orchestrator 启用 Subagent 架构模式，通过专家代理协调实现更好的任务分解。
+    """
     from grid_code.agents.callbacks import NullCallback
     from grid_code.agents.display import AgentStatusDisplay
     from grid_code.agents.hooks import set_status_callback
@@ -558,15 +564,28 @@ def chat(
             status_callback = AgentStatusDisplay(console, verbose=verbose)
 
         # 创建 Agent
-        if agent_type == AgentType.claude:
-            from grid_code.agents import ClaudeAgent
-            agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
-        elif agent_type == AgentType.pydantic:
-            from grid_code.agents import PydanticAIAgent
-            agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+        if orchestrator:
+            # Orchestrator 模式（Subagent 架构）
+            if agent_type == AgentType.claude:
+                from grid_code.agents import ClaudeOrchestrator
+                agent = ClaudeOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+            elif agent_type == AgentType.pydantic:
+                from grid_code.agents import PydanticOrchestrator
+                agent = PydanticOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+            else:
+                from grid_code.agents import LangGraphOrchestrator
+                agent = LangGraphOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
         else:
-            from grid_code.agents import LangGraphAgent
-            agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+            # 原始 Agent 模式
+            if agent_type == AgentType.claude:
+                from grid_code.agents import ClaudeAgent
+                agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+            elif agent_type == AgentType.pydantic:
+                from grid_code.agents import PydanticAIAgent
+                agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+            else:
+                from grid_code.agents import LangGraphAgent
+                agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
 
         console.print(f"[bold]GridCode Agent ({agent.name})[/bold]")
         console.print("输入问题进行对话，输入 'exit' 退出\n")
@@ -627,6 +646,9 @@ def ask(
     agent_type: AgentType = typer.Option(
         AgentType.claude, "--agent", "-a", help="Agent 类型"
     ),
+    orchestrator: bool = typer.Option(
+        False, "--orchestrator", "-o", help="启用 Orchestrator 模式（Subagent 架构）"
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="JSON 格式输出"),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="详细模式：显示完整工具参数"
@@ -637,11 +659,14 @@ def ask(
 ):
     """单次查询 Agent（非交互模式）
 
+    使用 --orchestrator 启用 Subagent 架构模式，通过专家代理协调实现更好的任务分解。
+
     示例:
         gridcode ask "母线失压如何处理?" -r angui_2024
         gridcode ask "什么是安规?" --agent pydantic --json
         gridcode ask "安全距离是多少?" -v  # 详细模式
         gridcode ask "什么是接地?" -q      # 静默模式
+        gridcode ask "表6-2注1的内容" -o   # Orchestrator 模式
     """
     from grid_code.agents.callbacks import NullCallback
     from grid_code.agents.display import AgentStatusDisplay
@@ -662,15 +687,28 @@ def ask(
             status_callback = AgentStatusDisplay(console, verbose=verbose)
 
         # 创建 Agent
-        if agent_type == AgentType.claude:
-            from grid_code.agents import ClaudeAgent
-            agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
-        elif agent_type == AgentType.pydantic:
-            from grid_code.agents import PydanticAIAgent
-            agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+        if orchestrator:
+            # Orchestrator 模式（Subagent 架构）
+            if agent_type == AgentType.claude:
+                from grid_code.agents import ClaudeOrchestrator
+                agent = ClaudeOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+            elif agent_type == AgentType.pydantic:
+                from grid_code.agents import PydanticOrchestrator
+                agent = PydanticOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+            else:
+                from grid_code.agents import LangGraphOrchestrator
+                agent = LangGraphOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
         else:
-            from grid_code.agents import LangGraphAgent
-            agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+            # 原始 Agent 模式
+            if agent_type == AgentType.claude:
+                from grid_code.agents import ClaudeAgent
+                agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+            elif agent_type == AgentType.pydantic:
+                from grid_code.agents import PydanticAIAgent
+                agent = PydanticAIAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+            else:
+                from grid_code.agents import LangGraphAgent
+                agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
 
         try:
             if not json_output:

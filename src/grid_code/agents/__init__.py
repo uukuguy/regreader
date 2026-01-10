@@ -5,6 +5,11 @@
 - PydanticAIAgent: 基于 Pydantic AI
 - LangGraphAgent: 基于 LangGraph
 
+Subagent 架构（Orchestrator 模式）：
+- ClaudeOrchestrator: 基于 Claude Agent SDK Handoff Pattern 的协调器
+- LangGraphOrchestrator: 基于 LangGraph Subgraph 的协调器
+- PydanticOrchestrator: 基于 Pydantic AI Dependent Agents 的协调器
+
 统一 MCP 连接管理：
 - MCPConnectionConfig: MCP 连接配置
 - MCPConnectionManager: MCP 连接管理器（单例）
@@ -39,6 +44,9 @@ from .hooks import (
     source_extraction_hook,
 )
 from .langgraph_agent import LangGraphAgent
+from .langgraph import LangGraphOrchestrator
+from .pydantic import PydanticOrchestrator
+from .claude import ClaudeOrchestrator
 from .mcp_connection import MCPConnectionConfig, MCPConnectionManager, configure_mcp, get_mcp_manager
 from .pydantic_agent import PydanticAIAgent
 from .session import SessionManager, SessionState
@@ -47,10 +55,14 @@ __all__ = [
     # Base
     "AgentResponse",
     "BaseGridCodeAgent",
-    # Agents
+    # Agents (Original)
     "ClaudeAgent",
     "LangGraphAgent",
     "PydanticAIAgent",
+    # Orchestrators (Subagent Architecture)
+    "ClaudeOrchestrator",
+    "LangGraphOrchestrator",
+    "PydanticOrchestrator",
     # MCP Connection
     "MCPConnectionConfig",
     "MCPConnectionManager",

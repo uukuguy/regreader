@@ -5,6 +5,8 @@
 	install-conda install-conda-dev install-conda-all install-conda-ocr install-conda-full serve-conda serve-conda-stdio serve-conda-port \
 	chat-conda chat-conda-claude chat-conda-pydantic chat-conda-langgraph ask-conda ask-conda-claude ask-conda-pydantic ask-conda-langgraph list-conda search-conda \
 	ask ask-json ask-claude ask-pydantic ask-langgraph \
+	chat-orch chat-orch-claude chat-orch-pydantic chat-orch-langgraph \
+	ask-orch ask-orch-claude ask-orch-pydantic ask-orch-langgraph \
 	toc read-pages chapter-structure page-info lookup-annotation search-tables resolve-reference \
 	search-annotations get-table get-block-context find-similar compare-sections \
 	build-table-registry table-registry-stats list-cross-page-tables build-table-index \
@@ -59,6 +61,13 @@ help: ## Show this help message
 	@echo "  make chat REG_ID=angui        # Start interactive chat"
 	@echo "  make ask ASK_QUERY=\"母线失压如何处理?\"  # Single query (non-interactive)"
 	@echo "  make ask-json ASK_QUERY=\"...\" # Single query with JSON output"
+	@echo ""
+	@echo "$(GREEN)Orchestrator Mode (Subagent Architecture):$(NC)"
+	@echo "  make chat-orch REG_ID=angui_2024                # Chat with Orchestrator"
+	@echo "  make chat-orch-claude REG_ID=angui_2024         # Claude Orchestrator"
+	@echo "  make chat-orch-pydantic REG_ID=angui_2024       # Pydantic Orchestrator"
+	@echo "  make chat-orch-langgraph REG_ID=angui_2024      # LangGraph Orchestrator"
+	@echo "  make ask-orch ASK_QUERY=\"表6-2注1的内容\" REG_ID=angui_2024  # Single query"
 	@echo ""
 	@echo "$(GREEN)Multi-Regulation Search:$(NC)"
 	@echo "  make search-smart QUERY=\"母线失压\"              # Smart selection (auto-detect regulation)"
@@ -297,6 +306,34 @@ ask-pydantic: ## Single query with Pydantic AI Agent
 
 ask-langgraph: ## Single query with LangGraph Agent
 	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph -v
+
+#----------------------------------------------------------------------
+# Orchestrator CLI Commands (Subagent Architecture)
+#----------------------------------------------------------------------
+
+chat-orch: ## Start chat with Orchestrator (usage: make chat-orch REG_ID=angui AGENT=claude)
+	$(UV) run gridcode $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent $(AGENT) --orchestrator
+
+chat-orch-claude: ## Start chat with Claude Orchestrator
+	$(UV) run gridcode $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent claude --orchestrator
+
+chat-orch-pydantic: ## Start chat with Pydantic Orchestrator
+	$(UV) run gridcode $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent pydantic --orchestrator
+
+chat-orch-langgraph: ## Start chat with LangGraph Orchestrator
+	$(UV) run gridcode $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent langgraph --orchestrator
+
+ask-orch: ## Single query with Orchestrator (usage: make ask-orch ASK_QUERY="表6-2注1的内容")
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT) --orchestrator
+
+ask-orch-claude: ## Single query with Claude Orchestrator
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude --orchestrator -v
+
+ask-orch-pydantic: ## Single query with Pydantic Orchestrator
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic --orchestrator -v
+
+ask-orch-langgraph: ## Single query with LangGraph Orchestrator
+	$(UV) run gridcode $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph --orchestrator -v
 
 list: ## List all ingested regulations
 	$(UV) run gridcode $(MCP_FLAGS) list
