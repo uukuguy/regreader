@@ -334,4 +334,38 @@ src/grid_code/subagents/config.py
 src/grid_code/subagents/base.py
 src/grid_code/subagents/__init__.py
 src/grid_code/orchestrator/__init__.py
+Makefile
+```
+
+## Makefile 更新 (2026-01-11)
+
+### 新增命令
+
+| 命令 | 说明 |
+|------|------|
+| `make test-bash-fs` | 运行 Bash+FS 架构单元测试 |
+| `make test-infrastructure` | 运行基础设施层测试 (FileContext, EventBus 等) |
+| `make test-regsearch` | 运行 RegSearchSubagent 测试 |
+| `make verify-bash-fs` | 运行完整架构验证（无需 pytest） |
+
+### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `scripts/verify_bash_fs.py` | Bash+FS 架构验证脚本 |
+
+### 使用示例
+
+```bash
+# 运行完整架构验证（无需安装 pytest）
+make verify-bash-fs
+
+# 运行所有 Bash+FS 单元测试
+make test-bash-fs
+
+# 仅运行基础设施层测试
+make test-infrastructure
+
+# 仅运行 RegSearchSubagent 测试
+make test-regsearch
 ```

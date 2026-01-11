@@ -13,7 +13,8 @@
 	list-mcp search-mcp toc-mcp read-pages-mcp list-mcp-sse search-mcp-sse toc-mcp-sse read-pages-mcp-sse \
 	chat-mcp-sse chat-claude-sse chat-pydantic-sse chat-langgraph-sse \
 	mcp-tools mcp-tools-v mcp-tools-live mcp-verify mcp-verify-v mcp-verify-sse \
-	enrich-metadata enrich-metadata-all search-all search-multi search-smart
+	enrich-metadata enrich-metadata-all search-all search-multi search-smart \
+	test-bash-fs verify-bash-fs test-infrastructure test-regsearch
 
 # Default target
 .DEFAULT_GOAL := help
@@ -103,6 +104,12 @@ help: ## Show this help message
 	@echo "  make search MODE=mcp-sse QUERY=\"母线失压\"  # Search via MCP SSE"
 	@echo "  make chat MODE=mcp-sse AGENT=claude      # Chat via MCP SSE"
 	@echo "  make chat-claude-sse          # Chat with Claude Agent via SSE"
+	@echo ""
+	@echo "$(GREEN)Bash+FS Subagents Architecture:$(NC)"
+	@echo "  make test-bash-fs             # Run Bash+FS unit tests"
+	@echo "  make test-infrastructure      # Test infrastructure layer (FileContext, EventBus, etc.)"
+	@echo "  make test-regsearch           # Test RegSearchSubagent"
+	@echo "  make verify-bash-fs           # Run architecture verification (no pytest needed)"
 
 #----------------------------------------------------------------------
 # Installation
@@ -202,6 +209,23 @@ test-mcp: ## Run MCP connection tests
 
 test-heading: ## Run heading detection tests
 	$(UV) run $(PYTHON) tests/test_heading_detection.py
+
+#----------------------------------------------------------------------
+# Bash+FS Subagents Architecture Testing
+#----------------------------------------------------------------------
+
+test-bash-fs: ## Run Bash+FS architecture unit tests
+	$(UV) run $(PYTEST) tests/bash-fs-paradiam/ -xvs
+
+test-infrastructure: ## Run infrastructure layer tests (FileContext, EventBus, etc.)
+	$(UV) run $(PYTEST) tests/bash-fs-paradiam/test_file_context.py tests/bash-fs-paradiam/test_event_bus.py tests/bash-fs-paradiam/test_security_guard.py tests/bash-fs-paradiam/test_skill_loader.py -xvs
+
+test-regsearch: ## Run RegSearchSubagent tests
+	$(UV) run $(PYTEST) tests/bash-fs-paradiam/test_regsearch_subagent.py -xvs
+
+verify-bash-fs: ## Run complete Bash+FS architecture verification (no pytest required)
+	@echo "$(BLUE)Verifying Bash+FS Subagents Architecture...$(NC)"
+	@$(UV) run $(PYTHON) scripts/verify_bash_fs.py
 
 #----------------------------------------------------------------------
 # MCP Server
