@@ -1,25 +1,34 @@
 """LangGraph Orchestrator 实现
 
-协调多个 Subgraph 的执行，实现查询路由和结果聚合。
+使用 LangGraph 原生的父图-子图模式协调多个 Subgraph 的执行。
 
 架构:
-    LangGraphOrchestrator
-        ├── QueryAnalyzer (查询意图分析)
-        ├── SubagentRouter (路由调度)
-        ├── Subgraphs (专家代理)
-        │   ├── SearchSubgraph
-        │   ├── TableSubgraph
-        │   ├── ReferenceSubgraph
-        │   └── DiscoverySubgraph
-        └── ResultAggregator (结果聚合)
+    OrchestratorGraph (父图)
+        ├── router (路由节点) - 分析查询意图，决定调用哪些子图
+        ├── search_subgraph (搜索子图)
+        ├── table_subgraph (表格子图)
+        ├── reference_subgraph (引用子图)
+        ├── discovery_subgraph (发现子图)
+        └── aggregator (聚合节点) - 合并所有子图结果
+
+关键特性:
+    - 子图作为父图节点，通过节点函数调用 subgraph.invoke()
+    - 状态转换在节点函数中完成（父图状态 <-> 子图状态）
+    - 条件边实现动态路由
+    - 支持顺序和并行执行模式
 """
 
+import asyncio
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
 import httpx
+from langchain_core.messages import BaseMessage
 from langchain_openai import ChatOpenAI
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.graph import CompiledGraph
+from langgraph.graph.message import add_messages
 from loguru import logger
 
 from grid_code.agents.base import AgentResponse, BaseGridCodeAgent
@@ -29,14 +38,16 @@ from grid_code.agents.events import (
     text_delta_event,
     thinking_event,
 )
-from grid_code.agents.langgraph.subgraphs import SUBGRAPH_CLASSES, create_subgraph
+from grid_code.agents.langgraph.subgraphs import (
+    SubgraphBuilder,
+    SubgraphOutput,
+    create_subgraph_builder,
+)
 from grid_code.agents.llm_timing import LLMTimingCollector
 from grid_code.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from grid_code.config import get_settings
 from grid_code.orchestrator.aggregator import ResultAggregator
-from grid_code.orchestrator.analyzer import QueryAnalyzer
-from grid_code.orchestrator.router import SubagentRouter
-from grid_code.subagents.base import BaseSubagent, SubagentContext
+from grid_code.orchestrator.analyzer import QueryAnalyzer, QueryIntent
 from grid_code.subagents.config import (
     DISCOVERY_AGENT_CONFIG,
     REFERENCE_AGENT_CONFIG,
@@ -45,6 +56,7 @@ from grid_code.subagents.config import (
     SubagentType,
 )
 from grid_code.subagents.prompts import inject_prompt_to_config
+from grid_code.subagents.result import SubagentResult
 
 # 在模块加载时注入提示词到配置
 inject_prompt_to_config()
@@ -53,21 +65,65 @@ if TYPE_CHECKING:
     from grid_code.mcp import GridCodeMCPClient
 
 
+# ============================================================================
+# Orchestrator State Definitions
+# ============================================================================
+
+
+class OrchestratorState(TypedDict):
+    """Orchestrator 父图状态
+
+    这是父图的状态，与子图状态（SubgraphState）分离。
+    """
+
+    messages: Annotated[list[BaseMessage], add_messages]
+    """消息历史"""
+
+    query: str
+    """原始用户查询"""
+
+    reg_id: str | None
+    """规程 ID"""
+
+    intent: QueryIntent | None
+    """查询意图分析结果"""
+
+    selected_subgraphs: list[str]
+    """选中的子图列表"""
+
+    subgraph_results: dict[str, SubgraphOutput]
+    """各子图的执行结果"""
+
+    final_content: str
+    """最终聚合内容"""
+
+    all_sources: list[str]
+    """所有来源"""
+
+    all_tool_calls: list[dict]
+    """所有工具调用"""
+
+
+# ============================================================================
+# LangGraph Orchestrator
+# ============================================================================
+
+
 class LangGraphOrchestrator(BaseGridCodeAgent):
     """LangGraph 协调器
 
-    使用 Subgraph 模式协调多个专家代理。
+    使用 LangGraph 原生父图-子图模式协调多个专家代理。
 
     工作流程:
-    1. QueryAnalyzer 分析查询意图
-    2. SubagentRouter 选择需要调用的 Subgraph
-    3. 执行 Subgraphs（顺序或并行）
-    4. ResultAggregator 聚合结果
+    1. router 节点: QueryAnalyzer 分析查询意图，选择子图
+    2. subgraph 节点: 执行选中的子图（顺序或并行）
+    3. aggregator 节点: 聚合所有子图结果
 
     特性:
-    - 上下文隔离：每个 Subgraph 持有独立的工具和提示词
-    - 灵活路由：基于关键词和意图分析选择 Subgraph
-    - 结果聚合：合并多个 Subgraph 的结果
+    - 原生子图组合：子图作为父图节点，通过 invoke() 调用
+    - 状态隔离：父图状态和子图状态分离
+    - 灵活路由：基于意图分析的条件边
+    - 结果聚合：合并多个子图的结果
 
     Usage:
         async with LangGraphOrchestrator(reg_id="angui_2024") as agent:
@@ -118,13 +174,15 @@ class LangGraphOrchestrator(BaseGridCodeAgent):
         # MCP 客户端（延迟初始化）
         self._mcp_client: GridCodeMCPClient | None = None
 
-        # Subgraphs（延迟初始化）
-        self._subgraphs: dict[SubagentType, BaseSubagent] = {}
+        # Subgraph Builders（延迟初始化）
+        self._subgraph_builders: dict[SubagentType, SubgraphBuilder] = {}
 
         # 协调组件
         self._analyzer = QueryAnalyzer()
-        self._router: SubagentRouter | None = None
         self._aggregator = ResultAggregator()
+
+        # 父图（延迟初始化）
+        self._orchestrator_graph: CompiledGraph | None = None
 
         # 会话 ID
         self._thread_id: str = self._generate_thread_id()
@@ -197,20 +255,20 @@ class LangGraphOrchestrator(BaseGridCodeAgent):
             self._mcp_client = self._mcp_manager.get_langgraph_client()
             await self._mcp_client.connect()
 
-            # 创建 Subgraphs
-            self._subgraphs = self._create_subgraphs()
+            # 创建 Subgraph Builders
+            self._subgraph_builders = self._create_subgraph_builders()
 
-            # 创建路由器
-            self._router = SubagentRouter(self._subgraphs, mode=self._mode)
+            # 构建父图
+            self._orchestrator_graph = self._build_orchestrator_graph()
 
             logger.debug(
                 f"Orchestrator initialized with subgraphs: "
-                f"{list(self._subgraphs.keys())}"
+                f"{list(self._subgraph_builders.keys())}"
             )
 
-    def _create_subgraphs(self) -> dict[SubagentType, BaseSubagent]:
-        """创建 Subgraph 实例"""
-        subgraphs = {}
+    def _create_subgraph_builders(self) -> dict[SubagentType, SubgraphBuilder]:
+        """创建 SubgraphBuilder 实例"""
+        builders = {}
 
         # 配置映射
         configs = {
@@ -228,11 +286,162 @@ class LangGraphOrchestrator(BaseGridCodeAgent):
             if not config.enabled:
                 continue
 
-            # 创建 Subgraph
-            subgraph = create_subgraph(config, self._llm, self._mcp_client)
-            subgraphs[agent_type] = subgraph
+            # 创建 SubgraphBuilder
+            builder = create_subgraph_builder(config, self._llm, self._mcp_client)
+            builders[agent_type] = builder
 
-        return subgraphs
+        return builders
+
+    def _build_orchestrator_graph(self) -> CompiledGraph:
+        """构建 Orchestrator 父图
+
+        父图结构:
+            START -> router -> [subgraph nodes] -> aggregator -> END
+        """
+        # 获取可用的子图类型
+        available_types = list(self._subgraph_builders.keys())
+
+        # ====================================================================
+        # 定义节点函数
+        # ====================================================================
+
+        async def router_node(state: OrchestratorState) -> dict:
+            """路由节点：分析意图并选择子图"""
+            query = state["query"]
+
+            # 分析意图
+            intent = await self._analyzer.analyze(query)
+            logger.debug(
+                f"Query intent: primary={intent.primary_type}, "
+                f"secondary={intent.secondary_types}"
+            )
+
+            # 确定要调用的子图
+            selected = []
+
+            # 添加主要子图
+            if intent.primary_type in self._subgraph_builders:
+                selected.append(intent.primary_type.value)
+
+            # 添加次要子图
+            for agent_type in intent.secondary_types:
+                if (
+                    agent_type in self._subgraph_builders
+                    and agent_type.value not in selected
+                ):
+                    selected.append(agent_type.value)
+
+            # 如果没有匹配，回退到 SearchAgent
+            if not selected and SubagentType.SEARCH in self._subgraph_builders:
+                selected.append(SubagentType.SEARCH.value)
+
+            return {
+                "intent": intent,
+                "selected_subgraphs": selected,
+            }
+
+        async def execute_subgraphs_node(state: OrchestratorState) -> dict:
+            """执行子图节点
+
+            根据 mode 配置决定顺序或并行执行。
+            """
+            selected = state["selected_subgraphs"]
+            query = state["query"]
+            reg_id = state["reg_id"]
+            intent = state["intent"]
+            hints = intent.hints if intent else {}
+
+            results: dict[str, SubgraphOutput] = {}
+            all_sources: list[str] = []
+            all_tool_calls: list[dict] = []
+
+            if self._mode == "parallel":
+                # 并行执行
+                tasks = []
+                for type_value in selected:
+                    agent_type = SubagentType(type_value)
+                    builder = self._subgraph_builders[agent_type]
+                    tasks.append(builder.invoke(query, reg_id, hints))
+
+                outputs = await asyncio.gather(*tasks, return_exceptions=True)
+
+                for i, output in enumerate(outputs):
+                    type_value = selected[i]
+                    if isinstance(output, Exception):
+                        results[type_value] = SubgraphOutput(
+                            content="",
+                            sources=[],
+                            tool_calls=[],
+                            success=False,
+                            error=str(output),
+                        )
+                    else:
+                        results[type_value] = output
+                        all_sources.extend(output["sources"])
+                        all_tool_calls.extend(output["tool_calls"])
+            else:
+                # 顺序执行
+                for type_value in selected:
+                    agent_type = SubagentType(type_value)
+                    builder = self._subgraph_builders[agent_type]
+
+                    output = await builder.invoke(query, reg_id, hints)
+                    results[type_value] = output
+                    all_sources.extend(output["sources"])
+                    all_tool_calls.extend(output["tool_calls"])
+
+            return {
+                "subgraph_results": results,
+                "all_sources": all_sources,
+                "all_tool_calls": all_tool_calls,
+            }
+
+        async def aggregator_node(state: OrchestratorState) -> dict:
+            """聚合节点：合并子图结果"""
+            results = state["subgraph_results"]
+            query = state["query"]
+
+            # 转换为 SubagentResult 列表
+            subagent_results = []
+            for type_value, output in results.items():
+                agent_type = SubagentType(type_value)
+                subagent_results.append(
+                    SubagentResult(
+                        agent_type=agent_type,
+                        success=output["success"],
+                        content=output["content"],
+                        sources=output["sources"],
+                        tool_calls=output["tool_calls"],
+                        error=output["error"],
+                    )
+                )
+
+            # 使用 ResultAggregator 聚合
+            aggregated = self._aggregator.aggregate(subagent_results, query)
+
+            return {
+                "final_content": aggregated.content,
+            }
+
+        # ====================================================================
+        # 构建父图
+        # ====================================================================
+
+        builder = StateGraph(OrchestratorState)
+
+        # 添加节点
+        builder.add_node("router", router_node)
+        builder.add_node("execute_subgraphs", execute_subgraphs_node)
+        builder.add_node("aggregator", aggregator_node)
+
+        # 添加边
+        builder.add_edge(START, "router")
+        builder.add_edge("router", "execute_subgraphs")
+        builder.add_edge("execute_subgraphs", "aggregator")
+        builder.add_edge("aggregator", END)
+
+        # 编译
+        return builder.compile()
 
     async def chat(self, message: str) -> AgentResponse:
         """与协调器对话
@@ -256,37 +465,30 @@ class LangGraphOrchestrator(BaseGridCodeAgent):
         await self._callback.on_event(thinking_event(start=True))
 
         try:
-            # 1. 分析查询意图
-            intent = await self._analyzer.analyze(message)
-            logger.debug(
-                f"Query intent: primary={intent.primary_type}, "
-                f"secondary={intent.secondary_types}, "
-                f"multi_hop={intent.requires_multi_hop}"
-            )
+            # 构建初始状态
+            initial_state: OrchestratorState = {
+                "messages": [],
+                "query": message,
+                "reg_id": self.reg_id,
+                "intent": None,
+                "selected_subgraphs": [],
+                "subgraph_results": {},
+                "final_content": "",
+                "all_sources": [],
+                "all_tool_calls": [],
+            }
 
-            # 2. 构建上下文
-            context = SubagentContext(
-                query=message,
-                reg_id=self.reg_id,
-                chapter_scope=intent.hints.get("chapter_scope"),
-                hints=intent.hints,
-                max_iterations=5,
-            )
+            # 执行父图
+            result_state = await self._orchestrator_graph.ainvoke(initial_state)
 
-            # 3. 路由和执行
-            results = await self._router.execute(intent, context)
-
-            # 4. 聚合结果
-            aggregated = self._aggregator.aggregate(results, message)
-
-            # 收集所有工具调用和来源
-            for result in results:
-                self._tool_calls.extend(result.tool_calls)
-                self._sources.extend(result.sources)
+            # 提取结果
+            final_content = result_state.get("final_content", "")
+            self._sources = result_state.get("all_sources", [])
+            self._tool_calls = result_state.get("all_tool_calls", [])
 
             # 发送文本事件
-            if aggregated.content:
-                await self._callback.on_event(text_delta_event(aggregated.content))
+            if final_content:
+                await self._callback.on_event(text_delta_event(final_content))
 
             # 发送思考结束事件
             await self._callback.on_event(thinking_event(start=False))
@@ -304,7 +506,11 @@ class LangGraphOrchestrator(BaseGridCodeAgent):
                 )
             )
 
-            return self._aggregator.to_agent_response(aggregated)
+            return AgentResponse(
+                content=final_content,
+                sources=list(set(self._sources)),
+                tool_calls=self._tool_calls,
+            )
 
         except Exception as e:
             logger.exception(f"Orchestrator execution error: {e}")
@@ -323,9 +529,9 @@ class LangGraphOrchestrator(BaseGridCodeAgent):
         self._tool_calls = []
         self._sources = []
 
-        # 重置所有 Subgraph
-        for subgraph in self._subgraphs.values():
-            await subgraph.reset()
+        # 重置所有 SubgraphBuilder
+        for builder in self._subgraph_builders.values():
+            builder.reset_tracking()
 
         logger.debug(f"Session reset, new thread_id: {self._thread_id}")
 
@@ -334,8 +540,8 @@ class LangGraphOrchestrator(BaseGridCodeAgent):
         if self._mcp_client:
             await self._mcp_client.disconnect()
             self._mcp_client = None
-            self._subgraphs = {}
-            self._router = None
+            self._subgraph_builders = {}
+            self._orchestrator_graph = None
             logger.debug("MCP client disconnected")
 
         if hasattr(self, "_ollama_http_client") and self._ollama_http_client:

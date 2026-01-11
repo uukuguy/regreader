@@ -9,6 +9,7 @@ Subagents 架构将单一的 GridCode Agent 分解为多个专业化的子代理
 - **上下文隔离**: 减轻主 Agent 的上下文压力，从 ~4000 tokens 降至 ~800 tokens
 - **专业化处理**: 每个 Subagent 专注于特定领域（搜索、表格、引用等）
 - **框架统一**: 三个框架（Claude/Pydantic/LangGraph）共享相同的 Subagent 定义
+- **原生模式**: 每个框架使用其原生的子代理/委托模式
 - **可扩展性**: 易于添加新的 Subagent 类型
 
 ### 1.2 架构对比
@@ -60,13 +61,13 @@ src/grid_code/
 │   │
 │   ├── pydantic/                 # Pydantic AI 实现
 │   │   ├── __init__.py
-│   │   ├── orchestrator.py       # PydanticOrchestrator
-│   │   └── subagents.py          # Pydantic Subagent 实现
+│   │   ├── orchestrator.py       # PydanticOrchestrator (使用 @tool 委托)
+│   │   └── subagents.py          # SubagentBuilder 实现
 │   │
 │   └── langgraph/                # LangGraph 实现
 │       ├── __init__.py
-│       ├── orchestrator.py       # LangGraphOrchestrator
-│       └── subgraphs.py          # Subgraph 实现
+│       ├── orchestrator.py       # LangGraphOrchestrator (父图)
+│       └── subgraphs.py          # SubgraphBuilder 实现
 ```
 
 ## 3. 核心接口
@@ -211,47 +212,172 @@ class BaseClaudeSubagent(BaseSubagent):
         )
 ```
 
-### 5.2 Pydantic AI
+### 5.2 Pydantic AI（原生委托模式）
 
-**模式**: Dependent Agents（依赖代理）
+**模式**: Agent Delegation（代理委托）
 
 **特点**:
-- Subagents 作为 tools 注册到 Orchestrator
-- 创建过滤的 `MCPServerStdio`，仅暴露指定工具
-- 通过 `register_tool` 动态注册
+- Orchestrator 通过 `@tool` 装饰器注册委托工具
+- 使用 `ctx.deps` 传递共享依赖
+- 使用 `ctx.usage` 聚合所有 Subagent 的 token 消耗
 
-**关键代码**:
-```python
-class BasePydanticSubagent(BaseSubagent):
-    def _get_allowed_tools(self) -> list[str]:
-        return [get_tool_name(name) for name in self.config.tools]
-
-    async def execute(self, context: SubagentContext) -> SubagentResult:
-        allowed_tools = self._get_allowed_tools()
-        async with self._mcp_manager.get_connection(allowed_tools) as server:
-            agent = Agent(model=self._model, mcp_servers=[server], ...)
-            result = await agent.run(context.query)
+**架构图**:
+```
+OrchestratorAgent (主协调器 Agent)
+    ├── @tool call_search_agent(ctx, query) -> 调用 SearchSubagent
+    ├── @tool call_table_agent(ctx, query) -> 调用 TableSubagent
+    ├── @tool call_reference_agent(ctx, query) -> 调用 ReferenceSubagent
+    └── @tool call_discovery_agent(ctx, query) -> 调用 DiscoverySubagent
 ```
 
-### 5.3 LangGraph
-
-**模式**: Subgraphs（子图）
-
-**特点**:
-- 每个 Subagent 是独立的 `StateGraph`
-- `SubgraphState` 与 `OrchestratorState` 分离
-- 通过 `compile()` 生成可执行图
-
 **关键代码**:
 ```python
-class BaseLangGraphSubagent(BaseSubagent):
-    def _create_graph(self) -> CompiledGraph:
-        builder = StateGraph(SubgraphState)
-        builder.add_node("agent", self._agent_node)
-        builder.add_node("tools", self._tool_node)
-        builder.add_edge(START, "agent")
-        builder.add_conditional_edges("agent", self._should_continue)
-        return builder.compile()
+# 依赖定义
+@dataclass
+class OrchestratorDependencies:
+    reg_id: str | None = None
+    mcp_server: Any = None
+    subagent_builders: dict[SubagentType, SubagentBuilder] = field(default_factory=dict)
+    subagent_agents: dict[SubagentType, Any] = field(default_factory=dict)
+    hints: dict[str, Any] = field(default_factory=dict)
+
+# 注册委托工具
+@orchestrator.tool
+async def call_search_agent(
+    ctx: RunContext[OrchestratorDependencies],
+    query: str,
+) -> str:
+    """调用搜索专家代理"""
+    return await _invoke_subagent(ctx, SubagentType.SEARCH, query)
+
+# 调用 Subagent（原生委托模式）
+async def _invoke_subagent(ctx, agent_type, query) -> str:
+    deps = ctx.deps
+    builder = deps.subagent_builders[agent_type]
+    subagent = deps.subagent_agents.get(agent_type) or builder.build(deps.mcp_server)
+
+    # 关键：传递 usage 以聚合 token 消耗
+    output = await builder.invoke(
+        subagent,
+        query,
+        subagent_deps,
+        usage=ctx.usage,  # ← Pydantic AI 原生使用量追踪
+    )
+    return output.content
+```
+
+**SubagentBuilder API**:
+```python
+class SubagentBuilder:
+    """Pydantic AI Subagent 构建器"""
+
+    def __init__(self, config: SubagentConfig, model: str): ...
+
+    def build(self, mcp_server: MCPServerStdio) -> Agent[SubagentDependencies, str]:
+        """构建 Agent 实例"""
+        ...
+
+    async def invoke(
+        self,
+        agent: Agent,
+        query: str,
+        deps: SubagentDependencies,
+        usage: Usage | None = None,
+    ) -> SubagentOutput:
+        """调用 Subagent（传递 usage 以聚合使用量）"""
+        ...
+```
+
+### 5.3 LangGraph（原生子图模式）
+
+**模式**: Subgraphs（子图组合）
+
+**特点**:
+- 父图（Orchestrator）和子图（Subagent）使用独立的 State 定义
+- 子图作为父图节点，通过 `builder.invoke()` 调用
+- 状态转换在节点函数中完成
+
+**架构图**:
+```
+OrchestratorGraph (父图 StateGraph)
+    ├── router_node (路由节点)
+    │       └── QueryAnalyzer 分析意图
+    │
+    ├── execute_subgraphs_node (执行节点)
+    │       └── 调用 SubgraphBuilder.invoke()
+    │
+    └── aggregator_node (聚合节点)
+            └── ResultAggregator 聚合结果
+
+SubgraphBuilder.invoke()
+    └── CompiledGraph.ainvoke(SubgraphState)
+            ├── agent_node (LLM 调用)
+            ├── tools_node (工具执行)
+            └── should_continue (条件边)
+```
+
+**状态定义**:
+```python
+# 父图状态
+class OrchestratorState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+    query: str
+    reg_id: str | None
+    intent: QueryIntent | None
+    selected_subgraphs: list[str]
+    subgraph_results: dict[str, SubgraphOutput]
+    final_content: str
+    all_sources: list[str]
+    all_tool_calls: list[dict]
+
+# 子图状态（独立）
+class SubgraphState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+    query: str
+    reg_id: str | None
+    hints: dict[str, Any]
+```
+
+**SubgraphBuilder API**:
+```python
+class SubgraphBuilder:
+    """LangGraph Subgraph 构建器"""
+
+    def __init__(self, config: SubagentConfig, llm: ChatOpenAI, mcp_client: GridCodeMCPClient): ...
+
+    def build(self) -> CompiledGraph:
+        """构建并编译 Subgraph"""
+        ...
+
+    async def invoke(
+        self,
+        query: str,
+        reg_id: str | None = None,
+        hints: dict[str, Any] | None = None,
+    ) -> SubgraphOutput:
+        """调用 Subgraph"""
+        ...
+```
+
+**父图节点实现**:
+```python
+async def execute_subgraphs_node(state: OrchestratorState) -> dict:
+    """执行选中的 Subgraph"""
+    results = {}
+
+    for subgraph_name in state["selected_subgraphs"]:
+        builder = subgraph_builders[subgraph_name]
+
+        # 调用子图（状态转换在此完成）
+        output = await builder.invoke(
+            query=state["query"],
+            reg_id=state["reg_id"],
+            hints=state.get("intent", {}).hints if state.get("intent") else {},
+        )
+
+        results[subgraph_name] = output
+
+    return {"subgraph_results": results}
 ```
 
 ## 6. 协调层
@@ -303,8 +429,28 @@ gridcode chat -r angui_2024 --agent langgraph -o
 
 ### 7.2 编程接口
 
+**LangGraph**:
 ```python
-from grid_code.agents import ClaudeOrchestrator
+from grid_code.agents.langgraph import LangGraphOrchestrator
+
+async with LangGraphOrchestrator(reg_id="angui_2024") as orchestrator:
+    response = await orchestrator.chat("表6-2中注1的内容是什么？")
+    print(response.content)
+```
+
+**Pydantic AI**:
+```python
+from grid_code.agents.pydantic import PydanticOrchestrator
+
+async with PydanticOrchestrator(reg_id="angui_2024") as orchestrator:
+    response = await orchestrator.chat("表6-2中注1的内容是什么？")
+    print(response.content)
+    # 使用量已通过 ctx.usage 自动聚合
+```
+
+**Claude SDK**:
+```python
+from grid_code.agents.claude import ClaudeOrchestrator
 
 async with ClaudeOrchestrator(reg_id="angui_2024") as orchestrator:
     response = await orchestrator.chat("表6-2中注1的内容是什么？")
@@ -342,6 +488,7 @@ orchestrator_mode: str = "sequential"      # sequential / parallel
 - 每个 Subagent 调用产生独立的 API 请求
 - 简单查询可能比单一 Agent 更昂贵
 - 复杂查询通过专业化处理可能更高效
+- Pydantic AI 通过 `ctx.usage` 自动追踪所有 token 消耗
 
 ## 10. 扩展指南
 
@@ -366,7 +513,18 @@ class CustomRouter(SubagentRouter):
         ...
 ```
 
-## 11. 测试
+## 11. 框架对比
+
+| 特性 | Claude SDK | Pydantic AI | LangGraph |
+|------|------------|-------------|-----------|
+| 模式 | Handoff Pattern | Agent Delegation | Subgraphs |
+| 状态隔离 | 独立实例 | deps 传递 | State 分离 |
+| 工具过滤 | allowed_tools | prompt 限制 | 独立 MCP Client |
+| 使用量追踪 | 手动 | ctx.usage 原生 | 手动 |
+| 依赖注入 | - | ctx.deps 原生 | 状态传递 |
+| 适用场景 | Anthropic API | 通用 OpenAI 兼容 | 复杂工作流 |
+
+## 12. 测试
 
 ```bash
 # 单元测试
@@ -376,3 +534,10 @@ pytest tests/orchestrator/ -xvs
 # 集成测试
 pytest tests/agents/test_orchestrator_integration.py -xvs
 ```
+
+## 13. 更新历史
+
+| 日期 | 版本 | 变更 |
+|------|------|------|
+| 2025-01-11 | v2.0 | 重构为原生模式：LangGraph 使用子图组合，Pydantic AI 使用 @tool 委托 + deps/usage |
+| 2025-01-10 | v1.0 | 初始 Subagents 架构实现 |

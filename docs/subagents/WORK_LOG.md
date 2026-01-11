@@ -111,3 +111,148 @@ CLI 帮助显示正确：
 2. **缓存机制**: 对于重复查询可以缓存 Subagent 结果
 3. **动态工具选择**: 根据历史执行结果动态调整工具权重
 4. **监控与调试**: 添加更详细的执行日志和性能指标
+
+---
+
+## 2025-01-11 工作记录
+
+### 任务目标
+
+验证并重构 LangGraph 和 Pydantic AI 的 Subagent 实现，确保使用各框架的原生模式：
+- **LangGraph**: 使用 Subgraphs（子图组合）模式
+- **Pydantic AI**: 使用委托（@tool）和依赖注入（deps/usage）模式
+
+### 问题分析
+
+通过 Context7 查询官方文档，发现原有实现存在以下偏差：
+
+#### Pydantic AI 问题
+- 使用 `FilteredMCPToolset` workaround 过滤工具
+- 未使用原生的 `@tool` 装饰器委托模式
+- 未利用 `ctx.deps` 依赖注入和 `ctx.usage` 使用量追踪
+
+#### LangGraph 问题（前一会话已修复）
+- 手动状态管理，未使用子图作为父图节点
+- 状态转换逻辑复杂，缺少父子状态隔离
+
+### 重构内容
+
+#### 1. Pydantic AI 原生委托模式重构
+
+**`src/grid_code/agents/pydantic/subagents.py`** - 完全重写
+
+新增核心类：
+```python
+@dataclass
+class SubagentDependencies:
+    """Subagent 共享依赖，通过 ctx.deps 传递"""
+    reg_id: str | None = None
+    mcp_server: Any = None
+    hints: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class SubagentOutput:
+    """Subagent 输出结果"""
+    content: str
+    sources: list[str] = field(default_factory=list)
+    tool_calls: list[dict] = field(default_factory=list)
+    success: bool = True
+    error: str | None = None
+
+class SubagentBuilder:
+    """Pydantic AI Subagent 构建器"""
+    def build(self, mcp_server: MCPServerStdio) -> Agent[SubagentDependencies, str]: ...
+    async def invoke(self, agent, query, deps, usage=None) -> SubagentOutput: ...
+```
+
+**`src/grid_code/agents/pydantic/orchestrator.py`** - 完全重写
+
+原生委托模式实现：
+```python
+@dataclass
+class OrchestratorDependencies:
+    """Orchestrator 依赖"""
+    reg_id: str | None = None
+    mcp_server: Any = None
+    subagent_builders: dict[SubagentType, SubagentBuilder] = field(default_factory=dict)
+    subagent_agents: dict[SubagentType, Any] = field(default_factory=dict)
+    hints: dict[str, Any] = field(default_factory=dict)
+
+# @tool 装饰器注册委托工具
+@orchestrator.tool
+async def call_search_agent(ctx: RunContext[OrchestratorDependencies], query: str) -> str:
+    """委托给搜索专家处理"""
+    return await _invoke_subagent(ctx, SubagentType.SEARCH, query)
+
+# 使用量聚合
+async def _invoke_subagent(ctx, agent_type, query) -> str:
+    output = await builder.invoke(subagent, query, subagent_deps, usage=ctx.usage)
+    return output.content
+```
+
+#### 2. LangGraph 原生子图模式（前一会话已完成）
+
+**`src/grid_code/agents/langgraph/subgraphs.py`** - 状态隔离
+```python
+class SubgraphState(TypedDict):
+    """子图独立状态"""
+    query: str
+    reg_id: str
+    output: SubgraphOutput
+
+class SubgraphBuilder:
+    def build(self) -> CompiledGraph: ...
+```
+
+**`src/grid_code/agents/langgraph/orchestrator.py`** - 父图组合
+```python
+class OrchestratorState(TypedDict):
+    """父图状态"""
+    query: str
+    reg_id: str
+    subgraph_outputs: dict[str, SubgraphOutput]
+    final_answer: str
+
+# 子图作为父图节点
+def _create_subgraph_node(self, builder: SubgraphBuilder):
+    async def node(state: OrchestratorState) -> dict:
+        subgraph_state = SubgraphState(query=state["query"], reg_id=state["reg_id"])
+        result = await subgraph.ainvoke(subgraph_state)
+        return {"subgraph_outputs": {builder.name: result["output"]}}
+    return node
+```
+
+### 修改文件列表
+
+| 文件 | 修改类型 | 说明 |
+|------|----------|------|
+| `src/grid_code/agents/pydantic/subagents.py` | 重写 | 新增 SubagentBuilder，保留 Legacy 类向后兼容 |
+| `src/grid_code/agents/pydantic/orchestrator.py` | 重写 | 使用 @tool 委托模式 + deps/usage 传递 |
+| `src/grid_code/agents/pydantic/__init__.py` | 更新 | 导出新 API + Legacy 类 |
+| `src/grid_code/agents/langgraph/__init__.py` | 更新 | 导出新 API + Legacy 类 |
+| `docs/subagents/SUBAGENTS_ARCHITECTURE.md` | 更新 | 新增 5.2/5.3 原生模式说明、框架对比表、更新历史 |
+
+### 验证结果
+
+导入验证通过：
+```bash
+python -c "from grid_code.agents.pydantic import SubagentBuilder, PydanticOrchestrator; print('OK')"
+python -c "from grid_code.agents.langgraph import SubgraphBuilder, LangGraphOrchestrator; print('OK')"
+```
+
+### 框架对比总结
+
+| 特性 | Pydantic AI | LangGraph |
+|------|-------------|-----------|
+| 子代理模式 | @tool 委托 | 子图组合 |
+| 依赖注入 | ctx.deps | state 传递 |
+| 使用量追踪 | ctx.usage 自动聚合 | 手动管理 |
+| 状态隔离 | Agent 实例隔离 | TypedDict 类型隔离 |
+| 工具限制 | system prompt 指示 | 子图独立工具集 |
+
+### 后续优化方向
+
+1. **运行时验证**: 在实际 MCP Server 环境中验证完整流程
+2. **性能测试**: 对比重构前后的响应延迟和 token 消耗
+3. **错误处理增强**: 添加子代理调用失败的重试和降级机制
+4. **监控集成**: 添加 OpenTelemetry span 追踪子代理调用链
