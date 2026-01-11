@@ -5,11 +5,17 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 
 class SubagentType(str, Enum):
     """Subagent 类型枚举"""
 
+    # 领域子代理（Domain Subagents）
+    REGSEARCH = "regsearch"
+    """规程检索代理：整合搜索、表格、引用、发现功能的领域子代理"""
+
+    # 内部组件子代理（作为 REGSEARCH 的内部组件）
     SEARCH = "search"
     """搜索代理：文档搜索与导航"""
 
@@ -21,6 +27,13 @@ class SubagentType(str, Enum):
 
     DISCOVERY = "discovery"
     """发现代理：高级语义分析（可选）"""
+
+    # 支撑子代理（Support Subagents，预留）
+    EXEC = "exec"
+    """执行代理：脚本执行（预留）"""
+
+    VALIDATOR = "validator"
+    """验证代理：结果验证（预留）"""
 
 
 @dataclass
@@ -84,6 +97,30 @@ class SubagentConfig:
     max_iterations: int = 5
     """最大工具调用迭代次数"""
 
+    # ==================== Bash+FS 范式配置 ====================
+
+    work_dir: Path | None = None
+    """Subagent 工作目录（如 Path("subagents/regsearch")）
+
+    设置后启用文件系统模式，FileContext 将使用此目录。
+    None 表示使用传统内存模式。
+    """
+
+    scratch_dir: str = "scratch"
+    """临时结果目录名（相对于 work_dir）"""
+
+    logs_dir: str = "logs"
+    """日志目录名（相对于 work_dir）"""
+
+    readable_dirs: list[str] = field(default_factory=lambda: ["shared/"])
+    """可读目录列表（相对于项目根目录）"""
+
+    writable_dirs: list[str] = field(default_factory=list)
+    """可写目录列表（相对于项目根目录）
+
+    默认为空，将自动添加 work_dir/scratch 和 work_dir/logs
+    """
+
     def __post_init__(self):
         """验证配置"""
         if not self.tools:
@@ -94,6 +131,58 @@ class SubagentConfig:
 
 # ==================== 预定义配置 ====================
 
+# 领域子代理配置
+REGSEARCH_AGENT_CONFIG = SubagentConfig(
+    agent_type=SubagentType.REGSEARCH,
+    name="RegSearchAgent",
+    description="规程文档检索领域专家，整合搜索、表格、引用、发现功能",
+    tools=[
+        # BASE 工具
+        "list_regulations",
+        "get_toc",
+        "smart_search",
+        "read_page_range",
+        # MULTI_HOP 工具
+        "lookup_annotation",
+        "search_tables",
+        "resolve_reference",
+        # CONTEXT 工具
+        "search_annotations",
+        "get_table_by_id",
+        "get_block_with_context",
+        # DISCOVERY 工具
+        "find_similar_content",
+        "compare_sections",
+        # NAVIGATION 工具
+        "get_tool_guide",
+        "get_chapter_structure",
+        "read_chapter_content",
+    ],
+    capabilities=[
+        "regulation_discovery",
+        "chapter_navigation",
+        "content_search",
+        "page_retrieval",
+        "table_search",
+        "table_extraction",
+        "annotation_lookup",
+        "reference_resolution",
+        "similarity_search",
+    ],
+    keywords=[
+        "查找", "搜索", "哪里", "什么是", "规定", "要求",
+        "如何", "怎么", "处理", "措施",
+        "表格", "表", "清单", "列表", "注释",
+        "见", "参见", "参照",
+    ],
+    priority=1,
+    enabled=True,
+    max_iterations=10,
+    work_dir=Path("subagents/regsearch"),
+    readable_dirs=["shared/", "coordinator/plan.md"],
+)
+
+# 内部组件子代理配置
 SEARCH_AGENT_CONFIG = SubagentConfig(
     agent_type=SubagentType.SEARCH,
     name="SearchAgent",
@@ -217,6 +306,9 @@ DISCOVERY_AGENT_CONFIG = SubagentConfig(
 
 # 配置注册表
 SUBAGENT_CONFIGS: dict[SubagentType, SubagentConfig] = {
+    # 领域子代理
+    SubagentType.REGSEARCH: REGSEARCH_AGENT_CONFIG,
+    # 内部组件子代理
     SubagentType.SEARCH: SEARCH_AGENT_CONFIG,
     SubagentType.TABLE: TABLE_AGENT_CONFIG,
     SubagentType.REFERENCE: REFERENCE_AGENT_CONFIG,

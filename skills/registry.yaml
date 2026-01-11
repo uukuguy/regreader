@@ -1,0 +1,140 @@
+# GridCode 技能注册表
+
+# 可复用的工作流技能
+
+skills:
+  # 简单搜索技能
+  - name: simple_search
+    description: 简单文档搜索工作流
+    entry_point: skills/simple_search/workflow.py
+    required_tools:
+      - get_toc
+      - smart_search
+      - read_page_range
+    subagents:
+      - regsearch
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: 搜索查询
+        reg_id:
+          type: string
+          description: 规程标识
+        chapter_scope:
+          type: string
+          description: 章节范围（可选）
+      required:
+        - query
+        - reg_id
+    output_schema:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              content:
+                type: string
+              source:
+                type: string
+              relevance:
+                type: number
+    tags:
+      - search
+      - basic
+    version: "1.0.0"
+
+  # 表格查询技能
+  - name: table_lookup
+    description: 表格搜索与提取工作流
+    entry_point: skills/table_lookup/workflow.py
+    required_tools:
+      - search_tables
+      - get_table_by_id
+      - lookup_annotation
+    subagents:
+      - regsearch
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: 表格搜索查询
+        reg_id:
+          type: string
+          description: 规程标识
+        table_id:
+          type: string
+          description: 表格ID（可选，直接查询）
+      required:
+        - reg_id
+    output_schema:
+      type: object
+      properties:
+        tables:
+          type: array
+          items:
+            type: object
+            properties:
+              table_id:
+                type: string
+              caption:
+                type: string
+              cells:
+                type: array
+              source:
+                type: string
+    tags:
+      - table
+      - extraction
+    version: "1.0.0"
+
+  # 交叉引用技能
+  - name: cross_ref
+    description: 交叉引用解析工作流
+    entry_point: skills/cross_ref/workflow.py
+    required_tools:
+      - resolve_reference
+      - read_page_range
+      - get_chapter_structure
+    subagents:
+      - regsearch
+    input_schema:
+      type: object
+      properties:
+        reference_text:
+          type: string
+          description: 引用文本（如"见第六章"）
+        reg_id:
+          type: string
+          description: 规程标识
+        context:
+          type: string
+          description: 上下文信息（可选）
+      required:
+        - reference_text
+        - reg_id
+    output_schema:
+      type: object
+      properties:
+        resolved:
+          type: boolean
+        target:
+          type: object
+          properties:
+            section:
+              type: string
+            page_range:
+              type: string
+            content:
+              type: string
+        chain:
+          type: array
+          description: 引用链（如果是多级引用）
+    tags:
+      - reference
+      - navigation
+    version: "1.0.0"
