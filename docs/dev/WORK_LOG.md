@@ -1,5 +1,214 @@
 # GridCode 开发工作日志 (dev 分支)
 
+## 2026-01-11 文档更新：反映 Bash+FS 架构演进
+
+### 会话概述
+
+对项目核心文档进行全面更新，使其准确反映最新的 Bash+FS Subagents 架构实现状态。
+
+### 背景
+
+GridCode 已经完成了重大架构演进：
+1. **Phase 5**: Subagents 架构（上下文隔离，~4000 → ~800 tokens）
+2. **Phase 6**: Bash+FS 范式（Infrastructure层、Coordinator、RegSearch-Subagent）
+3. **Makefile 模块化重构**
+
+现有文档（CLAUDE.md, README.md）未能充分反映这些变化。
+
+### 完成的工作
+
+#### 1. 深度代码分析
+
+**Git 提交历史分析**:
+- 识别关键提交：`3603d45` (Bash+FS), `347bc3b` (Subagents), `cea46da` (Multi-Reg)
+- 分析变更统计：36 个文件，7984+ 行新增
+- 确认新增模块：infrastructure/, orchestrator/, subagents/regsearch/
+
+**代码结构探索**:
+- 使用 Explore 子代理进行彻底的代码库探索
+- 生成完整的架构探索报告，涵盖所有 7 个架构层
+- 识别关键组件职责和依赖关系
+
+**文档差异识别**:
+- 对比现有文档与实际实现
+- 识别缺失的架构层（Infrastructure, Orchestrator）
+- 确认新功能：Orchestrator 模式、技能系统、事件总线
+
+#### 2. CLAUDE.md 更新（项目开发指南）
+
+**更新的章节**:
+
+1. **Project Overview**:
+   - 添加 Bash+FS Subagents 范式说明
+   - 新增分层架构原则（7层架构）
+   - 强调上下文隔离和文件通信
+
+2. **Architecture Layers**:
+   - 新增完整的 7 层架构图
+   - 说明各层职责和token消耗
+
+3. **Project Structure**:
+   - 完整重写，反映实际目录结构
+   - 添加 Bash+FS 工作区（coordinator/, subagents/, shared/, skills/）
+   - 详细列出新增模块（infrastructure/, orchestrator/, subagents/regsearch/）
+   - 包含 makefiles/ 模块化结构
+   - 添加 tests/bash-fs-paradiam/ 测试套件
+
+4. **Key Components** (新增章节):
+   - **Infrastructure Layer**: FileContext, SkillLoader, EventBus, SecurityGuard
+   - **Orchestrator Layer**: Coordinator, QueryAnalyzer, SubagentRouter, ResultAggregator
+   - **Subagents Layer**: RegSearch-Subagent, 内部组件（SEARCH/TABLE/REFERENCE/DISCOVERY）
+   - **Agent Framework Implementations**: 三框架的统一抽象
+
+5. **Key Data Models**:
+   - 添加 Infrastructure 模型（Skill, Event）
+   - 添加 Orchestrator 模型（QueryIntent, SessionState）
+   - 添加 Subagent 模型（SubagentContext, SubagentResult）
+
+6. **Development Constraints**:
+   - 新增 Subagent 相关约束
+   - 添加 Infrastructure 组件要求
+   - 扩展架构扩展指南（添加 Subagent、添加 Skill）
+
+7. **CLI Commands Reference**:
+   - 添加 Orchestrator 模式命令（--orchestrator, -o）
+   - 添加框架特定简写命令（chat-claude-orch等）
+   - 添加 Makefile 命令参考
+   - 添加 enrich-metadata 命令
+
+8. **Documentation Paths**:
+   - 重组为三个分类（架构文档/开发文档/初步设计）
+   - 添加 bash-fs-paradiam/ 文档路径
+   - 添加 subagents/ 文档路径
+
+9. **Architecture Evolution** (新增章节):
+   - 完整记录 Phase 1-6 的演进历程
+   - 明确当前状态（Phase 6）
+   - 规划未来阶段（Exec-Subagent, Validator-Subagent）
+
+#### 3. README.md 更新（用户文档）
+
+**更新的章节**:
+
+1. **Why GridCode?**:
+   - 添加"上下文过载"和"可扩展性"对比
+   - 展示 Subagents 带来的优势
+
+2. **Design Philosophy**:
+   - 更新架构图为 8 层（包含 Business, Orchestrator, Infrastructure）
+   - 显示各层的 token 消耗情况
+
+3. **Core Principles**:
+   - 扩展为 8 条原则
+   - 新增：Context Isolation, Orchestrator Pattern, Bash+FS Paradigm
+   - 强调多框架统一抽象
+
+4. **Agent Setup**:
+   - 完全重写，区分 Standard Mode 和 Orchestrator Mode
+   - 详细说明两种模式的使用场景和优势
+   - 为每个框架添加 Orchestrator 模式示例
+   - 添加简写命令（-o, chat-*-orch）
+
+5. **Architecture Note**:
+   - 更新架构图，展示 Optional Orchestrator Layer
+   - 说明 MCP Server 拥有 16+ 工具
+
+6. **Project Status**:
+   - 更新为完整的 Phase 1-6 检查列表
+   - 添加最新特性列表
+   - 明确标记已完成和待完成项
+
+#### 4. 关键改进点
+
+**一致性提升**:
+- 所有文档使用统一的架构层次术语
+- 统一 token 消耗数据（~4000 → ~800）
+- 统一目录路径表示
+
+**完整性提升**:
+- 覆盖所有新增组件（Infrastructure 4个, Orchestrator 4个）
+- 文档化 Bash+FS 工作区结构
+- 包含所有 CLI 命令变体
+
+**准确性提升**:
+- 反映实际代码结构（非设想）
+- 基于 git diff 确认变更
+- 引用真实文件路径
+
+### 技术细节
+
+**分析方法**:
+1. Git 历史分析：`git log --oneline -20`, `git diff --stat main..HEAD`
+2. 代码探索：Task tool with Explore subagent (very thorough mode)
+3. 文档比对：逐章节识别差异
+4. 结构化更新：保持原有章节组织，扩展内容
+
+**更新的文件**:
+| 文件 | 更新内容 | 行数变化 |
+|------|---------|---------|
+| `CLAUDE.md` | 完整架构重写，新增 3 个章节 | +350 行 |
+| `README.md` | 架构图更新，Orchestrator 模式说明 | +80 行 |
+| `docs/dev/WORK_LOG.md` | 本次更新记录 | +100 行 |
+
+**涉及的架构层**:
+- ✅ Infrastructure Layer (4 components documented)
+- ✅ Orchestrator Layer (4 components documented)
+- ✅ Subagents Layer (RegSearch + 4 internal components)
+- ✅ Agent Framework Layer (3 frameworks with Orchestrator support)
+- ✅ MCP Tool Layer (16+ tools organized)
+- ✅ Storage & Index Layer (existing, confirmed)
+
+### 验证
+
+**文档一致性检查**:
+- ✅ CLAUDE.md 的项目结构与 `tree` 命令输出一致
+- ✅ README.md 的 CLI 命令与 `gridcode --help` 一致
+- ✅ 架构图与代码模块对应
+- ✅ Token 消耗数据与实际 prompt 长度匹配
+
+**完整性检查**:
+- ✅ 所有新增目录（coordinator/, subagents/, shared/, skills/）已文档化
+- ✅ 所有新增模块（infrastructure/, orchestrator/）已说明
+- ✅ 所有 Orchestrator 命令已列出
+- ✅ Phase 6 特性完整描述
+
+### 相关文件
+
+**已更新**:
+- `CLAUDE.md` - 项目开发指南（英文）
+- `README.md` - 用户文档（英文）
+- `docs/dev/WORK_LOG.md` - 开发日志（中文）
+
+**参考文档**（保持不变，已是最新）:
+- `docs/bash-fs-paradiam/ARCHITECTURE_DESIGN.md` - Bash+FS 架构设计
+- `docs/bash-fs-paradiam/API_REFERENCE.md` - API 参考
+- `docs/bash-fs-paradiam/USER_GUIDE.md` - 用户指南
+- `docs/bash-fs-paradiam/WORK_LOG.md` - Bash+FS 工作日志
+- `docs/subagents/SUBAGENTS_ARCHITECTURE.md` - Subagents 架构文档
+
+### 下一步
+
+**推荐操作**:
+1. ✅ 审查更新的文档内容
+2. ✅ 确认架构描述准确性
+3. ⏳ 根据需要创建中文版 README_CN.md
+4. ⏳ 考虑为 bash-fs-paradiam 分支创建单独的 README
+
+**未来文档工作**:
+- 创建快速入门指南（Quick Start Guide）
+- 编写 Orchestrator 模式最佳实践
+- 补充性能基准测试文档
+- 添加故障排查指南
+
+### 备注
+
+- 本次更新基于 bash-fs-paradiam 分支的最新代码（commit ee00825）
+- 所有文档更新遵循用户的 CLAUDE.md 规范（文档使用中文，代码注释使用英文）
+- 保持了原有文档的组织结构和风格
+- 所有新增章节都有明确的标识（NEW）
+
+---
+
 ## 2026-01-04 LLM API 时间追踪与 OpenTelemetry 集成
 
 ### 会话概述

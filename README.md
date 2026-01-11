@@ -16,6 +16,8 @@ Power grid regulations present unique challenges that conventional RAG systems f
 | **Cross-page Tables** | Lost context at chunk boundaries | Agent detects truncation, fetches next page |
 | **Inline References** ("见注1") | Missed or orphaned | Agent traces annotations within page context |
 | **Source Attribution** | Approximate chunk location | Exact page number + table ID |
+| **Context Overload** | Single agent with all tools (~4000 tokens) | Specialized subagents (~800 tokens each) |
+| **Scalability** | Context grows with task complexity | Orchestrator routes to relevant experts only |
 
 ## Design Philosophy
 
@@ -23,18 +25,30 @@ Inspired by how Claude Code searches codebases, GridCode treats regulations as "
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Reasoning Layer                          │
-│     Claude Agent SDK  |  Pydantic AI  |  LangGraph          │
+│                    Business Layer (CLI/API)                  │
 ├─────────────────────────────────────────────────────────────┤
-│                    Tool Layer (MCP Server)                  │
-│        get_toc()  |  smart_search()  |  read_page_range()   │
+│                    Reasoning Layer                           │
+│     Claude Agent SDK  |  Pydantic AI  |  LangGraph           │
 ├─────────────────────────────────────────────────────────────┤
-│                    Index Layer (Pluggable)                  │
-│  Keyword: FTS5 / Tantivy / Whoosh                           │
-│  Vector:  LanceDB / Qdrant                                  │
+│                    Orchestrator Layer                        │
+│        QueryAnalyzer → Router → ResultAggregator             │
+│        (Context: ~800 tokens per orchestrator)               │
 ├─────────────────────────────────────────────────────────────┤
-│                    Storage Layer                            │
-│         Docling JSON (structure) + Markdown (reading)       │
+│                    Subagents Layer                           │
+│   SEARCH | TABLE | REFERENCE | DISCOVERY (Each ~600 tokens) │
+├─────────────────────────────────────────────────────────────┤
+│                    Infrastructure Layer                      │
+│   FileContext | EventBus | SecurityGuard | SkillLoader       │
+├─────────────────────────────────────────────────────────────┤
+│                    Tool Layer (MCP Server)                   │
+│        get_toc()  |  smart_search()  |  read_page_range()    │
+├─────────────────────────────────────────────────────────────┤
+│                    Index Layer (Pluggable)                   │
+│  Keyword: FTS5 / Tantivy / Whoosh                            │
+│  Vector:  LanceDB / Qdrant                                   │
+├─────────────────────────────────────────────────────────────┤
+│                    Storage Layer                             │
+│         Docling JSON (structure) + Markdown (reading)        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -46,12 +60,18 @@ Inspired by how Claude Code searches codebases, GridCode treats regulations as "
 
 3. **Agentic Reasoning**: The LLM decides when to fetch more context—reading adjacent pages for truncated tables, following "see Note 3" references, or drilling into appendices.
 
-4. **Multi-Framework**: Three agent implementations sharing the same MCP tools:
+4. **Context Isolation**: Use specialized subagents for different tasks (search, table extraction, reference resolution), reducing context from ~4000 to ~800 tokens per orchestrator.
+
+5. **Orchestrator Pattern**: Central coordinator analyzes intent, routes to relevant subagents, and aggregates results—enabling efficient multi-hop reasoning.
+
+6. **Multi-Framework**: Three agent implementations sharing the same MCP tools:
    - **Claude Agent SDK**: Optimal for Claude models with native MCP support
    - **Pydantic AI**: Type-safe, model-agnostic, production-ready
    - **LangGraph**: Complex workflow orchestration
 
-5. **Unified MCP Access**: All agents access page data through MCP protocol—the PageStore is controlled internally by the MCP Server, ensuring consistent data access patterns.
+7. **Unified MCP Access**: All agents access page data through MCP protocol—the PageStore is controlled internally by the MCP Server, ensuring consistent data access patterns.
+
+8. **Bash+FS Paradigm**: File-based communication for agent coordination, with infrastructure layer providing FileContext, EventBus, SecurityGuard, and SkillLoader.
 
 ## Data Model
 
@@ -158,7 +178,18 @@ export GRIDCODE_QDRANT_URL=http://localhost:6333
 
 ## Agent Setup
 
-GridCode provides three agent implementations. Each agent communicates with the MCP Server through MCP protocol:
+GridCode provides three agent implementations, each supporting both standard and orchestrator modes:
+
+### Standard Mode vs Orchestrator Mode
+
+**Standard Mode**: Single agent with all MCP tools (~4000 tokens context)
+- Best for: Simple, single-hop queries
+- Context: Includes all tool descriptions and full protocol
+
+**Orchestrator Mode**: Specialized subagents coordinated by orchestrator (~800 tokens per orchestrator)
+- Best for: Complex, multi-hop queries requiring multiple tool types
+- Context: Each subagent only sees relevant tools
+- Benefits: Reduced context, better focus, parallel execution
 
 ### Claude Agent SDK (Recommended for Claude models)
 
@@ -168,8 +199,12 @@ Uses the official Claude Agent SDK with native MCP support:
 # Set API key
 export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
 
-# Start chat with Claude Agent
+# Standard mode
 gridcode chat --agent claude --reg-id angui_2024
+
+# Orchestrator mode (context-efficient)
+gridcode chat --agent claude --reg-id angui_2024 --orchestrator
+gridcode chat-claude-orch --reg-id angui_2024  # Shortcut
 ```
 
 ### Pydantic AI Agent (Multi-model support)
@@ -183,8 +218,12 @@ export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
 # For OpenAI models
 export GRIDCODE_OPENAI_API_KEY="your-api-key"
 
-# Start chat
+# Standard mode
 gridcode chat --agent pydantic --reg-id angui_2024
+
+# Orchestrator mode
+gridcode chat --agent pydantic --reg-id angui_2024 -o  # -o is short for --orchestrator
+gridcode chat-pydantic-orch --reg-id angui_2024  # Shortcut
 ```
 
 ### LangGraph Agent (Complex workflows)
@@ -194,7 +233,12 @@ For advanced workflow orchestration:
 ```bash
 export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
 
+# Standard mode
 gridcode chat --agent langgraph --reg-id angui_2024
+
+# Orchestrator mode
+gridcode chat --agent langgraph --reg-id angui_2024 --orchestrator
+gridcode chat-langgraph-orch --reg-id angui_2024  # Shortcut
 ```
 
 ### Ollama Backend (Local LLM)
@@ -226,41 +270,59 @@ gridcode chat --agent langgraph --reg-id angui_2024
 
 ### Architecture Note
 
-All agents access page data through MCP protocol:
+All agents access page data through MCP protocol, with optional orchestrator mode for context efficiency:
 
 ```
-┌─────────────────────────────────────────────────┐
-│                 Agent Layer                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌──────────┐ │
-│  │ ClaudeAgent │  │ LangGraph   │  │ Pydantic │ │
-│  │ (SDK MCP)   │  │ Agent       │  │ AI Agent │ │
-│  └──────┬──────┘  └──────┬──────┘  └────┬─────┘ │
-│         │                │               │       │
-│         │         ┌──────┴───────────────┘       │
-│         │         │                              │
-│         │         ▼                              │
-│         │  GridCodeMCPClient                     │
-└─────────┼─────────┬──────────────────────────────┘
-          │         │
-          │  stdio  │  stdio
-          ▼         ▼
-┌─────────────────────────────────────────────────┐
-│              GridCode MCP Server                 │
-│   get_toc | smart_search | read_page_range      │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                 Agent Layer (3 Frameworks)                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐      │
+│  │ ClaudeAgent  │  │ LangGraph    │  │ Pydantic      │      │
+│  │ (SDK MCP)    │  │ Agent        │  │ AI Agent      │      │
+│  └──────┬───────┘  └──────┬───────┘  └───────┬───────┘      │
+│         │                 │                   │              │
+│         │                 │                   │              │
+│         ▼                 ▼                   ▼              │
+│   ┌─────────────────────────────────────────────────┐       │
+│   │  Optional: Orchestrator Layer                   │       │
+│   │  QueryAnalyzer → SubagentRouter → Aggregator    │       │
+│   │  (Context isolation: ~800 tokens per orch)      │       │
+│   └─────────────────────────────────────────────────┘       │
+│         │                 │                   │              │
+│         │                 ▼                   │              │
+│         │         GridCodeMCPClient           │              │
+└─────────┼─────────────────┬───────────────────┼──────────────┘
+          │                 │                   │
+          │   stdio         │   stdio           │   stdio
+          ▼                 ▼                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│              GridCode MCP Server (16+ tools)                 │
+│   get_toc | smart_search | read_page_range | ...            │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Project Status
 
-Core implementation complete. Remaining work:
+Architecture evolution complete through Phase 6:
 
 - [x] Phase 1: Docling integration, page-level storage
 - [x] Phase 2: FTS5 + LanceDB indexing (with pluggable backends)
-- [x] Phase 3: MCP Server with SSE transport
-- [x] Phase 4-6: Three agent implementations
+- [x] Phase 3: MCP Server with SSE transport (16+ tools)
+- [x] Phase 4: Three agent implementations (Claude SDK, Pydantic AI, LangGraph)
+- [x] Phase 5: Subagents architecture with orchestrator layer
+- [x] Phase 6: Bash+FS paradigm with infrastructure layer
 - [x] LLM API timing & observability (httpx + OpenTelemetry)
+- [x] Multi-regulation search with smart selection
 - [ ] End-to-end testing with real regulation documents
 - [ ] Performance benchmarking across index backends
+- [ ] Exec-Subagent: Script execution with sandboxing
+- [ ] Validator-Subagent: Result validation and quality assurance
+
+**Latest Features**:
+- Context isolation: Reduced from ~4000 to ~800 tokens per orchestrator
+- Infrastructure layer: FileContext, EventBus, SecurityGuard, SkillLoader
+- RegSearch-Subagent: Domain expert integrating SEARCH/TABLE/REFERENCE/DISCOVERY
+- Modular Makefile: Organized commands in `makefiles/*.mk`
+- Comprehensive testing: `tests/bash-fs-paradiam/` with 5 test suites
 
 ## References
 
