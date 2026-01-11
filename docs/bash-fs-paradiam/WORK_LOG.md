@@ -369,3 +369,127 @@ make test-infrastructure
 # 仅运行 RegSearchSubagent 测试
 make test-regsearch
 ```
+
+## Makefile 模块化重构 (2026-01-11)
+
+### 重构目标
+
+将 696 行单体 Makefile 重构为模块化结构，提升可维护性、可读性和可扩展性。
+
+### 重构成果
+
+**文件结构变化:**
+```
+Makefile: 696 → 247 行 (-64.5%)
+新增模块目录: makefiles/
+├── variables.mk      (65 行) - 统一变量定义
+├── conda.mk          (106 行) - Conda 环境专用
+├── agents.mk         (87 行) - Agent 命令接口
+└── mcp-tools.mk      (176 行) - MCP 工具 CLI
+
+新增辅助脚本: scripts/makefile/
+├── table_registry_build.py
+├── table_registry_stats.py
+└── list_cross_page_tables.py
+```
+
+**核心改进:**
+- Python 一行代码: 3 → 0 (全部提取为独立脚本)
+- UV 命令前缀重复: 70+ → 0 (使用 `$(GRIDCODE_CMD)` 变量)
+- Conda 依赖重复: 5 × 200+ 字符 → 1 个变量引用
+- Agent 目标数: 21 → 6 个通用命令 + 别名
+- 代码重复率: 显著减少
+
+### Phase 1: 变量提取和脚本化
+
+1. **创建 makefiles/variables.mk**
+   - 集中管理所有变量和默认值
+   - 定义命令前缀 (`GRIDCODE_CMD`, `PY_CMD`)
+   - 定义 Conda 依赖包列表
+   - 配置 MCP 模式标志
+
+2. **提取 Python 脚本**
+   - `table_registry_build.py`: 构建表格注册表
+   - `table_registry_stats.py`: 显示统计信息
+   - `list_cross_page_tables.py`: 列出跨页表格
+   - 所有脚本符合 Black 规范 (100 字符限制)
+
+3. **简化 Conda 命令**
+   - 使用 `$(CONDA_INSTALL_FLAGS)` 统一参数
+   - 使用 `$(CONDA_BASE_DEPS)` 等变量替代长列表
+
+### Phase 2: 模块化拆分
+
+1. **makefiles/conda.mk** - Conda 环境模块
+   - 5 个安装命令 (base/dev/all/ocr/full)
+   - 3 个 MCP 服务命令
+   - 4 个 CLI 命令
+   - 6 个 Agent 快捷方式
+   - 隔离 Linux 服务器专用功能
+
+2. **makefiles/agents.mk** - Agent 命令模块
+   - 6 个通用命令 (chat/ask/ask-json/chat-orch/ask-orch)
+   - 9 个 Agent 快捷别名
+   - 4 个 SSE 模式快捷方式
+   - 简化 Agent 三角形模式
+
+3. **makefiles/mcp-tools.mk** - MCP 工具模块
+   - 基础工具 (toc/read-pages/chapter-structure 等)
+   - Phase 1: 核心多跳工具 (lookup-annotation/search-tables 等)
+   - Phase 2: 上下文工具 (search-annotations/get-table 等)
+   - Phase 3: 发现工具 (find-similar/compare-sections)
+   - 表格注册表工具
+   - MCP 模式快捷方式
+   - MCP 服务验证
+
+### 技术实现
+
+**变量使用模式:**
+```makefile
+# 消除重复的命令前缀
+$(GRIDCODE_CMD) chat --reg-id $(REG_ID)
+# 代替: $(UV) run gridcode chat --reg-id angui_2024
+
+# 简化依赖列表
+pip install $(CONDA_INSTALL_FLAGS) $(CONDA_BASE_DEPS)
+# 代替: pip install -c ... pydantic pydantic-settings lancedb ...
+```
+
+**快捷方式实现:**
+```makefile
+# 使用变量覆盖
+chat-claude: AGENT=claude
+chat-claude: chat
+
+# 或直接调用
+chat-claude:
+	$(GRIDCODE_CMD) chat --reg-id $(REG_ID) --agent claude
+```
+
+### 向后兼容性
+
+✅ 所有现有命令保持不变
+✅ 命令行参数语义不变
+✅ 输出格式保持一致
+✅ Help 输出完整 (164 行)
+
+### 文档
+
+新增 `docs/bash-fs-paradiam/MAKEFILE_REFACTORING.md` (634 行):
+- 完整的模块说明
+- 使用指南和示例
+- 扩展开发指南
+- 最佳实践
+- 故障排除
+
+### Git 提交
+
+- Commit: `a5eeb32` - refactor(makefile): 模块化重构 Makefile 架构
+- 文件变更: 9 个文件 (+1,290 行, -483 行)
+- 测试状态: ✅ 所有命令验证通过
+
+### 后续改进空间 (Phase 3 - 可选)
+
+1. 创建 `makefiles/dev.mk` - 开发辅助工具
+2. 创建 `makefiles/utils.mk` - 通用工具命令
+3. 进一步优化长行命令
