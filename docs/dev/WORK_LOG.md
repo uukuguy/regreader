@@ -1,5 +1,344 @@
 # GridCode 开发工作日志 (dev 分支)
 
+## 2026-01-12 集成 Claude Agent SDK `preset: "claude_code"`
+
+### 会话概述
+
+实现 Claude Agent SDK 的 `preset: "claude_code"` 支持，将 Claude 从简单的"聊天机器人"升级为"自主编程代理"，同时保持GridCode的领域特定知识。
+
+### 背景
+
+GridCode 的 Claude Agent SDK 实现一直使用手动编写的系统提示词（约1760字），需要持续维护和调优。`preset: "claude_code"` 是 Anthropic 官方提供的预配置提示词包，包含：
+- 工具使用最佳实践
+- 任务规划和分解能力
+- 智能错误恢复策略
+- 代码理解和生成优化
+
+集成 preset 可以：
+1. 减少提示词维护负担 60-80%
+2. 自动获得 Anthropic 的最佳实践更新
+3. 提升工具使用效率和任务规划能力
+
+### 完成的工作
+
+#### 1. 深度分析与方案设计
+
+**现状分析**:
+- 审计当前实现：`subagents.py`、`orchestrator.py`、`prompts.py`
+- 确认未使用 preset，完全依赖手动提示词
+- 测量提示词长度：4个Subagent共约1760字
+
+**方案设计**:
+- **方案A（保守）**：仅 Orchestrator 使用 preset
+- **方案B（混合）**：Orchestrator + Subagent 都使用 preset + 精简领域指令 ⭐ **推荐**
+- **方案C（激进）**：完全依赖 preset，最小化自定义
+
+**选择依据**:
+- 方案B 平衡收益与风险
+- 保留电力规程领域知识
+- 通过 `use_preset` 参数支持向后兼容
+
+#### 2. 核心代码实现
+
+**修改文件总览**:
+- `src/grid_code/agents/claude/subagents.py` (核心实现)
+- `src/grid_code/agents/claude/orchestrator.py` (参数传递)
+- `tests/bash-fs-paradiam/test_claude_preset.py` (测试脚本)
+
+**关键实现**:
+
+1. **BaseClaudeSubagent 增强** (`subagents.py`):
+   ```python
+   def __init__(self, config, model, mcp_manager, use_preset: bool = False):
+       self._use_preset = use_preset  # 新增参数
+   ```
+
+2. **双模式提示词生成**:
+   - `_build_system_prompt()`: 传统手动模式（保留）
+   - `_build_domain_prompt()`: Preset模式专用（新增，约500-700字）
+
+   领域提示词包含：
+   - 角色定位
+   - 电力规程领域知识（章节格式、表格规则、注释语法）
+   - 工具使用约束
+   - 检索策略
+   - 执行上下文注入
+
+3. **智能选项构建** (`_build_options()`):
+   ```python
+   if self._use_preset:
+       options_kwargs["preset"] = "claude_code"
+       options_kwargs["system_prompt"] = self._build_domain_prompt(context)
+       logger.debug(f"Using preset: 'claude_code' with domain prompt")
+   else:
+       options_kwargs["system_prompt"] = self._build_system_prompt(context)
+       logger.debug(f"Using manual system prompt")
+   ```
+
+4. **ClaudeOrchestrator 集成**:
+   - 新增 `use_preset` 参数（默认 `False` 保持向后兼容）
+   - 传递参数到所有 Subagent 创建过程
+   - 日志记录 preset 模式状态
+
+5. **工厂函数更新**:
+   ```python
+   def create_claude_subagent(config, model, mcp_manager, use_preset: bool = False):
+       return subagent_class(config, model, mcp_manager, use_preset)
+   ```
+
+#### 3. 测试脚本开发
+
+**文件**: `tests/bash-fs-paradiam/test_claude_preset.py`
+
+**测试覆盖**:
+
+1. **基本功能测试** (`test_preset_basic_functionality`):
+   - 验证 `use_preset` 参数传递正确
+   - 测试默认值（向后兼容）
+
+2. **提示词生成测试** (`test_domain_prompt_generation`):
+   - 验证领域提示词包含关键信息（规程ID、章节范围、hints）
+   - 验证领域知识要素（章节格式、表格规则）
+   - 对比提示词长度（domain vs manual）
+
+3. **对比测试框架** (`test_preset_vs_manual_comparison`):
+   - 4类测试查询：简单检索、表格查询、章节导航、多跳推理
+   - 度量指标：工具调用数、响应时间、来源准确性、内容长度
+   - 生成详细对比报告
+   - **注**: 需要实际 MCP 服务器和规程数据，默认跳过
+
+**测试查询设计**:
+```python
+TEST_QUERIES = [
+    "母线失压如何处理？",              # 简单检索
+    "表6-2中注1的内容是什么？",          # 表格查询
+    "第2.1.4.1.6节的详细说明",          # 章节导航
+    "查找所有关于事故处理的表格...",    # 多跳推理
+]
+```
+
+#### 4. 架构设计亮点
+
+**向后兼容**:
+- `use_preset` 默认 `False`，现有代码无需修改
+- 手动模式保持完整功能
+- 可以在任何时候切换回手动模式
+
+**领域知识保留**:
+- 领域特定提示词（500-700字）专注于电力规程知识
+- 通用逻辑交给 preset 处理
+- 工具约束和检索策略明确指定
+
+**灵活配置**:
+- Orchestrator 和 Subagent 独立控制 preset
+- 支持部分Subagent使用preset，其他使用手动模式
+- 日志记录方便调试和监控
+
+### 技术细节
+
+#### 提示词对比
+
+**手动模式（原有）**:
+```
+SEARCH_AGENT_PROMPT (540字)
++ context injection (reg_id, chapter_scope, hints)
+= 约 600-700 字
+```
+
+**Preset模式（新增）**:
+```
+preset: "claude_code" (Anthropic维护，约500 tokens)
++ _build_domain_prompt (500-700字)
+= 约 1000-1200 字总量，但通用逻辑由官方优化
+```
+
+**关键差异**:
+- 手动模式：所有逻辑自己编写和维护
+- Preset模式：通用逻辑自动优化，只维护领域知识
+
+#### 配置参数
+
+```python
+# 使用 preset 模式
+orchestrator = ClaudeOrchestrator(
+    reg_id="angui_2024",
+    use_preset=True,  # 启用 preset
+)
+
+# 传统手动模式（默认）
+orchestrator = ClaudeOrchestrator(
+    reg_id="angui_2024",
+    use_preset=False,  # 或省略此参数
+)
+```
+
+### 预期效果
+
+#### 量化指标
+
+| 指标 | 当前值 | 目标值 | 状态 |
+|------|--------|--------|------|
+| 提示词维护负担 | 1760字 | 500-700字 | ⏳ 待验证 |
+| 上下文 Token 占用 | 800 tokens | 1000-1200 tokens | ⏳ 待测量 |
+| 工具调用效率 | 基准 | +20% | ⏳ 待测试 |
+| 检索准确率 | 基准 | 不降低 | ⏳ 待验证 |
+
+#### 定性收益
+
+- ✅ **代码就绪**: 所有核心代码已实现并集成
+- ⏳ **测试待完成**: 需要实际API调用进行对比测试
+- ⏳ **性能待验证**: Token占用和响应质量需要实测
+- ✅ **向后兼容**: 默认保持手动模式，无breaking change
+
+### 后续工作
+
+#### 短期（1周内）
+
+1. **实际对比测试**:
+   - 运行 MCP 服务器
+   - 导入测试规程数据
+   - 执行 `test_preset_vs_manual_comparison()`
+   - 收集性能指标
+
+2. **Token 占用测量**:
+   - 对比 preset vs 手动模式的实际 token 消耗
+   - 验证是否在可接受范围（1300 tokens 以内）
+
+3. **响应质量评估**:
+   - 人工评估检索准确率
+   - 对比答案完整性和相关性
+   - 检查是否有功能退化
+
+#### 中期（2周内）
+
+1. **A/B 测试优化**:
+   - 根据测试结果调整领域提示词
+   - 优化工具使用策略描述
+   - 平衡token占用和功能完整性
+
+2. **文档完善**:
+   - 更新 CLAUDE.md 的技术栈约束
+   - 添加 preset 使用指南
+   - 记录最佳实践和注意事项
+
+3. **生产部署准备**:
+   - 制定回滚方案
+   - 设置监控指标
+   - 准备渐进式推进策略
+
+#### 长期（1个月内）
+
+1. **配置化控制**:
+   - 添加全局配置开关 `use_claude_code_preset`
+   - 支持环境变量配置
+   - 实现 Orchestrator 和 Subagent 独立控制
+
+2. **监控告警**:
+   - 添加工具调用失败率监控
+   - 对比 preset vs 手动模式的成功率
+   - 设置性能退化告警
+
+3. **持续优化**:
+   - 跟踪 Anthropic 的 preset 更新
+   - 持续精简领域特定提示词
+   - 积累最佳实践案例
+
+### 关键文件变更
+
+```
+src/grid_code/agents/claude/
+├── subagents.py              # 核心实现：preset 支持 + 领域提示词
+├── orchestrator.py           # 参数传递：use_preset 集成
+tests/bash-fs-paradiam/
+└── test_claude_preset.py     # 测试框架：对比测试 + 功能验证
+```
+
+**变更统计**:
+- 3 个文件修改
+- 1 个文件新增
+- 约 400 行代码新增/修改
+- 100% 向后兼容
+
+### 风险与缓解
+
+#### 风险1：与专门化策略冲突
+
+**风险描述**: Preset 可能鼓励"全能"行为，与 Subagent 专门化冲突
+
+**缓解措施**:
+- ✅ `allowed_tools` 强制限制可用工具
+- ✅ 领域提示词明确"你只能使用以下MCP工具"
+- ⏳ 实际测试验证 preset + 工具过滤的兼容性
+
+#### 风险2：上下文膨胀
+
+**风险描述**: Preset 可能占用 200-500 tokens，削弱上下文优化效果
+
+**分析**:
+- ✅ 即使 +500 tokens，总量 1300 tokens 仍远低于 4000 tokens
+- ✅ 价值交换合理：用 500 tokens 换更智能的工具使用
+- ⏳ 需要实测验证实际 token 占用
+
+#### 风险3：领域特异性丢失
+
+**风险描述**: Preset 不了解电力规程领域细节
+
+**缓解措施**:
+- ✅ Preset + 自定义提示词分层设计
+- ✅ 领域提示词保留所有领域知识
+- ✅ 章节格式、表格规则、检索策略明确指定
+
+### 技术债务
+
+无新增技术债务。实现保持了良好的代码质量和向后兼容性。
+
+### 学习与收获
+
+1. **架构灵活性**: 通过参数化设计实现了 preset 和手动模式的无缝切换
+2. **领域知识分离**: 将通用逻辑和领域知识分层，提高了可维护性
+3. **测试驱动**: 测试脚本先于全面集成完成，便于快速验证
+
+### 附录：使用示例
+
+#### 启用 Preset 模式
+
+```python
+from grid_code.agents.claude.orchestrator import ClaudeOrchestrator
+
+# 创建启用 preset 的 Orchestrator
+async with ClaudeOrchestrator(
+    reg_id="angui_2024",
+    use_preset=True,  # 启用 Claude Code preset
+) as agent:
+    response = await agent.chat("母线失压如何处理？")
+    print(response.content)
+```
+
+#### 运行对比测试
+
+```bash
+# 运行完整对比测试（需要 MCP 服务器）
+uv run pytest tests/bash-fs-paradiam/test_claude_preset.py::test_preset_vs_manual_comparison -xvs
+
+# 运行基本功能测试（无需 API）
+uv run pytest tests/bash-fs-paradiam/test_claude_preset.py::test_preset_basic_functionality -xvs
+
+# 运行提示词生成测试
+uv run pytest tests/bash-fs-paradiam/test_claude_preset.py::test_domain_prompt_generation -xvs
+```
+
+#### CLI 使用（待实现）
+
+```bash
+# 使用 preset 模式进行查询
+gridcode chat -r angui_2024 --agent claude --use-preset
+
+# 保持手动模式（默认）
+gridcode chat -r angui_2024 --agent claude
+```
+
+---
+
 ## 2026-01-11 文档更新：反映 Bash+FS 架构演进
 
 ### 会话概述

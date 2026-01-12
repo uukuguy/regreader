@@ -278,6 +278,11 @@ The orchestrator layer coordinates query processing across specialized subagents
 ### Agent Framework Implementations
 
 **Claude SDK** (`agents/claude/`): Handoff Pattern with nested agents
+- **Default behavior**: Uses `preset: "claude_code"` (Anthropic's official best practices)
+- Converts Claude from chatbot to autonomous programming agent
+- Combines official preset (~200-500 tokens) with domain-specific prompts (~500-700 chars)
+- Can be disabled with `use_preset=False` to use manual prompts only
+
 **Pydantic AI** (`agents/pydantic/`): Delegation Pattern with @tool decorators
 **LangGraph** (`agents/langgraph/`): Subgraph Pattern with state management
 
@@ -405,6 +410,7 @@ read_chapter_content(reg_id, section_number) -> ChapterContent
 - All agents must access page data through MCP protocol
 - Infrastructure components must support both sync and async APIs
 - Orchestrator must support both normal and file-based (Bash+FS) modes
+- **Claude SDK agents default to `preset: "claude_code"`** for best practices (can override with `use_preset=False`)
 
 ### Prohibited
 - Do not directly manipulate raw PDF/DOCX files in the index layer

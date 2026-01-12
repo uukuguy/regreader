@@ -88,6 +88,7 @@ class ClaudeOrchestrator(BaseGridCodeAgent):
         status_callback: StatusCallback | None = None,
         mode: str = "sequential",
         enabled_subagents: list[str] | None = None,
+        use_preset: bool = True,
     ):
         """初始化 Claude 协调器
 
@@ -98,6 +99,7 @@ class ClaudeOrchestrator(BaseGridCodeAgent):
             status_callback: 状态回调
             mode: 执行模式（"sequential" 或 "parallel"）
             enabled_subagents: 启用的 Subagent 列表
+            use_preset: 是否使用 preset: "claude_code"（默认True，使用Anthropic官方最佳实践）
         """
         super().__init__(reg_id)
 
@@ -112,6 +114,7 @@ class ClaudeOrchestrator(BaseGridCodeAgent):
         # Claude 使用 Anthropic 专用配置
         self._model = model or settings.anthropic_model_name or ""
         self._mode = mode
+        self._use_preset = use_preset
 
         # 确定启用的 Subagent
         if enabled_subagents is None:
@@ -142,7 +145,8 @@ class ClaudeOrchestrator(BaseGridCodeAgent):
         model_display = self._model or "(SDK default)"
         logger.info(
             f"ClaudeOrchestrator initialized: model={model_display}, "
-            f"mode={self._mode}, enabled_subagents={self._enabled_subagents}"
+            f"mode={self._mode}, enabled_subagents={self._enabled_subagents}, "
+            f"use_preset={self._use_preset}"
         )
 
     @property
@@ -189,9 +193,9 @@ class ClaudeOrchestrator(BaseGridCodeAgent):
             if not config.enabled:
                 continue
 
-            # 创建 Subagent
+            # 创建 Subagent（传递 use_preset 参数）
             subagent = create_claude_subagent(
-                config, self._model, self._mcp_manager
+                config, self._model, self._mcp_manager, self._use_preset
             )
             subagents[agent_type] = subagent
 

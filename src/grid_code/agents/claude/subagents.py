@@ -65,6 +65,7 @@ class BaseClaudeSubagent(BaseSubagent):
         config: SubagentConfig,
         model: str,
         mcp_manager: MCPConnectionManager,
+        use_preset: bool = True,
     ):
         """初始化 Claude Subagent
 
@@ -72,6 +73,7 @@ class BaseClaudeSubagent(BaseSubagent):
             config: Subagent 配置
             model: Claude 模型名称（如 haiku, sonnet）
             mcp_manager: MCP 连接管理器
+            use_preset: 是否使用 preset: "claude_code"（默认True，使用Anthropic官方最佳实践）
         """
         super().__init__(config)
 
@@ -83,6 +85,7 @@ class BaseClaudeSubagent(BaseSubagent):
 
         self._model = model
         self._mcp_manager = mcp_manager
+        self._use_preset = use_preset
 
         # 工具调用追踪
         self._tool_calls: list[dict] = []
@@ -90,7 +93,7 @@ class BaseClaudeSubagent(BaseSubagent):
 
         logger.debug(
             f"Claude Subagent '{self.name}' initialized: "
-            f"model={model}, tools={len(config.tools)}"
+            f"model={model}, tools={len(config.tools)}, use_preset={use_preset}"
         )
 
     def _get_allowed_tools(self) -> list[str]:
@@ -105,7 +108,7 @@ class BaseClaudeSubagent(BaseSubagent):
         return self._mcp_manager.get_claude_sdk_config()
 
     def _build_system_prompt(self, context: SubagentContext) -> str:
-        """构建系统提示词
+        """构建系统提示词（传统手动模式）
 
         注入上下文信息到基础提示词。
 
@@ -132,8 +135,94 @@ class BaseClaudeSubagent(BaseSubagent):
 
         return prompt
 
+    def _build_domain_prompt(self, context: SubagentContext) -> str:
+        """构建精简的领域特定指令（preset模式）
+
+        只包含电力规程领域知识，通用逻辑由 preset: "claude_code" 处理。
+        提示词长度约 500-700 字，相比手动模式的 1500-2000 字减少 60-70%。
+
+        Args:
+            context: Subagent 上下文，包含 query、reg_id、chapter_scope、hints 等
+
+        Returns:
+            str: 领域特定提示词，包含：
+                - 角色定位和责任描述
+                - 电力规程文档结构规范
+                - 工具使用约束
+                - 检索策略
+                - 动态注入的上下文信息
+
+        Example:
+            >>> context = SubagentContext(
+            ...     query="表6-2中注1的内容",
+            ...     reg_id="angui_2024",
+            ...     chapter_scope="第六章",
+            ...     hints={"table_hint": "表6-2", "annotation_hint": "注1"},
+            ...     max_iterations=5
+            ... )
+            >>> prompt = subagent._build_domain_prompt(context)
+            >>> print(len(prompt))  # ~600 字符
+            >>> assert "表6-2" in prompt
+            >>> assert "注1" in prompt
+
+        Note:
+            此方法仅在 use_preset=True 时使用。使用 preset: "claude_code" 时，
+            通用的工具使用策略、任务规划、错误处理等由 Anthropic 官方 preset 提供，
+            此方法只需关注电力规程领域的特定知识。
+        """
+        # 获取允许的工具列表（用于显示约束）
+        allowed_tools = self._get_allowed_tools()
+        tools_display = ", ".join(allowed_tools) if allowed_tools else "无"
+
+        # 基础角色和领域知识
+        prompt = f"""# 角色定位
+你是 {self.name}，专门负责{self.config.description}。
+
+# 电力规程领域知识
+
+## 文档结构规范
+- **章节编号格式**：X.X.X.X（如 2.1.4.1.6）
+- **表格命名规则**：表X-X（如 表6-2）
+- **注释引用**：注1、注2、注①、注一、选项A、选项B、方案甲等变体
+- **引用语法**："见第X章"、"参见X.X节"、"详见附录X"、"见注X"
+
+## 工具使用约束
+你**只能使用**以下MCP工具：
+{tools_display}
+
+**严格限制**：不得使用其他未列出的工具，不得尝试绕过工具限制。
+
+## 检索策略
+1. **精确匹配优先**：优先使用章节号、表格号、注释ID等精确标识符
+2. **语义搜索作为补充**：找不到精确匹配时使用语义搜索
+3. **表格查询完整性**：表格查询必须返回完整结构，注意跨页表格
+4. **注释引用追踪**：发现注释引用时必须回溯到原文获取完整内容
+
+"""
+
+        # 注入上下文信息
+        if context.reg_id:
+            prompt += f"""## 当前执行上下文
+默认规程: {context.reg_id}
+"""
+
+        if context.chapter_scope:
+            prompt += f"章节范围限制: {context.chapter_scope}\n"
+
+        if context.hints:
+            hints_lines = [f"- {k}: {v}" for k, v in context.hints.items()]
+            hints_str = "\n".join(hints_lines)
+            prompt += f"""
+## 查询提示信息
+{hints_str}
+"""
+
+        return prompt
+
     def _build_options(self, context: SubagentContext) -> ClaudeAgentOptions:
         """构建 Agent 选项
+
+        根据 use_preset 配置决定使用 preset: "claude_code" 还是手动提示词。
 
         Args:
             context: Subagent 上下文
@@ -141,15 +230,15 @@ class BaseClaudeSubagent(BaseSubagent):
         Returns:
             ClaudeAgentOptions
         """
-        # 禁用内置工具
+        # 禁用内置工具（避免与MCP工具冲突）
         disallowed = [
             "Bash", "Read", "Write", "Edit", "Glob", "Grep",
             "LS", "MultiEdit", "NotebookEdit", "NotebookRead",
             "TodoRead", "TodoWrite", "WebFetch", "WebSearch",
         ]
 
+        # 基础选项
         options_kwargs = {
-            "system_prompt": self._build_system_prompt(context),
             "mcp_servers": self._get_mcp_config(),
             "allowed_tools": self._get_allowed_tools(),
             "disallowed_tools": disallowed,
@@ -157,6 +246,17 @@ class BaseClaudeSubagent(BaseSubagent):
             "permission_mode": "bypassPermissions",
             "include_partial_messages": False,  # 简化事件处理
         }
+
+        # 根据配置选择提示词模式
+        if self._use_preset:
+            # Preset模式：使用 claude_code preset + 精简的领域特定指令
+            options_kwargs["preset"] = "claude_code"
+            options_kwargs["system_prompt"] = self._build_domain_prompt(context)
+            logger.debug(f"[{self.name}] Using preset: 'claude_code' with domain prompt")
+        else:
+            # 手动模式：使用完整的手动编写提示词
+            options_kwargs["system_prompt"] = self._build_system_prompt(context)
+            logger.debug(f"[{self.name}] Using manual system prompt")
 
         # 只有指定模型时才传递
         if self._model:
@@ -374,16 +474,46 @@ def create_claude_subagent(
     config: SubagentConfig,
     model: str,
     mcp_manager: MCPConnectionManager,
+    use_preset: bool = True,
 ) -> BaseClaudeSubagent:
     """创建 Claude Subagent 实例
 
+    工厂函数，根据配置创建相应的 Claude Subagent。
+
     Args:
-        config: Subagent 配置
-        model: Claude 模型名称
-        mcp_manager: MCP 连接管理器
+        config: Subagent 配置，包含 agent_type、system_prompt、tools 等
+        model: Claude 模型名称（如 "claude-sonnet-4-20250514"）
+        mcp_manager: MCP 连接管理器，用于工具集成
+        use_preset: 是否使用 preset: "claude_code"（默认True）
+            - True: 使用 Anthropic 官方最佳实践 + 精简领域提示词（推荐）
+            - False: 使用完整手动编写提示词（向后兼容）
 
     Returns:
-        BaseClaudeSubagent 实例
+        BaseClaudeSubagent: 根据 config.agent_type 创建的具体 Subagent 实例
+            - SearchAgent: 文档搜索和导航
+            - TableAgent: 表格查询和提取
+            - ReferenceAgent: 交叉引用解析
+            - DiscoveryAgent: 语义分析（可选）
+            - BaseClaudeSubagent: 默认实现（未匹配特定类型时）
+
+    Example:
+        >>> from grid_code.subagents.config import SEARCH_AGENT_CONFIG
+        >>> from grid_code.agents.mcp_connection import get_mcp_manager
+        >>>
+        >>> mcp_manager = get_mcp_manager()
+        >>> subagent = create_claude_subagent(
+        ...     config=SEARCH_AGENT_CONFIG,
+        ...     model="claude-sonnet-4-20250514",
+        ...     mcp_manager=mcp_manager,
+        ...     use_preset=True  # 使用 Anthropic 官方最佳实践
+        ... )
+        >>> context = SubagentContext(
+        ...     query="母线失压如何处理？",
+        ...     reg_id="angui_2024",
+        ...     max_iterations=5
+        ... )
+        >>> result = await subagent.execute(context)
+        >>> print(result.content)
     """
     subagent_class = SUBAGENT_CLASSES.get(config.agent_type, BaseClaudeSubagent)
-    return subagent_class(config, model, mcp_manager)
+    return subagent_class(config, model, mcp_manager, use_preset)
