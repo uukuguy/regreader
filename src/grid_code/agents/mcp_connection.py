@@ -268,6 +268,8 @@ class MCPConnectionManager:
         return MCPServerStdio(
             self.config.get_stdio_command(),
             args=self.config.stdio_args,
+            timeout=60.0,  # 增加初始化超时到 60 秒（用于加载嵌入模型）
+            read_timeout=300.0,  # 5 分钟读取超时
         )
 
     def _create_pydantic_sse_server(self):

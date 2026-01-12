@@ -17,11 +17,19 @@ PY_CMD := $(UV_RUN) $(PYTHON)
 # Agent 配置
 AGENT ?= claude
 AGENTS := claude pydantic langgraph
+AGENT_FLAGS ?=  # 额外的 agent 参数，如 -v (verbose), -q (quiet)
 
 # 默认值集中管理
-REG_ID ?= wengui_2024
+REG_ID ?=  # 空值表示自动识别规程（推荐），也可显式指定如 REG_ID=wengui_2024
 FILE ?= ./data/raw/wengui_2024.pdf
 ASK_QUERY ?= 长南Ⅰ线停运会影响哪些断面的限额？
+
+# 条件性地设置 REG_ID_FLAG（只在 REG_ID 非空时添加 --reg-id 参数）
+ifneq ($(REG_ID),)
+    REG_ID_FLAG := --reg-id $(REG_ID)
+else
+    REG_ID_FLAG :=
+endif
 
 MAX_LEVEL ?= 3
 START_PAGE ?= 4

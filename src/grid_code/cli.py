@@ -220,11 +220,25 @@ def serve(
     ),
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="监听地址"),
     port: int = typer.Option(8080, "--port", "-p", help="监听端口"),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="详细模式：显示 DEBUG 日志"
+    ),
 ):
     """启动 MCP Server"""
     import sys
 
+    from loguru import logger
+
     from grid_code.mcp.server import create_mcp_server
+
+    # 默认抑制 DEBUG 日志，verbose 模式下保留
+    if not verbose:
+        logger.remove()
+        logger.add(
+            sys.stderr,
+            level="INFO",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+        )
 
     # stdio 模式下不能向 stdout 输出任何非 JSON-RPC 消息
     if transport == TransportType.sse:
@@ -527,7 +541,7 @@ def read_chapter(
 
 @app.command()
 def chat(
-    reg_id: str = typer.Option(None, "--reg-id", "-r", help="限定规程"),
+    reg_id: str = typer.Option(None, "--reg-id", "-r", help="限定规程（可选，默认自动识别）"),
     agent_type: AgentType = typer.Option(
         AgentType.claude, "--agent", "-a", help="Agent 类型"
     ),
@@ -535,7 +549,7 @@ def chat(
         False, "--orchestrator", "-o", help="启用 Orchestrator 模式（Subagent 架构）"
     ),
     verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="详细模式：显示完整工具参数"
+        False, "--verbose", "-v", help="详细模式：显示完整工具参数和 DEBUG 日志"
     ),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="静默模式：只显示最终结果"
@@ -544,6 +558,11 @@ def chat(
     """与 Agent 对话（交互模式）
 
     使用 --orchestrator 启用 Subagent 架构模式，通过专家代理协调实现更好的任务分解。
+
+    示例：
+        gridcode chat                           # 自动识别规程
+        gridcode chat -r angui_2024             # 限定在安规中查询
+        gridcode chat -o                        # 使用 Orchestrator 模式
     """
     from grid_code.agents.callbacks import NullCallback
     from grid_code.agents.display import AgentStatusDisplay
@@ -551,6 +570,8 @@ def chat(
     from grid_code.agents.mcp_connection import MCPConnectionConfig
 
     async def run_chat():
+        from loguru import logger
+
         # 构建 MCP 配置（从全局状态）
         if state.mcp_transport == "sse" and state.mcp_url:
             mcp_config = MCPConnectionConfig.sse(state.mcp_url)
@@ -562,6 +583,17 @@ def chat(
             status_callback = NullCallback()
         else:
             status_callback = AgentStatusDisplay(console, verbose=verbose)
+
+        # 默认模式下抑制 DEBUG 日志（包括初始化阶段）
+        # verbose 模式下保留 DEBUG 日志用于问题排查
+        handler_id = None
+        if not verbose:
+            logger.remove()
+            handler_id = logger.add(
+                lambda msg: console.print(f"[dim]{msg}[/dim]", highlight=False),
+                level="WARNING",
+                format="{message}",
+            )
 
         # 创建 Agent
         if orchestrator:
@@ -633,6 +665,20 @@ def chat(
             # 清理全局回调
             if agent_type == AgentType.claude:
                 set_status_callback(None)
+            # 恢复 logger 配置（如果尚未被 live_context 恢复）
+            if handler_id is not None:
+                try:
+                    logger.remove(handler_id)
+                except ValueError:
+                    # Handler 已被 live_context 移除，无需重复操作
+                    pass
+                else:
+                    # 仅在成功移除时才添加 DEBUG handler（避免重复添加）
+                    logger.add(
+                        lambda msg: console.print(msg, highlight=False),
+                        level="DEBUG",
+                        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+                    )
 
         console.print("[dim]再见![/dim]")
 
@@ -642,7 +688,7 @@ def chat(
 @app.command()
 def ask(
     query: str = typer.Argument(..., help="查询问题"),
-    reg_id: str = typer.Option(None, "--reg-id", "-r", help="限定规程"),
+    reg_id: str = typer.Option(None, "--reg-id", "-r", help="限定规程（可选，默认自动识别）"),
     agent_type: AgentType = typer.Option(
         AgentType.claude, "--agent", "-a", help="Agent 类型"
     ),
@@ -651,7 +697,7 @@ def ask(
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="JSON 格式输出"),
     verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="详细模式：显示完整工具参数"
+        False, "--verbose", "-v", help="详细模式：显示完整工具参数和 DEBUG 日志"
     ),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="静默模式：只显示最终结果"
@@ -662,11 +708,11 @@ def ask(
     使用 --orchestrator 启用 Subagent 架构模式，通过专家代理协调实现更好的任务分解。
 
     示例:
-        gridcode ask "母线失压如何处理?" -r angui_2024
-        gridcode ask "什么是安规?" --agent pydantic --json
-        gridcode ask "安全距离是多少?" -v  # 详细模式
-        gridcode ask "什么是接地?" -q      # 静默模式
-        gridcode ask "表6-2注1的内容" -o   # Orchestrator 模式
+        gridcode ask "母线失压如何处理?"              # 自动识别规程
+        gridcode ask "什么是安规?" -r angui_2024     # 限定在安规中查询
+        gridcode ask "安全距离是多少?" -v            # 详细模式
+        gridcode ask "什么是接地?" -q                # 静默模式
+        gridcode ask "表6-2注1的内容" -o             # Orchestrator 模式
     """
     from grid_code.agents.callbacks import NullCallback
     from grid_code.agents.display import AgentStatusDisplay
@@ -674,6 +720,8 @@ def ask(
     from grid_code.agents.mcp_connection import MCPConnectionConfig
 
     async def run_ask():
+        from loguru import logger
+
         # 构建 MCP 配置
         if state.mcp_transport == "sse" and state.mcp_url:
             mcp_config = MCPConnectionConfig.sse(state.mcp_url)
@@ -685,6 +733,17 @@ def ask(
             status_callback = NullCallback()
         else:
             status_callback = AgentStatusDisplay(console, verbose=verbose)
+
+        # 默认模式下抑制 DEBUG 日志（包括初始化阶段）
+        # verbose 模式下保留 DEBUG 日志用于问题排查
+        handler_id = None
+        if not verbose:
+            logger.remove()
+            handler_id = logger.add(
+                lambda msg: console.print(f"[dim]{msg}[/dim]", highlight=False),
+                level="WARNING",
+                format="{message}",
+            )
 
         # 创建 Agent
         if orchestrator:
@@ -756,6 +815,20 @@ def ask(
             # 清理全局回调
             if agent_type == AgentType.claude:
                 set_status_callback(None)
+            # 恢复 logger 配置（如果尚未被 live_context 恢复）
+            if handler_id is not None:
+                try:
+                    logger.remove(handler_id)
+                except ValueError:
+                    # Handler 已被 live_context 移除，无需重复操作
+                    pass
+                else:
+                    # 仅在成功移除时才添加 DEBUG handler（避免重复添加）
+                    logger.add(
+                        lambda msg: console.print(msg, highlight=False),
+                        level="DEBUG",
+                        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+                    )
 
     asyncio.run(run_ask())
 

@@ -27,7 +27,6 @@ import httpx
 from langchain_core.messages import BaseMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.graph import CompiledGraph
 from langgraph.graph.message import add_messages
 from loguru import logger
 
@@ -182,7 +181,7 @@ class LangGraphOrchestrator(BaseGridCodeAgent):
         self._aggregator = ResultAggregator()
 
         # 父图（延迟初始化）
-        self._orchestrator_graph: CompiledGraph | None = None
+        self._orchestrator_graph: Any = None
 
         # 会话 ID
         self._thread_id: str = self._generate_thread_id()
@@ -292,7 +291,7 @@ class LangGraphOrchestrator(BaseGridCodeAgent):
 
         return builders
 
-    def _build_orchestrator_graph(self) -> CompiledGraph:
+    def _build_orchestrator_graph(self) -> Any:
         """构建 Orchestrator 父图
 
         父图结构:

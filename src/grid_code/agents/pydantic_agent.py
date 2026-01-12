@@ -323,7 +323,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
             async for event in event_stream:
                 # DEBUG: 记录所有事件类型，帮助排查漏记问题
                 event_type = type(event).__name__
-                logger.debug(f"[EventStream] Event received: {event_type}")
+                # logger.debug(f"[EventStream] Event received: {event_type}")
 
                 # 处理文本增量事件（流式输出）
                 if isinstance(event, PartDeltaEvent):

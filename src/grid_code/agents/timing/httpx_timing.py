@@ -124,7 +124,7 @@ class HttpxTimingBackend(TimingBackend):
 
         logger.debug(
             f"[HttpxTiming] API call completed: {metric.duration_ms:.0f}ms, "
-            f"tokens: {metric.prompt_tokens}/{metric.completion_tokens}"
+            f"tokens: {metric.prompt_tokens=}/{metric.completion_tokens=}"
         )
 
     def _extract_token_usage(

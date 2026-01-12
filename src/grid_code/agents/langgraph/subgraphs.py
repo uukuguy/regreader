@@ -24,7 +24,6 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.graph import CompiledGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from loguru import logger
@@ -253,7 +252,7 @@ class SubgraphBuilder:
             for item in result:
                 self._extract_sources(item)
 
-    def build(self) -> CompiledGraph:
+    def build(self) -> Any:
         """构建并编译 Subgraph
 
         Returns:
@@ -265,7 +264,7 @@ class SubgraphBuilder:
 
         return self._build_agentic_graph()
 
-    def _build_simple_graph(self) -> CompiledGraph:
+    def _build_simple_graph(self) -> Any:
         """构建简单图（无工具）"""
 
         async def agent_node(state: SubgraphState) -> dict:
@@ -286,7 +285,7 @@ class SubgraphBuilder:
 
         return builder.compile()
 
-    def _build_agentic_graph(self) -> CompiledGraph:
+    def _build_agentic_graph(self) -> Any:
         """构建 Agentic 图（有工具）"""
         # 绑定工具到 LLM
         llm_with_tools = self._llm.bind_tools(self._langchain_tools)

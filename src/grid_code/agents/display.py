@@ -268,37 +268,49 @@ class AgentStatusDisplay(StatusCallback):
         # 简化工具名（去除 mcp__gridcode__ 前缀）
         display_name = _strip_tool_prefix(tool_name)
 
+        # 显示工具名称
         if self._verbose:
-            # 详细模式：工具名(参数) (思考 Xms, API Yms[/N次], 执行 Zms)
+            # verbose: 显示完整工具名和参数
             text.append(f"{display_name}", style=StatusColors.TOOL_NAME)
             if tool_input:
                 params_str = _format_params_simple(tool_input)
                 text.append(f"({params_str})", style=StatusColors.DIM)
+        else:
+            # 默认: 显示工具简述
+            text.append(f"{brief}", style=StatusColors.SUCCESS)
 
-            # 三时间显示：思考时间 + API时间 + 执行时间
-            text.append(" (", style=StatusColors.DIM)
+        # 结果摘要
+        if result_count is not None:
+            text.append("完成", style=StatusColors.DIM)
+            text.append(f"（{result_count}条）", style=StatusColors.DIM)
+        elif result_summary:
+            text.append(f" {result_summary}", style=StatusColors.DIM)
 
-            # 思考时间（步骤间总时间）
-            if llm_duration_ms is not None:
-                text.append(f"思考 {self._format_duration(llm_duration_ms)}", style=StatusColors.THINKING_TIME)
-                text.append(", ", style=StatusColors.DIM)
-            elif thinking_duration_ms is not None:
-                # 兼容：如果没有llm_duration_ms但有thinking_duration_ms
-                text.append(f"思考 {self._format_duration(thinking_duration_ms)}", style=StatusColors.THINKING_TIME)
-                text.append(", ", style=StatusColors.DIM)
+        # 时间统计（始终显示）
+        text.append(" (", style=StatusColors.DIM)
 
-            # API时间（精确的HTTP往返时间）
-            if api_duration_ms is not None:
-                text.append(f"API {self._format_duration(api_duration_ms)}", style=StatusColors.API_TIME)
-                if api_call_count is not None and api_call_count > 1:
-                    text.append(f"/{api_call_count}次", style=StatusColors.API_TIME)
-                text.append(", ", style=StatusColors.DIM)
+        # 思考时间（步骤间总时间）
+        if llm_duration_ms is not None:
+            text.append(f"思考 {self._format_duration(llm_duration_ms)}", style=StatusColors.THINKING_TIME)
+            text.append(", ", style=StatusColors.DIM)
+        elif thinking_duration_ms is not None:
+            # 兼容：如果没有llm_duration_ms但有thinking_duration_ms
+            text.append(f"思考 {self._format_duration(thinking_duration_ms)}", style=StatusColors.THINKING_TIME)
+            text.append(", ", style=StatusColors.DIM)
 
-            # 执行时间
-            text.append(f"执行 {self._format_duration(duration_ms)}", style=StatusColors.EXEC_TIME)
-            text.append(")", style=StatusColors.DIM)
+        # API时间（精确的HTTP往返时间）
+        if api_duration_ms is not None:
+            text.append(f"API {self._format_duration(api_duration_ms)}", style=StatusColors.API_TIME)
+            if api_call_count is not None and api_call_count > 1:
+                text.append(f"/{api_call_count}次", style=StatusColors.API_TIME)
+            text.append(", ", style=StatusColors.DIM)
 
-            # 详细结果摘要（多行）
+        # 执行时间
+        text.append(f"执行 {self._format_duration(duration_ms)}", style=StatusColors.EXEC_TIME)
+        text.append(")", style=StatusColors.DIM)
+
+        # 详细结果摘要（仅 verbose 模式）
+        if self._verbose:
             detail_lines = self._format_verbose_result_details(
                 result_count=result_count,
                 result_type=result_type,
@@ -309,25 +321,6 @@ class AgentStatusDisplay(StatusCallback):
             if detail_lines:
                 text.append("\n")
                 text.append_text(detail_lines)
-        else:
-            # 紧凑模式
-            text.append(f"{brief}", style=StatusColors.SUCCESS)
-
-            # 结果摘要
-            if result_count is not None:
-                text.append("完成", style=StatusColors.DIM)
-                text.append(f"（{result_count}条）", style=StatusColors.DIM)
-            elif result_summary:
-                text.append(f" {result_summary}", style=StatusColors.DIM)
-            else:
-                text.append(" 完成", style=StatusColors.SUCCESS)
-
-            # 耗时（紧凑模式只显示 > 1s 的）
-            if self._show_duration and duration_ms is not None:
-                if duration_ms >= 1000:
-                    text.append(f"（{duration_ms/1000:.1f}s）", style=StatusColors.DURATION)
-                elif duration_ms > 100:
-                    text.append(f"（{duration_ms:.0f}ms）", style=StatusColors.DURATION)
 
         return text
 
@@ -665,7 +658,8 @@ class AgentStatusDisplay(StatusCallback):
             if llm_duration_ms is not None:
                 self._tool_llm_times[tool_id] = llm_duration_ms
 
-            if self._streaming_text and self._verbose:
+            # 提交思考文本（默认显示）
+            if self._streaming_text:
                 if self._streaming_text != self._last_committed_text:
                     self._print_to_history("\n")
                     self._print_to_history(self._format_thinking_text(self._streaming_text))
@@ -675,7 +669,7 @@ class AgentStatusDisplay(StatusCallback):
 
             # 如果有决策提示，先打印到历史（因为 spinner 是 transient 的）
             decision_hint = event.data.get("decision_hint")
-            if decision_hint and self._verbose:
+            if decision_hint:
                 hint_text = Text()
                 hint_text.append("⚡ ", style="yellow")
                 hint_text.append(f"{decision_hint}", style="italic yellow")
@@ -733,31 +727,28 @@ class AgentStatusDisplay(StatusCallback):
                 self._print_to_history(self._format_iteration(iteration))
 
         elif event.event_type == AgentEventType.TEXT_DELTA:
-            # 流式文本增量（仅详细模式）
+            # 流式文本增量（默认显示）
             # 只累积文本，不更新 Live 显示（避免终端刷新问题导致重复）
-            if self._verbose:
-                delta = event.data.get("delta", "")
-                if delta:
-                    self._streaming_text += delta
-                    self._is_streaming = True
-                    # 不再更新 _current_status，避免 Live 刷新导致重复显示
+            delta = event.data.get("delta", "")
+            if delta:
+                self._streaming_text += delta
+                self._is_streaming = True
+                # 不再更新 _current_status，避免 Live 刷新导致重复显示
 
         elif event.event_type == AgentEventType.THINKING_DELTA:
-            # 思考增量（仅详细模式）
+            # 思考增量（默认显示）
             # 只累积文本，不更新 Live 显示
-            if self._verbose:
-                delta = event.data.get("delta", "")
-                if delta:
-                    self._streaming_text += delta
-                    self._is_streaming = True
-                    # 不再更新 _current_status，避免 Live 刷新导致重复显示
+            delta = event.data.get("delta", "")
+            if delta:
+                self._streaming_text += delta
+                self._is_streaming = True
+                # 不再更新 _current_status，避免 Live 刷新导致重复显示
 
         elif event.event_type == AgentEventType.PHASE_CHANGE:
-            # 阶段变化（仅详细模式）
-            if self._verbose:
-                phase = event.data.get("phase", "")
-                description = event.data.get("description", "")
-                if phase:
+            # 阶段变化（默认显示）
+            phase = event.data.get("phase", "")
+            description = event.data.get("description", "")
+            if phase:
                     self._current_phase = phase
                     self._print_to_history(self._format_phase_change(phase, description))
 
@@ -789,7 +780,7 @@ class AgentStatusDisplay(StatusCallback):
 
         elif event.event_type == AgentEventType.RESPONSE_COMPLETE:
             # 清理流式文本状态（避免重复添加）
-            if self._streaming_text and self._verbose:
+            if self._streaming_text:
                 if self._streaming_text != self._last_committed_text:
                     self._print_to_history("\n")
                     self._print_to_history(self._format_thinking_text(self._streaming_text))
@@ -805,18 +796,17 @@ class AgentStatusDisplay(StatusCallback):
             if final_api_call_count is not None:
                 self._total_api_call_count += final_api_call_count
 
-            # 只在详细模式下显示摘要
+            # 显示摘要（默认显示）
             # 修复：不再限制 total_tools > 0，只要有任何活动（工具调用、LLM调用、API调用）就显示
-            if self._verbose:
-                total_tools = event.data.get("total_tool_calls", 0)
-                # 有工具调用、LLM思考、或API调用时都显示摘要
-                has_activity = (
-                    total_tools > 0
-                    or self._llm_call_count > 0
-                    or self._total_api_call_count > 0
-                )
-                if has_activity:
-                    self._print_to_history(self._format_summary(event))
+            total_tools = event.data.get("total_tool_calls", 0)
+            # 有工具调用、LLM思考、或API调用时都显示摘要
+            has_activity = (
+                total_tools > 0
+                or self._llm_call_count > 0
+                or self._total_api_call_count > 0
+            )
+            if has_activity:
+                self._print_to_history(self._format_summary(event))
 
             # 重置查询状态，为下一次查询做准备
             self._query_start_time = None
@@ -861,10 +851,10 @@ class AgentStatusDisplay(StatusCallback):
         self._current_phase = None
         self._last_committed_text = ""
 
-        # 临时禁用 DEBUG 级别日志（避免与显示混杂）
-        # 只在详细模式下才禁用，因为详细模式会显示思考内容
+        # 默认抑制 DEBUG 日志（避免与显示混杂）
+        # verbose 模式下保留 DEBUG 日志用于问题排查
         handler_id = None
-        if self._verbose:
+        if not self._verbose:
             # 移除默认 handler，添加一个只显示 WARNING 及以上的 handler
             logger.remove()
             handler_id = logger.add(

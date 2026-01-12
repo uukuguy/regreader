@@ -37,9 +37,20 @@ help: ## Show this help message
 	@echo "  make install-dev              # Install with dev dependencies (uv)"
 	@echo "  make test                     # Run all tests"
 	@echo "  make serve                    # Start MCP server (SSE mode)"
-	@echo "  make chat REG_ID=angui        # Start interactive chat"
-	@echo "  make ask ASK_QUERY=\"母线失压如何处理?\"  # Single query (non-interactive)"
-	@echo "  make ask-json ASK_QUERY=\"...\" # Single query with JSON output"
+	@echo "  make chat                     # Start interactive chat (auto-detect regulation)"
+	@echo "  make chat REG_ID=angui_2024   # Chat with specific regulation"
+	@echo "  make ask ASK_QUERY=\"母线失压如何处理?\"  # Single query (auto-detect)"
+	@echo "  make ask ASK_QUERY=\"...\" REG_ID=angui_2024  # Query in specific regulation"
+	@echo ""
+	@echo "$(GREEN)Agent Flags:$(NC)"
+	@echo "  AGENT_FLAGS=\"-v\"              # Verbose mode: show DEBUG logs"
+	@echo "  AGENT_FLAGS=\"-q\"              # Quiet mode: only show final result"
+	@echo "  make ask-pydantic AGENT_FLAGS=\"-v\" ASK_QUERY=\"...\""
+	@echo ""
+	@echo "$(GREEN)Regulation ID (Optional):$(NC)"
+	@echo "  REG_ID=                       # Auto-detect regulation (default, recommended)"
+	@echo "  REG_ID=angui_2024             # Query in specific regulation"
+	@echo "  REG_ID=wengui_2024            # Query in specific regulation"
 	@echo ""
 	@echo "$(GREEN)Orchestrator Mode (Subagent Architecture):$(NC)"
 	@echo "  make chat-orch REG_ID=angui_2024                # Chat with Orchestrator"
@@ -184,7 +195,7 @@ list: ## List all ingested regulations
 
 QUERY ?= 母线失压
 search: ## Search regulations (usage: make search QUERY="母线失压" REG_ID=angui)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) search "$(QUERY)" --reg-id $(REG_ID)
+	$(GRIDCODE_CMD) $(MCP_FLAGS) search "$(QUERY)" $(REG_ID_FLAG)
 
 #----------------------------------------------------------------------
 # Multi-Regulation Search

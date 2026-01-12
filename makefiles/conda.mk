@@ -72,10 +72,10 @@ serve-conda-port: ## Start MCP server on custom port in conda (usage: make serve
 #----------------------------------------------------------------------
 
 chat-conda: ## Start chat in conda environment (usage: make chat-conda AGENT=claude)
-	$(GRIDCODE) chat --reg-id $(REG_ID) --agent $(AGENT)
+	$(GRIDCODE) chat $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS)
 
 ask-conda: ## Single query in conda environment (usage: make ask-conda ASK_QUERY="...")
-	$(GRIDCODE) $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT)
+	$(GRIDCODE) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS)
 
 list-conda: ## List regulations in conda environment
 	$(GRIDCODE) list

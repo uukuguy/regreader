@@ -12,19 +12,19 @@ include makefiles/variables.mk
 #----------------------------------------------------------------------
 
 chat: ## Start interactive chat (usage: make chat REG_ID=angui AGENT=claude MODE=mcp-sse)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent $(AGENT)
+	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS)
 
 ask: ## Single query to Agent (usage: make ask ASK_QUERY="母线失压如何处理?" AGENT=claude)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT)
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS)
 
 ask-json: ## Single query with JSON output
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT) --json
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) --json
 
 chat-orch: ## Start chat with Orchestrator (usage: make chat-orch REG_ID=angui AGENT=claude)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent $(AGENT) --orchestrator
+	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --orchestrator $(AGENT_FLAGS)
 
 ask-orch: ## Single query with Orchestrator (usage: make ask-orch ASK_QUERY="表6-2注1的内容")
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent $(AGENT) --orchestrator
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) --orchestrator $(AGENT_FLAGS)
 
 #----------------------------------------------------------------------
 # Agent 快捷别名（向后兼容）
@@ -32,43 +32,43 @@ ask-orch: ## Single query with Orchestrator (usage: make ask-orch ASK_QUERY="表
 
 # Chat aliases
 chat-claude: ## Start chat with Claude Agent SDK
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent claude
+	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude $(AGENT_FLAGS)
 
 chat-pydantic: ## Start chat with Pydantic AI Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent pydantic
+	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic $(AGENT_FLAGS)
 
 chat-langgraph: ## Start chat with LangGraph Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent langgraph
+	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph $(AGENT_FLAGS)
 
 # Ask aliases
 ask-claude: ## Single query with Claude Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude -v
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude $(AGENT_FLAGS)
 
 ask-pydantic: ## Single query with Pydantic AI Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic -v
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic $(AGENT_FLAGS)
 
 ask-langgraph: ## Single query with LangGraph Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph -v
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph $(AGENT_FLAGS)
 
 # Orchestrator chat aliases
 chat-orch-claude: ## Start chat with Claude Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent claude --orchestrator
+	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude --orchestrator $(AGENT_FLAGS)
 
 chat-orch-pydantic: ## Start chat with Pydantic Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent pydantic --orchestrator
+	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic --orchestrator $(AGENT_FLAGS)
 
 chat-orch-langgraph: ## Start chat with LangGraph Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent langgraph --orchestrator
+	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph --orchestrator $(AGENT_FLAGS)
 
 # Orchestrator ask aliases
 ask-orch-claude: ## Single query with Claude Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent claude --orchestrator -v
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude --orchestrator $(AGENT_FLAGS)
 
 ask-orch-pydantic: ## Single query with Pydantic Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent pydantic --orchestrator -v
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic --orchestrator $(AGENT_FLAGS)
 
 ask-orch-langgraph: ## Single query with LangGraph Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" --reg-id $(REG_ID) --agent langgraph --orchestrator -v
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph --orchestrator $(AGENT_FLAGS)
 
 #----------------------------------------------------------------------
 # SSE Mode 快捷方式（需要先运行 'make serve'）
