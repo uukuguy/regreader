@@ -17,7 +17,7 @@
 ## 文件结构
 
 ```
-grid-code/
+regreader/
 ├── Makefile                    # 主入口 (247 行)
 ├── makefiles/                  # Makefile 模块目录
 │   ├── variables.mk            # 统一变量定义 (65 行)
@@ -42,11 +42,11 @@ grid-code/
 # 工具链
 PYTHON := python
 UV := uv
-GRIDCODE := gridcode
+GRIDCODE := regreader
 
 # 命令前缀（消除 70+ 处重复）
 UV_RUN := $(UV) run
-GRIDCODE_CMD := $(UV_RUN) $(GRIDCODE)
+REGREADER_CMD := $(UV_RUN) $(GRIDCODE)
 PY_CMD := $(UV_RUN) $(PYTHON)
 
 # Agent 配置
@@ -72,7 +72,7 @@ CONDA_ALL_DEPS := $(CONDA_DEV_DEPS) tantivy whoosh jieba qdrant-client
 
 **使用方式:**
 - 在其他模块中通过 `include makefiles/variables.mk` 引入
-- 使用 `$(GRIDCODE_CMD)` 代替 `$(UV) run gridcode`
+- 使用 `$(REGREADER_CMD)` 代替 `$(UV) run regreader`
 - 使用 `$(CONDA_BASE_DEPS)` 代替长字符串依赖列表
 
 ### 2. conda.mk - Conda 环境模块
@@ -115,7 +115,7 @@ make ask-conda-claude ASK_QUERY="..."
 
 **技术实现:**
 - 使用 `pip install $(CONDA_INSTALL_FLAGS) $(CONDA_BASE_DEPS)` 简化命令
-- 不使用 UV 包管理器，直接调用 `gridcode` 命令
+- 不使用 UV 包管理器，直接调用 `regreader` 命令
 - 使用 Make 变量覆盖实现快捷方式: `AGENT=claude`
 
 ### 3. agents.mk - Agent 命令模块
@@ -242,7 +242,7 @@ make mcp-verify-sse         # SSE 模式验证（需要 make serve）
 ```
 
 **技术实现:**
-- 使用 `$(GRIDCODE_CMD) $(MCP_FLAGS)` 统一命令前缀
+- 使用 `$(REGREADER_CMD) $(MCP_FLAGS)` 统一命令前缀
 - 使用 shell 条件判断处理可选参数
 - 使用 `$(MAKE)` 递归调用实现 MCP 模式切换
 
@@ -473,7 +473,7 @@ make chat-orch-new_agent
 在 `makefiles/mcp-tools.mk` 中添加:
 ```makefile
 new-tool: ## New tool description
-	$(GRIDCODE_CMD) $(MCP_FLAGS) new-tool --arg1 $(ARG1) --arg2 $(ARG2)
+	$(REGREADER_CMD) $(MCP_FLAGS) new-tool --arg1 $(ARG1) --arg2 $(ARG2)
 ```
 
 ### 添加新 Conda 命令
@@ -481,7 +481,7 @@ new-tool: ## New tool description
 在 `makefiles/conda.mk` 中添加:
 ```makefile
 new-conda-command: ## Description
-	gridcode new-command --options
+	regreader new-command --options
 ```
 
 ## 最佳实践
@@ -490,12 +490,12 @@ new-conda-command: ## Description
 
 **推荐:**
 ```makefile
-$(GRIDCODE_CMD) chat --reg-id $(REG_ID)
+$(REGREADER_CMD) chat --reg-id $(REG_ID)
 ```
 
 **不推荐:**
 ```makefile
-$(UV) run gridcode chat --reg-id angui_2024
+$(UV) run regreader chat --reg-id angui_2024
 ```
 
 ### 2. 可选参数处理
@@ -508,9 +508,9 @@ target:
 		exit 1; \
 	fi
 	@if [ -n "$(OPTIONAL_ARG)" ]; then \
-		$(GRIDCODE_CMD) command --required $(REQUIRED_ARG) --optional $(OPTIONAL_ARG); \
+		$(REGREADER_CMD) command --required $(REQUIRED_ARG) --optional $(OPTIONAL_ARG); \
 	else \
-		$(GRIDCODE_CMD) command --required $(REQUIRED_ARG); \
+		$(REGREADER_CMD) command --required $(REQUIRED_ARG); \
 	fi
 ```
 
@@ -519,7 +519,7 @@ target:
 **推荐:**
 ```makefile
 chat-claude: ## Chat with Claude Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent claude
+	$(REGREADER_CMD) $(MCP_FLAGS) chat --reg-id $(REG_ID) --agent claude
 ```
 
 **或使用变量覆盖:**
@@ -554,7 +554,7 @@ make: *** No rule to make target `makefiles/variables.mk', needed by `Makefile'.
 
 ### 问题 2: Conda 命令不工作
 
-**症状:** `make chat-conda` 报错 "gridcode: command not found"
+**症状:** `make chat-conda` 报错 "regreader: command not found"
 
 **解决方案:**
 ```bash
@@ -565,8 +565,8 @@ conda activate your-env
 make install-conda
 
 # 3. 验证安装
-which gridcode
-gridcode --version
+which regreader
+regreader --version
 ```
 
 ### 问题 3: MCP 模式不工作
@@ -606,7 +606,7 @@ make chat-claude-sse
 
 ## 参考资料
 
-- [GridCode CLAUDE.md](../../CLAUDE.md) - 项目开发指南
+- [RegReader CLAUDE.md](../../CLAUDE.md) - 项目开发指南
 - [Bash+FS 架构设计](./BASH_FS_ARCHITECTURE.md)
 - [Makefile 最佳实践](https://makefiletutorial.com/)
 - [GNU Make 文档](https://www.gnu.org/software/make/manual/)

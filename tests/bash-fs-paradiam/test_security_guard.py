@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from grid_code.infrastructure.security_guard import (
+from regreader.infrastructure.security_guard import (
     PREDEFINED_PERMISSIONS,
     PermissionMatrix,
     SecurityGuard,

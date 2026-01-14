@@ -9,11 +9,11 @@ import sys
 
 async def test_direct_tool_call():
     """直接测试 MCP 工具调用日志"""
-    from grid_code.mcp.client import GridCodeMCPClient
+    from regreader.mcp.client import RegReaderMCPClient
 
     print("\n=== Direct MCP Tool Call Test ===", file=sys.stderr)
 
-    async with GridCodeMCPClient(transport="stdio") as client:
+    async with RegReaderMCPClient(transport="stdio") as client:
         print(f"Connected, tools: {[t['name'] for t in client._tools_cache]}", file=sys.stderr)
 
         # 直接调用工具，观察日志
@@ -53,7 +53,7 @@ async def main():
     print("=" * 60, file=sys.stderr)
 
     # 测试 LangGraph MCP Client
-    print("\n[Test 1: GridCodeMCPClient (LangGraph)]", file=sys.stderr)
+    print("\n[Test 1: RegReaderMCPClient (LangGraph)]", file=sys.stderr)
     try:
         await test_direct_tool_call()
     except Exception as e:

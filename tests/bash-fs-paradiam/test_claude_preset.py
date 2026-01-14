@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from grid_code.agents.claude.orchestrator import ClaudeOrchestrator
+from regreader.agents.claude.orchestrator import ClaudeOrchestrator
 
 
 # 测试查询集合（覆盖不同任务类型）
@@ -231,10 +231,10 @@ async def test_preset_basic_functionality():
 @pytest.mark.asyncio
 async def test_domain_prompt_generation():
     """测试领域特定提示词的生成"""
-    from grid_code.agents.claude.subagents import BaseClaudeSubagent
-    from grid_code.agents.mcp_connection import get_mcp_manager
-    from grid_code.subagents.config import SEARCH_AGENT_CONFIG
-    from grid_code.subagents.base import SubagentContext
+    from regreader.agents.claude.subagents import BaseClaudeSubagent
+    from regreader.agents.mcp_connection import get_mcp_manager
+    from regreader.subagents.config import SEARCH_AGENT_CONFIG
+    from regreader.subagents.base import SubagentContext
 
     # 创建 Subagent（preset 模式）
     mcp_manager = get_mcp_manager()

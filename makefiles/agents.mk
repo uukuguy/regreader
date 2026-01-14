@@ -1,5 +1,5 @@
 # ============================================================
-# GridCode Makefile - Agents 模块
+# RegReader Makefile - Agents 模块
 # ============================================================
 # Agent 命令统一接口
 # 依赖: mk/variables.mk
@@ -12,13 +12,13 @@ include makefiles/variables.mk
 #----------------------------------------------------------------------
 
 chat: ## Start interactive chat (usage: make chat REG_ID=angui AGENT=claude MODE=mcp-sse)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS)
 
 ask: ## Single query to Agent (usage: make ask ASK_QUERY="母线失压如何处理?" AGENT=claude)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS)
 
 ask-json: ## Single query with JSON output
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) --json
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) --json
 
 ask-file: ## Query from file (usage: make ask-file QUERY_FILE=queries/query.txt AGENT=claude)
 	@if [ -z "$(QUERY_FILE)" ]; then \
@@ -35,7 +35,7 @@ ask-file: ## Query from file (usage: make ask-file QUERY_FILE=queries/query.txt 
 		exit 1; \
 	fi
 	@echo "$(BLUE)从文件读取查询: $(QUERY_FILE)$(NC)"
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) -- "$$(cat $(QUERY_FILE))"
+	$(REGREADER_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) -- "$$(cat $(QUERY_FILE))"
 
 ask-stdin: ## Query from stdin (usage: cat query.txt | make ask-stdin AGENT=claude)
 	@echo "$(BLUE)从 stdin 读取查询...$(NC)"
@@ -46,13 +46,13 @@ ask-stdin: ## Query from stdin (usage: cat query.txt | make ask-stdin AGENT=clau
 		echo "或者: echo '查询内容' | make ask-stdin AGENT=claude"; \
 		exit 1; \
 	fi; \
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) -- "$$QUERY"
+	$(REGREADER_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) -- "$$QUERY"
 
 chat-orch: ## Start chat with Orchestrator (usage: make chat-orch REG_ID=angui AGENT=claude)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --orchestrator $(AGENT_FLAGS)
 
 ask-orch: ## Single query with Orchestrator (usage: make ask-orch ASK_QUERY="表6-2注1的内容")
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) --orchestrator $(AGENT_FLAGS)
 
 #----------------------------------------------------------------------
 # Agent 快捷别名（向后兼容）
@@ -60,43 +60,43 @@ ask-orch: ## Single query with Orchestrator (usage: make ask-orch ASK_QUERY="表
 
 # Chat aliases
 chat-claude: ## Start chat with Claude Agent SDK
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude $(AGENT_FLAGS)
 
 chat-pydantic: ## Start chat with Pydantic AI Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic $(AGENT_FLAGS)
 
 chat-langgraph: ## Start chat with LangGraph Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph $(AGENT_FLAGS)
 
 # Ask aliases
 ask-claude: ## Single query with Claude Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude $(AGENT_FLAGS)
 
 ask-pydantic: ## Single query with Pydantic AI Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic $(AGENT_FLAGS)
 
 ask-langgraph: ## Single query with LangGraph Agent
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph $(AGENT_FLAGS)
 
 # Orchestrator chat aliases
 chat-orch-claude: ## Start chat with Claude Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude --orchestrator $(AGENT_FLAGS)
 
 chat-orch-pydantic: ## Start chat with Pydantic Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic --orchestrator $(AGENT_FLAGS)
 
 chat-orch-langgraph: ## Start chat with LangGraph Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph --orchestrator $(AGENT_FLAGS)
 
 # Orchestrator ask aliases
 ask-orch-claude: ## Single query with Claude Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude --orchestrator $(AGENT_FLAGS)
 
 ask-orch-pydantic: ## Single query with Pydantic Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic --orchestrator $(AGENT_FLAGS)
 
 ask-orch-langgraph: ## Single query with LangGraph Orchestrator
-	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph --orchestrator $(AGENT_FLAGS)
 
 #----------------------------------------------------------------------
 # SSE Mode 快捷方式（需要先运行 'make serve'）
@@ -155,7 +155,7 @@ ask-examples: ## Show examples for long query input methods
 	@echo "  EOF"
 	@echo "  )\" AGENT=claude REG_ID=angui_2024"
 	@echo ""
-	@echo "$(BLUE)方案 4: 直接使用 gridcode CLI$(NC)"
-	@echo "  gridcode ask \"\$$(cat queries/my_query.txt)\" -r angui_2024 --agent claude"
+	@echo "$(BLUE)方案 4: 直接使用 regreader CLI$(NC)"
+	@echo "  regreader ask \"\$$(cat queries/my_query.txt)\" -r angui_2024 --agent claude"
 	@echo ""
 	@echo "$(GREEN)========================================$(NC)"

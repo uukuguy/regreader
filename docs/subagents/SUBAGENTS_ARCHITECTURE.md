@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-Subagents 架构将单一的 GridCode Agent 分解为多个专业化的子代理（Subagent），每个子代理拥有独立的上下文和工具集，通过 Orchestrator 协调实现复杂查询的分解和执行。
+Subagents 架构将单一的 RegReader Agent 分解为多个专业化的子代理（Subagent），每个子代理拥有独立的上下文和工具集，通过 Orchestrator 协调实现复杂查询的分解和执行。
 
 ### 1.1 设计目标
 
@@ -38,7 +38,7 @@ Subagents (专家代理, 各 ~600 tokens)
 ## 2. 目录结构
 
 ```
-src/grid_code/
+src/regreader/
 ├── subagents/                    # Subagent 框架（统一定义）
 │   ├── __init__.py
 │   ├── base.py                   # 抽象基类 (BaseSubagent, SubagentContext)
@@ -343,7 +343,7 @@ class SubgraphState(TypedDict):
 class SubgraphBuilder:
     """LangGraph Subgraph 构建器"""
 
-    def __init__(self, config: SubagentConfig, llm: ChatOpenAI, mcp_client: GridCodeMCPClient): ...
+    def __init__(self, config: SubagentConfig, llm: ChatOpenAI, mcp_client: RegReaderMCPClient): ...
 
     def build(self) -> CompiledGraph:
         """构建并编译 Subgraph"""
@@ -417,21 +417,21 @@ class QueryIntent:
 
 ```bash
 # 交互模式 + Orchestrator
-gridcode chat -r angui_2024 --orchestrator
+regreader chat -r angui_2024 --orchestrator
 
 # 单次查询 + Orchestrator
-gridcode ask "表6-2注1的内容" -r angui_2024 -o
+regreader ask "表6-2注1的内容" -r angui_2024 -o
 
 # 指定框架
-gridcode chat -r angui_2024 --agent pydantic -o
-gridcode chat -r angui_2024 --agent langgraph -o
+regreader chat -r angui_2024 --agent pydantic -o
+regreader chat -r angui_2024 --agent langgraph -o
 ```
 
 ### 7.2 编程接口
 
 **LangGraph**:
 ```python
-from grid_code.agents.langgraph import LangGraphOrchestrator
+from regreader.agents.langgraph import LangGraphOrchestrator
 
 async with LangGraphOrchestrator(reg_id="angui_2024") as orchestrator:
     response = await orchestrator.chat("表6-2中注1的内容是什么？")
@@ -440,7 +440,7 @@ async with LangGraphOrchestrator(reg_id="angui_2024") as orchestrator:
 
 **Pydantic AI**:
 ```python
-from grid_code.agents.pydantic import PydanticOrchestrator
+from regreader.agents.pydantic import PydanticOrchestrator
 
 async with PydanticOrchestrator(reg_id="angui_2024") as orchestrator:
     response = await orchestrator.chat("表6-2中注1的内容是什么？")
@@ -450,7 +450,7 @@ async with PydanticOrchestrator(reg_id="angui_2024") as orchestrator:
 
 **Claude SDK**:
 ```python
-from grid_code.agents.claude import ClaudeOrchestrator
+from regreader.agents.claude import ClaudeOrchestrator
 
 async with ClaudeOrchestrator(reg_id="angui_2024") as orchestrator:
     response = await orchestrator.chat("表6-2中注1的内容是什么？")
@@ -460,7 +460,7 @@ async with ClaudeOrchestrator(reg_id="angui_2024") as orchestrator:
 ## 8. 配置选项
 
 ```python
-# 在 src/grid_code/config.py 中
+# 在 src/regreader/config.py 中
 
 # Subagent 架构配置
 enable_orchestrator: bool = False          # 启用 subagent 模式

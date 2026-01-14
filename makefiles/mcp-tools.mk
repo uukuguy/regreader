@@ -1,5 +1,5 @@
 # ============================================================
-# GridCode Makefile - MCP Tools 模块
+# RegReader Makefile - MCP Tools 模块
 # ============================================================
 # MCP 工具 CLI 命令
 # 依赖: mk/variables.mk
@@ -18,9 +18,9 @@ read-chapter: ## Read chapter content by section number (usage: make read-chapte
 		exit 1; \
 	fi
 	@if [ "$(NO_CHILDREN)" = "true" ]; then \
-		$(GRIDCODE_CMD) $(MCP_FLAGS) read-chapter --reg-id $(REG_ID) --section "$(SECTION)" --no-children; \
+		$(REGREADER_CMD) $(MCP_FLAGS) read-chapter --reg-id $(REG_ID) --section "$(SECTION)" --no-children; \
 	else \
-		$(GRIDCODE_CMD) $(MCP_FLAGS) read-chapter --reg-id $(REG_ID) --section "$(SECTION)"; \
+		$(REGREADER_CMD) $(MCP_FLAGS) read-chapter --reg-id $(REG_ID) --section "$(SECTION)"; \
 	fi
 
 #----------------------------------------------------------------------
@@ -28,16 +28,16 @@ read-chapter: ## Read chapter content by section number (usage: make read-chapte
 #----------------------------------------------------------------------
 
 toc: ## Get regulation TOC (usage: make toc REG_ID=angui)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) toc $(REG_ID) --level ${MAX_LEVEL}
+	$(REGREADER_CMD) $(MCP_FLAGS) toc $(REG_ID) --level ${MAX_LEVEL}
 
 read-pages: ## Read page range (usage: make read-pages REG_ID=angui START_PAGE=85 END_PAGE=87)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) read-pages --reg-id $(REG_ID) --start $(START_PAGE) --end $(END_PAGE)
+	$(REGREADER_CMD) $(MCP_FLAGS) read-pages --reg-id $(REG_ID) --start $(START_PAGE) --end $(END_PAGE)
 
 chapter-structure: ## Get chapter structure (usage: make chapter-structure REG_ID=angui)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) chapter-structure $(REG_ID)
+	$(REGREADER_CMD) $(MCP_FLAGS) chapter-structure $(REG_ID)
 
 page-info: ## Get page chapter info (usage: make page-info REG_ID=angui PAGE_NUM=85)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) page-info --reg-id $(REG_ID) --page $(PAGE_NUM)
+	$(REGREADER_CMD) $(MCP_FLAGS) page-info --reg-id $(REG_ID) --page $(PAGE_NUM)
 
 #----------------------------------------------------------------------
 # MCP Tools CLI (Phase 1: 核心多跳工具)
@@ -45,16 +45,16 @@ page-info: ## Get page chapter info (usage: make page-info REG_ID=angui PAGE_NUM
 
 lookup-annotation: ## Lookup annotation (usage: make lookup-annotation REG_ID=angui ANNOTATION_ID="注1" PAGE_NUM=85)
 	@if [ -n "$(PAGE_NUM)" ] && [ "$(PAGE_NUM)" != "7" ]; then \
-		$(GRIDCODE_CMD) $(MCP_FLAGS) lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)" --page $(PAGE_NUM); \
+		$(REGREADER_CMD) $(MCP_FLAGS) lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)" --page $(PAGE_NUM); \
 	else \
-		$(GRIDCODE_CMD) $(MCP_FLAGS) lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)"; \
+		$(REGREADER_CMD) $(MCP_FLAGS) lookup-annotation --reg-id $(REG_ID) "$(ANNOTATION_ID)"; \
 	fi
 
 search-tables: ## Search tables (usage: make search-tables REG_ID=angui TABLE_QUERY="母线失压" TABLE_SEARCH_MODE=hybrid)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) search-tables "$(TABLE_QUERY)" --reg-id $(REG_ID) --mode $(TABLE_SEARCH_MODE)
+	$(REGREADER_CMD) $(MCP_FLAGS) search-tables "$(TABLE_QUERY)" --reg-id $(REG_ID) --mode $(TABLE_SEARCH_MODE)
 
 resolve-reference: ## Resolve cross-reference (usage: make resolve-reference REG_ID=angui REFERENCE="见第六章")
-	$(GRIDCODE_CMD) $(MCP_FLAGS) resolve-reference "$(REFERENCE)" --reg-id $(REG_ID)
+	$(REGREADER_CMD) $(MCP_FLAGS) resolve-reference "$(REFERENCE)" --reg-id $(REG_ID)
 
 #----------------------------------------------------------------------
 # MCP Tools CLI (Phase 2: 上下文工具)
@@ -62,13 +62,13 @@ resolve-reference: ## Resolve cross-reference (usage: make resolve-reference REG
 
 search-annotations: ## Search all annotations (usage: make search-annotations REG_ID=angui PATTERN="电压" ANNOTATION_TYPE=note)
 	@if [ -n "$(PATTERN)" ] && [ -n "$(ANNOTATION_TYPE)" ]; then \
-		$(GRIDCODE_CMD) $(MCP_FLAGS) search-annotations $(REG_ID) --pattern "$(PATTERN)" --type $(ANNOTATION_TYPE); \
+		$(REGREADER_CMD) $(MCP_FLAGS) search-annotations $(REG_ID) --pattern "$(PATTERN)" --type $(ANNOTATION_TYPE); \
 	elif [ -n "$(PATTERN)" ]; then \
-		$(GRIDCODE_CMD) $(MCP_FLAGS) search-annotations $(REG_ID) --pattern "$(PATTERN)"; \
+		$(REGREADER_CMD) $(MCP_FLAGS) search-annotations $(REG_ID) --pattern "$(PATTERN)"; \
 	elif [ -n "$(ANNOTATION_TYPE)" ]; then \
-		$(GRIDCODE_CMD) $(MCP_FLAGS) search-annotations $(REG_ID) --type $(ANNOTATION_TYPE); \
+		$(REGREADER_CMD) $(MCP_FLAGS) search-annotations $(REG_ID) --type $(ANNOTATION_TYPE); \
 	else \
-		$(GRIDCODE_CMD) $(MCP_FLAGS) search-annotations $(REG_ID); \
+		$(REGREADER_CMD) $(MCP_FLAGS) search-annotations $(REG_ID); \
 	fi
 
 get-table: ## Get full table by ID (usage: make get-table REG_ID=angui TABLE_ID="table_xxx")
@@ -77,7 +77,7 @@ get-table: ## Get full table by ID (usage: make get-table REG_ID=angui TABLE_ID=
 		echo "Usage: make get-table REG_ID=angui TABLE_ID=\"table_xxx\""; \
 		exit 1; \
 	fi
-	$(GRIDCODE_CMD) $(MCP_FLAGS) get-table "$(TABLE_ID)" --reg-id $(REG_ID)
+	$(REGREADER_CMD) $(MCP_FLAGS) get-table "$(TABLE_ID)" --reg-id $(REG_ID)
 
 get-block-context: ## Get block with context (usage: make get-block-context REG_ID=angui BLOCK_ID="block_xxx" CONTEXT=2)
 	@if [ -z "$(BLOCK_ID)" ]; then \
@@ -85,14 +85,14 @@ get-block-context: ## Get block with context (usage: make get-block-context REG_
 		echo "Usage: make get-block-context REG_ID=angui BLOCK_ID=\"block_xxx\""; \
 		exit 1; \
 	fi
-	$(GRIDCODE_CMD) $(MCP_FLAGS) get-block-context "$(BLOCK_ID)" --reg-id $(REG_ID) --context $(CONTEXT)
+	$(REGREADER_CMD) $(MCP_FLAGS) get-block-context "$(BLOCK_ID)" --reg-id $(REG_ID) --context $(CONTEXT)
 
 #----------------------------------------------------------------------
 # MCP Tools CLI (Phase 3: 发现工具)
 #----------------------------------------------------------------------
 
 find-similar: ## Find similar content (usage: make find-similar REG_ID=angui SIMILAR_QUERY="母线失压处理")
-	$(GRIDCODE_CMD) $(MCP_FLAGS) find-similar --reg-id $(REG_ID) --query "$(SIMILAR_QUERY)" --limit $(LIMIT)
+	$(REGREADER_CMD) $(MCP_FLAGS) find-similar --reg-id $(REG_ID) --query "$(SIMILAR_QUERY)" --limit $(LIMIT)
 
 compare-sections: ## Compare two sections (usage: make compare-sections REG_ID=angui SECTION_A="2.1.4" SECTION_B="2.1.5")
 	@if [ -z "$(SECTION_A)" ] || [ -z "$(SECTION_B)" ]; then \
@@ -100,7 +100,7 @@ compare-sections: ## Compare two sections (usage: make compare-sections REG_ID=a
 		echo "Usage: make compare-sections REG_ID=angui SECTION_A=\"2.1.4\" SECTION_B=\"2.1.5\""; \
 		exit 1; \
 	fi
-	$(GRIDCODE_CMD) $(MCP_FLAGS) compare-sections "$(SECTION_A)" "$(SECTION_B)" --reg-id $(REG_ID)
+	$(REGREADER_CMD) $(MCP_FLAGS) compare-sections "$(SECTION_A)" "$(SECTION_B)" --reg-id $(REG_ID)
 
 #----------------------------------------------------------------------
 # 表格注册表工具
@@ -112,9 +112,9 @@ build-table-registry: ## Build table registry for a regulation (usage: make buil
 
 build-table-index: ## Build table search index (FTS5 + vector) (usage: make build-table-index REG_ID=angui_2024 REBUILD_INDEX=true)
 	@if [ "$(REBUILD_INDEX)" = "true" ]; then \
-		$(GRIDCODE_CMD) build-table-index $(REG_ID) --rebuild; \
+		$(REGREADER_CMD) build-table-index $(REG_ID) --rebuild; \
 	else \
-		$(GRIDCODE_CMD) build-table-index $(REG_ID); \
+		$(REGREADER_CMD) build-table-index $(REG_ID); \
 	fi
 
 table-registry-stats: ## Show table registry statistics (usage: make table-registry-stats REG_ID=angui_2024)
@@ -158,19 +158,19 @@ read-pages-mcp-sse: ## Read pages via MCP SSE
 #----------------------------------------------------------------------
 
 mcp-tools: ## List MCP tools (static metadata)
-	$(GRIDCODE_CMD) mcp-tools
+	$(REGREADER_CMD) mcp-tools
 
 mcp-tools-v: ## List MCP tools with detailed info
-	$(GRIDCODE_CMD) mcp-tools -v
+	$(REGREADER_CMD) mcp-tools -v
 
 mcp-tools-live: ## List MCP tools from live server (stdio)
-	$(GRIDCODE_CMD) mcp-tools --live
+	$(REGREADER_CMD) mcp-tools --live
 
 mcp-verify: ## Verify MCP service completeness (stdio mode)
-	$(GRIDCODE_CMD) mcp-tools --live --verify
+	$(REGREADER_CMD) mcp-tools --live --verify
 
 mcp-verify-v: ## Verify MCP service with detailed output
-	$(GRIDCODE_CMD) mcp-tools --live --verify -v
+	$(REGREADER_CMD) mcp-tools --live --verify -v
 
 mcp-verify-sse: ## Verify MCP service via SSE (requires 'make serve' running)
-	$(GRIDCODE_CMD) mcp-tools --live --sse $(SSE_URL) --verify -v
+	$(REGREADER_CMD) mcp-tools --live --sse $(SSE_URL) --verify -v

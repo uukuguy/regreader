@@ -2,7 +2,7 @@
 
 ## 概述
 
-GridCode 的 Claude Agent SDK 实现现在默认使用 Anthropic 官方的 `preset: "claude_code"` 配置。这个预设将 Claude 从一个简单的"聊天机器人"转变为"自主编程代理"，提供了经过优化的系统提示词和最佳实践。
+RegReader 的 Claude Agent SDK 实现现在默认使用 Anthropic 官方的 `preset: "claude_code"` 配置。这个预设将 Claude 从一个简单的"聊天机器人"转变为"自主编程代理"，提供了经过优化的系统提示词和最佳实践。
 
 ### 核心优势
 
@@ -17,7 +17,7 @@ GridCode 的 Claude Agent SDK 实现现在默认使用 Anthropic 官方的 `pres
 ### 基本使用（默认启用）
 
 ```python
-from grid_code.agents.claude.orchestrator import ClaudeOrchestrator
+from regreader.agents.claude.orchestrator import ClaudeOrchestrator
 
 # Preset 模式（默认）- 推荐使用
 async with ClaudeOrchestrator(reg_id="angui_2024") as agent:
@@ -74,7 +74,7 @@ async with ClaudeOrchestrator(
 ### ClaudeOrchestrator
 
 ```python
-class ClaudeOrchestrator(BaseGridCodeAgent):
+class ClaudeOrchestrator(BaseRegReaderAgent):
     def __init__(
         self,
         reg_id: str | None = None,
@@ -340,7 +340,7 @@ response = await agent.chat(
 from loguru import logger
 
 # 启用详细日志
-logger.enable("grid_code.agents.claude")
+logger.enable("regreader.agents.claude")
 
 async with ClaudeOrchestrator(reg_id="angui_2024") as agent:
     response = await agent.chat(query)
@@ -372,7 +372,7 @@ async with ClaudeOrchestrator(
 
 ```bash
 # .env 文件
-GRIDCODE_CLAUDE_USE_PRESET=false  # 全局禁用 preset
+REGREADER_CLAUDE_USE_PRESET=false  # 全局禁用 preset
 ```
 
 ```python
@@ -429,8 +429,8 @@ async with ClaudeOrchestrator(
 
 ```python
 # 查看实际使用的领域提示词
-from grid_code.agents.claude.subagents import BaseClaudeSubagent
-from grid_code.subagents.base import SubagentContext
+from regreader.agents.claude.subagents import BaseClaudeSubagent
+from regreader.subagents.base import SubagentContext
 
 subagent = BaseClaudeSubagent(...)
 context = SubagentContext(query="...", reg_id="angui_2024")
@@ -444,14 +444,14 @@ print(domain_prompt)  # 检查内容是否完整
 
 1. **CLI 集成**
    ```bash
-   gridcode chat --preset    # 显式启用
-   gridcode chat --no-preset # 显式禁用
+   regreader chat --preset    # 显式启用
+   regreader chat --no-preset # 显式禁用
    ```
 
 2. **环境变量配置**
    ```bash
-   GRIDCODE_CLAUDE_USE_PRESET=true
-   GRIDCODE_CLAUDE_PRESET_NAME=claude_code  # 支持其他 preset
+   REGREADER_CLAUDE_USE_PRESET=true
+   REGREADER_CLAUDE_PRESET_NAME=claude_code  # 支持其他 preset
    ```
 
 3. **动态提示词调整**
@@ -471,7 +471,7 @@ print(domain_prompt)  # 检查内容是否完整
 
 ### 项目文档
 
-- [GridCode 架构设计](../CLAUDE.md)
+- [RegReader 架构设计](../CLAUDE.md)
 - [Subagents 架构](../subagents/SUBAGENTS_ARCHITECTURE.md)
 - [开发工作日志](./WORK_LOG.md)
 
@@ -481,7 +481,7 @@ print(domain_prompt)  # 检查内容是否完整
 
 ## 总结
 
-`preset: "claude_code"` 为 GridCode 的 Claude Agent SDK 实现带来了：
+`preset: "claude_code"` 为 RegReader 的 Claude Agent SDK 实现带来了：
 
 ✅ **更低的维护成本**：领域提示词减少 60-70%
 ✅ **更好的工具使用**：官方优化的调用策略
@@ -494,4 +494,4 @@ print(domain_prompt)  # 检查内容是否完整
 - 领域提示词仍然可以定制
 - 工具过滤机制不受影响
 
-这是 Anthropic 官方推荐的最佳实践，现在已经成为 GridCode 的默认配置！
+这是 Anthropic 官方推荐的最佳实践，现在已经成为 RegReader 的默认配置！

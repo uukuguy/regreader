@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from grid_code.mcp.tools import GridCodeTools
+from regreader.mcp.tools import RegReaderTools
 
 # 测试用规程 ID
 TEST_REG_ID = "angui_2024"
@@ -58,7 +58,7 @@ class TestGetTocDepth:
     @pytest.fixture
     def tools(self):
         """获取工具实例"""
-        return GridCodeTools()
+        return RegReaderTools()
 
     def test_default_depth(self, tools):
         """测试默认深度（3级）返回合理大小"""

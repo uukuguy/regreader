@@ -12,10 +12,10 @@ import typer
 from rich.console import Console
 from rich.prompt import Confirm
 
-from grid_code.config import get_settings
-from grid_code.index import FTSIndex, VectorIndex
-from grid_code.parser import DoclingParser, PageExtractor
-from grid_code.storage import PageStore
+from regreader.config import get_settings
+from regreader.index import FTSIndex, VectorIndex
+from regreader.parser import DoclingParser, PageExtractor
+from regreader.storage import PageStore
 
 console = Console()
 app = typer.Typer()

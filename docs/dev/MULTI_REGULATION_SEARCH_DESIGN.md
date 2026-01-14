@@ -2,7 +2,7 @@
 
 ## 背景
 
-当前 GridCode 系统针对单一规程（安规2024）设计，现已入库两个规程：
+当前 RegReader 系统针对单一规程（安规2024）设计，现已入库两个规程：
 - `angui_2024`：安全自动装置调度运行管理规定
 - `wengui_2024`：特高压互联电网稳定及无功电压调度运行规定
 
@@ -26,7 +26,7 @@
 ### Phase 1: MCP 工具层改造
 
 #### 1.1 修改 `smart_search` 参数签名
-**文件**: `src/grid_code/mcp/tools.py` (第 168-220 行)
+**文件**: `src/regreader/mcp/tools.py` (第 168-220 行)
 
 ```python
 # 当前
@@ -81,7 +81,7 @@ return [
 ```
 
 #### 1.4 扩展 `RegulationInfo` 模型
-**文件**: `src/grid_code/storage/models.py` (第 323-330 行)
+**文件**: `src/regreader/storage/models.py` (第 323-330 行)
 
 新增字段用于辅助 Agent 选择规程：
 ```python
@@ -116,14 +116,14 @@ class RegulationInfo(BaseModel):
 ```
 
 #### 1.6 新增 CLI 命令：自动生成规程元数据
-**文件**: `src/grid_code/cli.py`
+**文件**: `src/regreader/cli.py`
 
 ```bash
 # 为单个规程生成元数据
-gridcode enrich-metadata angui_2024
+regreader enrich-metadata angui_2024
 
 # 为所有规程生成元数据
-gridcode enrich-metadata --all
+regreader enrich-metadata --all
 ```
 
 实现逻辑：
@@ -188,15 +188,15 @@ METADATA_GENERATION_PROMPT = """
 ### Phase 2: Prompt 系统改造
 
 #### 2.1 泛化角色定义
-**文件**: `src/grid_code/agents/prompts.py` (第 20-25 行)
+**文件**: `src/regreader/agents/prompts.py` (第 20-25 行)
 
 ```python
 # 当前
-ROLE_DEFINITION = """你是电力系统安规专家助理 GridCode..."""
+ROLE_DEFINITION = """你是电力系统安规专家助理 RegReader..."""
 
 # 改为（规程列表从元数据动态生成）
 ROLE_DEFINITION = """# 角色定义
-你是电力系统规程专家助理 GridCode，具备在多部规程文档中动态"翻书"的能力。
+你是电力系统规程专家助理 RegReader，具备在多部规程文档中动态"翻书"的能力。
 
 ## 可用规程库
 {regulation_list}
@@ -206,7 +206,7 @@ ROLE_DEFINITION = """# 角色定义
 ```
 
 #### 2.2 从元数据动态生成规程列表
-**文件**: `src/grid_code/agents/prompts.py`
+**文件**: `src/regreader/agents/prompts.py`
 
 新增函数，从 `list_regulations()` 返回的元数据生成提示词片段：
 ```python
@@ -225,7 +225,7 @@ def format_regulation_list(regulations: list[dict]) -> str:
 ```
 
 #### 2.3 新增多规程工作流
-**文件**: `src/grid_code/agents/prompts.py`
+**文件**: `src/regreader/agents/prompts.py`
 
 在 `OPERATION_PROTOCOLS` 开头新增：
 
@@ -242,7 +242,7 @@ def format_regulation_list(regulations: list[dict]) -> str:
 ### Phase 3: Agent 层改造
 
 #### 3.1 初始化时预加载规程列表
-**文件**: `src/grid_code/agents/claude_agent.py` (及其他 Agent)
+**文件**: `src/regreader/agents/claude_agent.py` (及其他 Agent)
 
 ```python
 async def _get_system_prompt(self) -> str:
@@ -257,7 +257,7 @@ async def _get_system_prompt(self) -> str:
 ### Phase 4: CLI 改造
 
 #### 4.1 搜索命令支持多规程参数
-**文件**: `src/grid_code/cli.py` (第 271-288 行)
+**文件**: `src/regreader/cli.py` (第 271-288 行)
 
 ```python
 @app.command()
@@ -267,10 +267,10 @@ def search(
     all_regs: bool = Option(False, "--all", "-a", help="搜索所有规程"),
 ):
     # 示例用法：
-    # gridcode search "母线失压"                          # 智能选择规程
-    # gridcode search "天中直流安控" -r angui_2024         # 单规程
-    # gridcode search "稳定控制" -r angui_2024 -r wengui_2024  # 多规程
-    # gridcode search "故障处理" --all                    # 全规程
+    # regreader search "母线失压"                          # 智能选择规程
+    # regreader search "天中直流安控" -r angui_2024         # 单规程
+    # regreader search "稳定控制" -r angui_2024 -r wengui_2024  # 多规程
+    # regreader search "故障处理" --all                    # 全规程
 ```
 
 **默认行为**：
@@ -284,7 +284,7 @@ def search(
 
 ### Phase 5: 工具元数据更新
 
-**文件**: `src/grid_code/mcp/tool_metadata.py`
+**文件**: `src/regreader/mcp/tool_metadata.py`
 
 更新 `smart_search` 描述和参数定义，新增工作流：
 ```python
@@ -297,16 +297,16 @@ def search(
 
 | 文件 | 修改内容 |
 |------|----------|
-| `src/grid_code/storage/models.py` | RegulationInfo 新增 description/keywords/scope 字段 |
-| `src/grid_code/storage/page_store.py` | 新增 update_info() 方法更新元数据 |
-| `src/grid_code/mcp/tools.py` | smart_search 参数+逻辑 |
-| `src/grid_code/mcp/tool_metadata.py` | 工具描述、参数定义、工作流 |
-| `src/grid_code/agents/prompts.py` | 角色定义、format_regulation_list 函数、操作协议 |
-| `src/grid_code/agents/claude_agent.py` | 预加载规程列表、动态生成提示词 |
-| `src/grid_code/agents/pydantic_agent.py` | 同上 |
-| `src/grid_code/agents/langgraph_agent.py` | 同上 |
-| `src/grid_code/cli.py` | 多规程参数、结果分组显示、enrich-metadata 命令 |
-| `src/grid_code/services/metadata_service.py` | 新增：LLM 生成元数据服务 |
+| `src/regreader/storage/models.py` | RegulationInfo 新增 description/keywords/scope 字段 |
+| `src/regreader/storage/page_store.py` | 新增 update_info() 方法更新元数据 |
+| `src/regreader/mcp/tools.py` | smart_search 参数+逻辑 |
+| `src/regreader/mcp/tool_metadata.py` | 工具描述、参数定义、工作流 |
+| `src/regreader/agents/prompts.py` | 角色定义、format_regulation_list 函数、操作协议 |
+| `src/regreader/agents/claude_agent.py` | 预加载规程列表、动态生成提示词 |
+| `src/regreader/agents/pydantic_agent.py` | 同上 |
+| `src/regreader/agents/langgraph_agent.py` | 同上 |
+| `src/regreader/cli.py` | 多规程参数、结果分组显示、enrich-metadata 命令 |
+| `src/regreader/services/metadata_service.py` | 新增：LLM 生成元数据服务 |
 
 ## 实现顺序
 
@@ -328,11 +328,11 @@ def search(
 
 ## 验收标准
 
-1. `gridcode search "母线失压"` → 智能选择匹配的规程（angui_2024 包含"故障处理"关键词）
-2. `gridcode search "特高压稳定限额"` → 智能选择 wengui_2024
-3. `gridcode search "天中直流安控" -r angui_2024` → 仅搜索安规
-4. `gridcode search "稳定控制" -r angui_2024 -r wengui_2024` → 搜索指定多规程
-5. `gridcode search "xxx" --all` → 搜索所有规程
-6. `gridcode chat` → Agent 能根据问题智能选择规程
+1. `regreader search "母线失压"` → 智能选择匹配的规程（angui_2024 包含"故障处理"关键词）
+2. `regreader search "特高压稳定限额"` → 智能选择 wengui_2024
+3. `regreader search "天中直流安控" -r angui_2024` → 仅搜索安规
+4. `regreader search "稳定控制" -r angui_2024 -r wengui_2024` → 搜索指定多规程
+5. `regreader search "xxx" --all` → 搜索所有规程
+6. `regreader chat` → Agent 能根据问题智能选择规程
 7. 跨规程问题（如"天中直流的稳定限额和安控措施"）能匹配两个规程并整合回答
-8. `gridcode enrich-metadata --all` → 自动生成所有规程的元数据
+8. `regreader enrich-metadata --all` → 自动生成所有规程的元数据

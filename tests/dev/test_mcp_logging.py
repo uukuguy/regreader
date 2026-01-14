@@ -10,11 +10,11 @@ import sys
 
 async def test_langgraph_mcp():
     """测试 LangGraph 的 MCP 连接"""
-    from grid_code.mcp.client import GridCodeMCPClient
+    from regreader.mcp.client import RegReaderMCPClient
 
     print("\n=== Testing LangGraph MCP Client ===", file=sys.stderr)
 
-    async with GridCodeMCPClient(transport="stdio") as client:
+    async with RegReaderMCPClient(transport="stdio") as client:
         print(f"Connected, tools: {[t['name'] for t in client._tools_cache]}", file=sys.stderr)
 
         # 调用工具

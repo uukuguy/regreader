@@ -1,6 +1,6 @@
 """Test result_parser with various tool_response formats."""
 
-from grid_code.agents.result_parser import parse_tool_result, _unwrap_text_content
+from regreader.agents.result_parser import parse_tool_result, _unwrap_text_content
 
 
 def test_parse_smart_search_list():

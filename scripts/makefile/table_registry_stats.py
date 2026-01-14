@@ -14,7 +14,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from grid_code.storage import PageStore
+from regreader.storage import PageStore
 
 
 def show_stats(reg_id: str) -> None:

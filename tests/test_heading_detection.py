@@ -1,6 +1,6 @@
 """测试标题检测功能"""
 
-from grid_code.parser.page_extractor import PageExtractor
+from regreader.parser.page_extractor import PageExtractor
 
 
 def test_detect_heading_from_text():

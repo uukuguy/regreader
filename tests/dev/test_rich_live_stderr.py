@@ -12,7 +12,7 @@ from rich.live import Live
 
 async def test_with_rich_live():
     """在 Rich Live 模式下测试 MCP 日志"""
-    from grid_code.mcp.client import GridCodeMCPClient
+    from regreader.mcp.client import RegReaderMCPClient
 
     console = Console()
 
@@ -20,7 +20,7 @@ async def test_with_rich_live():
 
     # 使用 Rich Live 模式（模拟 CLI 的 AgentStatusDisplay）
     with Live("[cyan]思考中...[/cyan]", console=console, transient=True) as live:
-        async with GridCodeMCPClient(transport="stdio") as client:
+        async with RegReaderMCPClient(transport="stdio") as client:
             live.update("[cyan]MCP 连接成功[/cyan]")
             print(f"Connected, tools: {len(client._tools_cache)}", file=sys.stderr)
 
@@ -34,11 +34,11 @@ async def test_with_rich_live():
 
 async def test_without_rich_live():
     """不使用 Rich Live 模式测试 MCP 日志"""
-    from grid_code.mcp.client import GridCodeMCPClient
+    from regreader.mcp.client import RegReaderMCPClient
 
     print("\n=== Testing WITHOUT Rich Live ===", file=sys.stderr)
 
-    async with GridCodeMCPClient(transport="stdio") as client:
+    async with RegReaderMCPClient(transport="stdio") as client:
         print(f"Connected, tools: {len(client._tools_cache)}", file=sys.stderr)
 
         # 调用工具

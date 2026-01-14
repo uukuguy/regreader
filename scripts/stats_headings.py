@@ -4,7 +4,7 @@
 import sys
 from collections import Counter
 
-from grid_code.storage import PageStore
+from regreader.storage import PageStore
 
 
 def main():

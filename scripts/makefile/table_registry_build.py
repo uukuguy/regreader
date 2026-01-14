@@ -14,8 +14,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from grid_code.storage import PageStore
-from grid_code.parser import TableRegistryBuilder
+from regreader.storage import PageStore
+from regreader.parser import TableRegistryBuilder
 
 
 def build_table_registry(reg_id: str) -> None:

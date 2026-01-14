@@ -1,7 +1,7 @@
 # Subagents 重构工作日志
 
 ## 概述
-将 GridCode 重构为 **Subagents 范式**，通过独立上下文减轻主 Agent 的上下文容量压力。
+将 RegReader 重构为 **Subagents 范式**，通过独立上下文减轻主 Agent 的上下文容量压力。
 
 ## 2025-01-10 工作记录
 
@@ -19,41 +19,41 @@
 ### 新增文件
 
 #### Subagents 基础层
-- `src/grid_code/subagents/__init__.py` - 模块导出
-- `src/grid_code/subagents/base.py` - 抽象基类 (BaseSubagent, SubagentContext)
-- `src/grid_code/subagents/config.py` - 配置定义 (SubagentConfig, SubagentType)
-- `src/grid_code/subagents/result.py` - 结果模型 (SubagentResult)
-- `src/grid_code/subagents/registry.py` - 注册表 (SubagentRegistry)
-- `src/grid_code/subagents/prompts.py` - 专用提示词
+- `src/regreader/subagents/__init__.py` - 模块导出
+- `src/regreader/subagents/base.py` - 抽象基类 (BaseSubagent, SubagentContext)
+- `src/regreader/subagents/config.py` - 配置定义 (SubagentConfig, SubagentType)
+- `src/regreader/subagents/result.py` - 结果模型 (SubagentResult)
+- `src/regreader/subagents/registry.py` - 注册表 (SubagentRegistry)
+- `src/regreader/subagents/prompts.py` - 专用提示词
 
 #### Orchestrator 协调层
-- `src/grid_code/orchestrator/__init__.py` - 模块导出
-- `src/grid_code/orchestrator/analyzer.py` - QueryAnalyzer（查询意图分析）
-- `src/grid_code/orchestrator/router.py` - SubagentRouter（路由逻辑）
-- `src/grid_code/orchestrator/aggregator.py` - ResultAggregator（结果聚合）
+- `src/regreader/orchestrator/__init__.py` - 模块导出
+- `src/regreader/orchestrator/analyzer.py` - QueryAnalyzer（查询意图分析）
+- `src/regreader/orchestrator/router.py` - SubagentRouter（路由逻辑）
+- `src/regreader/orchestrator/aggregator.py` - ResultAggregator（结果聚合）
 
 #### LangGraph 实现
-- `src/grid_code/agents/langgraph/__init__.py` - 模块导出
-- `src/grid_code/agents/langgraph/orchestrator.py` - LangGraphOrchestrator
-- `src/grid_code/agents/langgraph/subgraphs.py` - Subgraph 实现
+- `src/regreader/agents/langgraph/__init__.py` - 模块导出
+- `src/regreader/agents/langgraph/orchestrator.py` - LangGraphOrchestrator
+- `src/regreader/agents/langgraph/subgraphs.py` - Subgraph 实现
 
 #### Pydantic AI 实现
-- `src/grid_code/agents/pydantic/__init__.py` - 模块导出
-- `src/grid_code/agents/pydantic/orchestrator.py` - PydanticOrchestrator
-- `src/grid_code/agents/pydantic/subagents.py` - Pydantic Subagent 实现
+- `src/regreader/agents/pydantic/__init__.py` - 模块导出
+- `src/regreader/agents/pydantic/orchestrator.py` - PydanticOrchestrator
+- `src/regreader/agents/pydantic/subagents.py` - Pydantic Subagent 实现
 
 #### Claude Agent SDK 实现
-- `src/grid_code/agents/claude/__init__.py` - 模块导出
-- `src/grid_code/agents/claude/orchestrator.py` - ClaudeOrchestrator
-- `src/grid_code/agents/claude/subagents.py` - Claude Subagent 实现
+- `src/regreader/agents/claude/__init__.py` - 模块导出
+- `src/regreader/agents/claude/orchestrator.py` - ClaudeOrchestrator
+- `src/regreader/agents/claude/subagents.py` - Claude Subagent 实现
 
 ### 修改文件
 
 #### Agents 模块
-- `src/grid_code/agents/__init__.py` - 添加三个 Orchestrator 的导出
+- `src/regreader/agents/__init__.py` - 添加三个 Orchestrator 的导出
 
 #### CLI
-- `src/grid_code/cli.py` - 添加 `--orchestrator` 标志到 `chat` 和 `ask` 命令
+- `src/regreader/cli.py` - 添加 `--orchestrator` 标志到 `chat` 和 `ask` 命令
 
 ### 技术实现细节
 
@@ -78,23 +78,23 @@
 
 ```bash
 # 交互模式 + Orchestrator
-gridcode chat -r angui_2024 --orchestrator
-gridcode chat -r angui_2024 -o  # 简写
+regreader chat -r angui_2024 --orchestrator
+regreader chat -r angui_2024 -o  # 简写
 
 # 单次查询 + Orchestrator
-gridcode ask "表6-2注1的内容" -r angui_2024 --orchestrator
-gridcode ask "表6-2注1的内容" -r angui_2024 -o  # 简写
+regreader ask "表6-2注1的内容" -r angui_2024 --orchestrator
+regreader ask "表6-2注1的内容" -r angui_2024 -o  # 简写
 
 # 指定框架 + Orchestrator
-gridcode chat -r angui_2024 --agent pydantic -o
-gridcode chat -r angui_2024 --agent langgraph -o
+regreader chat -r angui_2024 --agent pydantic -o
+regreader chat -r angui_2024 --agent langgraph -o
 ```
 
 ### 验证结果
 
 所有导入验证通过：
 ```python
-from grid_code.agents import (
+from regreader.agents import (
     ClaudeOrchestrator,
     PydanticOrchestrator,
     LangGraphOrchestrator
@@ -102,8 +102,8 @@ from grid_code.agents import (
 ```
 
 CLI 帮助显示正确：
-- `gridcode chat --help` 显示 `--orchestrator` 选项
-- `gridcode ask --help` 显示 `--orchestrator` 选项
+- `regreader chat --help` 显示 `--orchestrator` 选项
+- `regreader ask --help` 显示 `--orchestrator` 选项
 
 ### 后续优化方向
 
@@ -139,7 +139,7 @@ CLI 帮助显示正确：
 
 #### 1. Pydantic AI 原生委托模式重构
 
-**`src/grid_code/agents/pydantic/subagents.py`** - 完全重写
+**`src/regreader/agents/pydantic/subagents.py`** - 完全重写
 
 新增核心类：
 ```python
@@ -165,7 +165,7 @@ class SubagentBuilder:
     async def invoke(self, agent, query, deps, usage=None) -> SubagentOutput: ...
 ```
 
-**`src/grid_code/agents/pydantic/orchestrator.py`** - 完全重写
+**`src/regreader/agents/pydantic/orchestrator.py`** - 完全重写
 
 原生委托模式实现：
 ```python
@@ -192,7 +192,7 @@ async def _invoke_subagent(ctx, agent_type, query) -> str:
 
 #### 2. LangGraph 原生子图模式（前一会话已完成）
 
-**`src/grid_code/agents/langgraph/subgraphs.py`** - 状态隔离
+**`src/regreader/agents/langgraph/subgraphs.py`** - 状态隔离
 ```python
 class SubgraphState(TypedDict):
     """子图独立状态"""
@@ -204,7 +204,7 @@ class SubgraphBuilder:
     def build(self) -> CompiledGraph: ...
 ```
 
-**`src/grid_code/agents/langgraph/orchestrator.py`** - 父图组合
+**`src/regreader/agents/langgraph/orchestrator.py`** - 父图组合
 ```python
 class OrchestratorState(TypedDict):
     """父图状态"""
@@ -226,18 +226,18 @@ def _create_subgraph_node(self, builder: SubgraphBuilder):
 
 | 文件 | 修改类型 | 说明 |
 |------|----------|------|
-| `src/grid_code/agents/pydantic/subagents.py` | 重写 | 新增 SubagentBuilder，保留 Legacy 类向后兼容 |
-| `src/grid_code/agents/pydantic/orchestrator.py` | 重写 | 使用 @tool 委托模式 + deps/usage 传递 |
-| `src/grid_code/agents/pydantic/__init__.py` | 更新 | 导出新 API + Legacy 类 |
-| `src/grid_code/agents/langgraph/__init__.py` | 更新 | 导出新 API + Legacy 类 |
+| `src/regreader/agents/pydantic/subagents.py` | 重写 | 新增 SubagentBuilder，保留 Legacy 类向后兼容 |
+| `src/regreader/agents/pydantic/orchestrator.py` | 重写 | 使用 @tool 委托模式 + deps/usage 传递 |
+| `src/regreader/agents/pydantic/__init__.py` | 更新 | 导出新 API + Legacy 类 |
+| `src/regreader/agents/langgraph/__init__.py` | 更新 | 导出新 API + Legacy 类 |
 | `docs/subagents/SUBAGENTS_ARCHITECTURE.md` | 更新 | 新增 5.2/5.3 原生模式说明、框架对比表、更新历史 |
 
 ### 验证结果
 
 导入验证通过：
 ```bash
-python -c "from grid_code.agents.pydantic import SubagentBuilder, PydanticOrchestrator; print('OK')"
-python -c "from grid_code.agents.langgraph import SubgraphBuilder, LangGraphOrchestrator; print('OK')"
+python -c "from regreader.agents.pydantic import SubagentBuilder, PydanticOrchestrator; print('OK')"
+python -c "from regreader.agents.langgraph import SubgraphBuilder, LangGraphOrchestrator; print('OK')"
 ```
 
 ### 框架对比总结

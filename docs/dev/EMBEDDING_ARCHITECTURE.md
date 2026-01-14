@@ -2,7 +2,7 @@
 
 ## 背景
 
-当前 GridCode 使用 `sentence-transformers` 加载 BGE 模型时产生警告：
+当前 RegReader 使用 `sentence-transformers` 加载 BGE 模型时产生警告：
 ```
 WARNING  No sentence-transformers model found with name BAAI/bge-small-zh-v1.5.
 Creating a new one with mean pooling.
@@ -24,7 +24,7 @@ Creating a new one with mean pooling.
 
 ### 目录结构
 ```
-src/grid_code/
+src/regreader/
 ├── embedding/                    # 新增嵌入模块
 │   ├── __init__.py              # 导出 + 工厂函数
 │   ├── base.py                  # BaseEmbedder 抽象基类
@@ -88,34 +88,34 @@ embedding_api_base: str | None = None  # 自定义 API 端点
 ## 实现步骤
 
 ### Step 1: 创建 embedding 模块基础
-**文件**: `src/grid_code/embedding/base.py`
+**文件**: `src/regreader/embedding/base.py`
 - 定义 `EmbedType` 枚举
 - 定义 `BaseEmbedder` 抽象基类
 
 ### Step 2: 实现 SentenceTransformerEmbedder
-**文件**: `src/grid_code/embedding/sentence_transformer.py`
+**文件**: `src/regreader/embedding/sentence_transformer.py`
 - 自动检测 BGE 模型查询前缀
 - 使用 `prompt_name` 区分 query/document
 
 ### Step 3: 实现 FlagEmbedder
-**文件**: `src/grid_code/embedding/flag.py`
+**文件**: `src/regreader/embedding/flag.py`
 - 使用 `encode_queries()` / `encode_corpus()`
 - 支持 FP16 加速
 
 ### Step 4: 工厂函数和模块导出
-**文件**: `src/grid_code/embedding/__init__.py`
+**文件**: `src/regreader/embedding/__init__.py`
 - `create_embedder()` 工厂函数
 - `get_embedder()` 全局单例
 
 ### Step 5: 扩展配置
-**文件**: `src/grid_code/config.py`
+**文件**: `src/regreader/config.py`
 - 添加 `embedding_backend`、`embedding_use_fp16` 等配置
 
 ### Step 6: 重构向量索引
 **文件**:
-- `src/grid_code/index/vector/lancedb.py`
-- `src/grid_code/index/vector/qdrant.py`
-- `src/grid_code/index/table_lancedb.py`
+- `src/regreader/index/vector/lancedb.py`
+- `src/regreader/index/vector/qdrant.py`
+- `src/regreader/index/table_lancedb.py`
 
 修改点：
 - 构造函数接受 `embedder: BaseEmbedder | None` 参数
@@ -140,26 +140,26 @@ flag = ["FlagEmbedding>=1.2.0"]
 
 | 文件 | 操作 |
 |------|------|
-| `src/grid_code/embedding/base.py` | 新建 |
-| `src/grid_code/embedding/sentence_transformer.py` | 新建 |
-| `src/grid_code/embedding/flag.py` | 新建 |
-| `src/grid_code/embedding/__init__.py` | 新建 |
-| `src/grid_code/config.py` | 修改 |
-| `src/grid_code/index/vector/lancedb.py` | 修改 |
-| `src/grid_code/index/vector/qdrant.py` | 修改 |
-| `src/grid_code/index/table_lancedb.py` | 修改 |
+| `src/regreader/embedding/base.py` | 新建 |
+| `src/regreader/embedding/sentence_transformer.py` | 新建 |
+| `src/regreader/embedding/flag.py` | 新建 |
+| `src/regreader/embedding/__init__.py` | 新建 |
+| `src/regreader/config.py` | 修改 |
+| `src/regreader/index/vector/lancedb.py` | 修改 |
+| `src/regreader/index/vector/qdrant.py` | 修改 |
+| `src/regreader/index/table_lancedb.py` | 修改 |
 | `pyproject.toml` | 修改 |
 
 ## 使用示例
 
 ```bash
 # 环境变量切换后端
-export GRIDCODE_EMBEDDING_BACKEND=flag
+export REGREADER_EMBEDDING_BACKEND=flag
 ```
 
 ```python
 # 代码中指定
-from grid_code.embedding import create_embedder
+from regreader.embedding import create_embedder
 
 embedder = create_embedder(backend="flag")
 query_vec = embedder.embed_query("工作票办理流程")

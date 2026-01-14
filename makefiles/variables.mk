@@ -1,5 +1,5 @@
 # ============================================================
-# GridCode Makefile 变量定义
+# RegReader Makefile 变量定义
 # ============================================================
 
 # 工具链
@@ -7,11 +7,11 @@ PYTHON := python
 UV := uv
 PYTEST := pytest
 RUFF := ruff
-GRIDCODE := gridcode
+REGREADER := regreader
 
 # 命令前缀（消除 70+ 处重复）
 UV_RUN := $(UV) run
-GRIDCODE_CMD := $(UV_RUN) $(GRIDCODE)
+REGREADER_CMD := $(UV_RUN) $(REGREADER)
 PY_CMD := $(UV_RUN) $(PYTHON)
 
 # Agent 配置

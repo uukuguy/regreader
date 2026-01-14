@@ -1,14 +1,14 @@
-# GridCode 开发工作日志 (dev 分支)
+# RegReader 开发工作日志 (dev 分支)
 
 ## 2026-01-12 集成 Claude Agent SDK `preset: "claude_code"`
 
 ### 会话概述
 
-实现 Claude Agent SDK 的 `preset: "claude_code"` 支持，将 Claude 从简单的"聊天机器人"升级为"自主编程代理"，同时保持GridCode的领域特定知识。
+实现 Claude Agent SDK 的 `preset: "claude_code"` 支持，将 Claude 从简单的"聊天机器人"升级为"自主编程代理"，同时保持RegReader的领域特定知识。
 
 ### 背景
 
-GridCode 的 Claude Agent SDK 实现一直使用手动编写的系统提示词（约1760字），需要持续维护和调优。`preset: "claude_code"` 是 Anthropic 官方提供的预配置提示词包，包含：
+RegReader 的 Claude Agent SDK 实现一直使用手动编写的系统提示词（约1760字），需要持续维护和调优。`preset: "claude_code"` 是 Anthropic 官方提供的预配置提示词包，包含：
 - 工具使用最佳实践
 - 任务规划和分解能力
 - 智能错误恢复策略
@@ -41,8 +41,8 @@ GridCode 的 Claude Agent SDK 实现一直使用手动编写的系统提示词�
 #### 2. 核心代码实现
 
 **修改文件总览**:
-- `src/grid_code/agents/claude/subagents.py` (核心实现)
-- `src/grid_code/agents/claude/orchestrator.py` (参数传递)
+- `src/regreader/agents/claude/subagents.py` (核心实现)
+- `src/regreader/agents/claude/orchestrator.py` (参数传递)
 - `tests/bash-fs-paradiam/test_claude_preset.py` (测试脚本)
 
 **关键实现**:
@@ -246,7 +246,7 @@ orchestrator = ClaudeOrchestrator(
 ### 关键文件变更
 
 ```
-src/grid_code/agents/claude/
+src/regreader/agents/claude/
 ├── subagents.py              # 核心实现：preset 支持 + 领域提示词
 ├── orchestrator.py           # 参数传递：use_preset 集成
 tests/bash-fs-paradiam/
@@ -303,7 +303,7 @@ tests/bash-fs-paradiam/
 #### 启用 Preset 模式
 
 ```python
-from grid_code.agents.claude.orchestrator import ClaudeOrchestrator
+from regreader.agents.claude.orchestrator import ClaudeOrchestrator
 
 # 创建启用 preset 的 Orchestrator
 async with ClaudeOrchestrator(
@@ -331,10 +331,10 @@ uv run pytest tests/bash-fs-paradiam/test_claude_preset.py::test_domain_prompt_g
 
 ```bash
 # 使用 preset 模式进行查询
-gridcode chat -r angui_2024 --agent claude --use-preset
+regreader chat -r angui_2024 --agent claude --use-preset
 
 # 保持手动模式（默认）
-gridcode chat -r angui_2024 --agent claude
+regreader chat -r angui_2024 --agent claude
 ```
 
 ---
@@ -347,7 +347,7 @@ gridcode chat -r angui_2024 --agent claude
 
 ### 背景
 
-GridCode 已经完成了重大架构演进：
+RegReader 已经完成了重大架构演进：
 1. **Phase 5**: Subagents 架构（上下文隔离，~4000 → ~800 tokens）
 2. **Phase 6**: Bash+FS 范式（Infrastructure层、Coordinator、RegSearch-Subagent）
 3. **Makefile 模块化重构**
@@ -429,7 +429,7 @@ GridCode 已经完成了重大架构演进：
 
 **更新的章节**:
 
-1. **Why GridCode?**:
+1. **Why RegReader?**:
    - 添加"上下文过载"和"可扩展性"对比
    - 展示 Subagents 带来的优势
 
@@ -501,7 +501,7 @@ GridCode 已经完成了重大架构演进：
 
 **文档一致性检查**:
 - ✅ CLAUDE.md 的项目结构与 `tree` 命令输出一致
-- ✅ README.md 的 CLI 命令与 `gridcode --help` 一致
+- ✅ README.md 的 CLI 命令与 `regreader --help` 一致
 - ✅ 架构图与代码模块对应
 - ✅ Token 消耗数据与实际 prompt 长度匹配
 
@@ -579,7 +579,7 @@ GridCode 已经完成了重大架构演进：
 
 #### Phase 2: 双轨时间追踪架构
 
-**新建 `src/grid_code/agents/timing/` 模块**
+**新建 `src/regreader/agents/timing/` 模块**
 
 ```
 timing/
@@ -625,7 +625,7 @@ def create_timing_backend_from_config(callback=None) -> TimingBackend
 ```python
 timing_backend: str = "httpx"           # httpx 或 otel
 otel_exporter_type: str = "console"     # console, otlp, jaeger, zipkin
-otel_service_name: str = "gridcode-agent"
+otel_service_name: str = "regreader-agent"
 otel_endpoint: str | None = None        # OTLP/Jaeger/Zipkin 端点
 ```
 
@@ -639,7 +639,7 @@ otel-zipkin = [...] # + opentelemetry-exporter-zipkin
 
 #### Phase 3: Claude Agent SDK OTel 集成
 
-**新建 `src/grid_code/agents/otel_hooks.py`**
+**新建 `src/regreader/agents/otel_hooks.py`**
 
 为 Claude Agent SDK 的 hooks 机制提供 OTel 支持：
 
@@ -666,7 +666,7 @@ def _build_hooks(self):
     settings = get_settings()
     enable_otel = settings.timing_backend == "otel"
 
-    from grid_code.agents.otel_hooks import get_combined_hooks
+    from regreader.agents.otel_hooks import get_combined_hooks
     combined = get_combined_hooks(
         enable_audit=True,
         enable_otel=enable_otel,
@@ -681,38 +681,38 @@ def _build_hooks(self):
 
 | 文件 | 修改内容 |
 |------|----------|
-| `src/grid_code/agents/events.py` | 添加 ANSWER_GENERATION 事件 |
-| `src/grid_code/agents/pydantic_agent.py` | 发送答案生成事件 |
-| `src/grid_code/agents/langgraph_agent.py` | 发送答案生成事件 |
-| `src/grid_code/agents/display.py` | 处理答案生成事件，修复汇总条件 |
-| `src/grid_code/agents/timing/__init__.py` | 新建 - 工厂函数 |
-| `src/grid_code/agents/timing/base.py` | 新建 - 抽象接口 |
-| `src/grid_code/agents/timing/httpx_timing.py` | 新建 - httpx 后端 |
-| `src/grid_code/agents/timing/otel_timing.py` | 新建 - OTel 后端 |
-| `src/grid_code/agents/llm_timing.py` | 更新为兼容层 |
-| `src/grid_code/agents/otel_hooks.py` | 新建 - Claude SDK OTel hooks |
-| `src/grid_code/agents/claude_agent.py` | 使用组合 hooks |
-| `src/grid_code/config.py` | 添加 OTel 配置项 |
+| `src/regreader/agents/events.py` | 添加 ANSWER_GENERATION 事件 |
+| `src/regreader/agents/pydantic_agent.py` | 发送答案生成事件 |
+| `src/regreader/agents/langgraph_agent.py` | 发送答案生成事件 |
+| `src/regreader/agents/display.py` | 处理答案生成事件，修复汇总条件 |
+| `src/regreader/agents/timing/__init__.py` | 新建 - 工厂函数 |
+| `src/regreader/agents/timing/base.py` | 新建 - 抽象接口 |
+| `src/regreader/agents/timing/httpx_timing.py` | 新建 - httpx 后端 |
+| `src/regreader/agents/timing/otel_timing.py` | 新建 - OTel 后端 |
+| `src/regreader/agents/llm_timing.py` | 更新为兼容层 |
+| `src/regreader/agents/otel_hooks.py` | 新建 - Claude SDK OTel hooks |
+| `src/regreader/agents/claude_agent.py` | 使用组合 hooks |
+| `src/regreader/config.py` | 添加 OTel 配置项 |
 | `pyproject.toml` | 添加 otel 可选依赖 |
 
 ### 使用示例
 
 ```bash
 # 使用 httpx 后端（默认，CLI 显示）
-export GRIDCODE_TIMING_BACKEND=httpx
-gridcode chat -r angui_2024
+export REGREADER_TIMING_BACKEND=httpx
+regreader chat -r angui_2024
 
 # 使用 OTel 后端（控制台输出）
-export GRIDCODE_TIMING_BACKEND=otel
-export GRIDCODE_OTEL_EXPORTER_TYPE=console
-gridcode chat -r angui_2024
+export REGREADER_TIMING_BACKEND=otel
+export REGREADER_OTEL_EXPORTER_TYPE=console
+regreader chat -r angui_2024
 
 # 使用 OTel 后端（OTLP 导出到 Jaeger）
-pip install grid-code[otel-otlp]
-export GRIDCODE_TIMING_BACKEND=otel
-export GRIDCODE_OTEL_EXPORTER_TYPE=otlp
-export GRIDCODE_OTEL_ENDPOINT=http://localhost:4317
-gridcode chat -r angui_2024
+pip install regreader[otel-otlp]
+export REGREADER_TIMING_BACKEND=otel
+export REGREADER_OTEL_EXPORTER_TYPE=otlp
+export REGREADER_OTEL_ENDPOINT=http://localhost:4317
+regreader chat -r angui_2024
 ```
 
 ### 架构设计
@@ -815,7 +815,7 @@ self._ollama_http_client = httpx.AsyncClient(
 
 ### 完成的工作
 
-#### 1. 配置层增强 (`src/grid_code/config.py`)
+#### 1. 配置层增强 (`src/regreader/config.py`)
 
 添加 Ollama 后端检测和配置支持：
 
@@ -835,7 +835,7 @@ def is_ollama_backend(self) -> bool:
     return ":11434" in base_url or "ollama" in base_url
 ```
 
-#### 2. PydanticAIAgent 修复 (`src/grid_code/agents/pydantic_agent.py`)
+#### 2. PydanticAIAgent 修复 (`src/regreader/agents/pydantic_agent.py`)
 
 **核心修改**：
 ```python
@@ -908,7 +908,7 @@ async def close(self) -> None:
         self._ollama_http_client = None
 ```
 
-#### 3. LangGraphAgent 修复 (`src/grid_code/agents/langgraph_agent.py`)
+#### 3. LangGraphAgent 修复 (`src/regreader/agents/langgraph_agent.py`)
 
 应用相同的 httpx transport 修复：
 
@@ -946,9 +946,9 @@ else:
 
 | 文件 | 修改内容 |
 |------|----------|
-| `src/grid_code/config.py` | 添加 `is_ollama_backend()` 方法和 `ollama_disable_streaming` 配置 |
-| `src/grid_code/agents/pydantic_agent.py` | Ollama 检测、自定义 httpx client、流式降级策略、资源清理 |
-| `src/grid_code/agents/langgraph_agent.py` | Ollama 检测、自定义 httpx client、资源清理 |
+| `src/regreader/config.py` | 添加 `is_ollama_backend()` 方法和 `ollama_disable_streaming` 配置 |
+| `src/regreader/agents/pydantic_agent.py` | Ollama 检测、自定义 httpx client、流式降级策略、资源清理 |
+| `src/regreader/agents/langgraph_agent.py` | Ollama 检测、自定义 httpx client、资源清理 |
 
 ### 环境变量配置
 
@@ -959,12 +959,12 @@ else:
 export OPENAI_BASE_URL=http://localhost:11434/v1
 export OPENAI_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
 
-# 或使用 GRIDCODE_ 前缀
-export GRIDCODE_LLM_BASE_URL=http://localhost:11434/v1
-export GRIDCODE_LLM_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
+# 或使用 REGREADER_ 前缀
+export REGREADER_LLM_BASE_URL=http://localhost:11434/v1
+export REGREADER_LLM_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
 
 # 可选：禁用流式（某些小模型可能需要）
-export GRIDCODE_OLLAMA_DISABLE_STREAMING=true
+export REGREADER_OLLAMA_DISABLE_STREAMING=true
 ```
 
 Ollama 自动检测规则：
@@ -975,13 +975,13 @@ Ollama 自动检测规则：
 
 ```bash
 # PydanticAIAgent with Ollama
-gridcode chat -r angui_2024 --agent pydantic
+regreader chat -r angui_2024 --agent pydantic
 
 # LangGraphAgent with Ollama
-gridcode chat -r angui_2024 --agent langgraph
+regreader chat -r angui_2024 --agent langgraph
 
 # 单次查询
-gridcode ask "特高压南阳站稳态过电压控制装置1发生故障时，系统应如何处理？" \
+regreader ask "特高压南阳站稳态过电压控制装置1发生故障时，系统应如何处理？" \
   -r angui_2024 --agent pydantic -v
 ```
 
@@ -1090,7 +1090,7 @@ gridcode ask "特高压南阳站稳态过电压控制装置1发生故障时，�
 - **MCP 工具层实现**: 工具分类体系、核心工具实现、Server 实现
 - **Agent 层实现**: 抽象基类、三种框架实现、对话历史管理
 - **CLI 实现**: 命令结构和完整命令列表
-- **配置系统**: GridCodeSettings 详细配置
+- **配置系统**: RegReaderSettings 详细配置
 - **异常体系**: 完整异常类定义
 - **实现状态汇总**: 已完成模块和可选模块状态
 - **技术亮点**: 架构设计、数据处理、检索优化、工具设计
@@ -1133,7 +1133,7 @@ gridcode ask "特高压南阳站稳态过电压控制装置1发生故障时，�
 用户提出三个架构问题：
 1. 3个Agent和客户端是什么关系？
 2. 为什么在CLI中调用agent循环，但各自还要创建MCP server？
-3. Agent设计是否与grid-code的整体架构适配？
+3. Agent设计是否与regreader的整体架构适配？
 
 分析后发现原有设计的问题：
 - 三个 Agent 各自独立创建 MCP 连接配置
@@ -1144,7 +1144,7 @@ gridcode ask "特高压南阳站稳态过电压控制装置1发生故障时，�
 
 #### 1. 核心模块 (新建)
 
-创建 `src/grid_code/agents/mcp_connection.py`：
+创建 `src/regreader/agents/mcp_connection.py`：
 
 **MCPConnectionConfig** - MCP 连接配置类
 ```python
@@ -1176,7 +1176,7 @@ class MCPConnectionManager:
     def get_pydantic_mcp_server(self):
         """获取 Pydantic AI 的 MCP Server 对象"""
 
-    def get_langgraph_client(self) -> GridCodeMCPClient:
+    def get_langgraph_client(self) -> RegReaderMCPClient:
         """获取 LangGraph 使用的 MCP 客户端"""
 ```
 
@@ -1190,24 +1190,24 @@ def configure_mcp(transport: Literal["stdio", "sse"] = "stdio", server_url: str 
 
 为三个 Agent 添加 `mcp_config` 参数：
 
-**ClaudeAgent** (`src/grid_code/agents/claude_agent.py`)
+**ClaudeAgent** (`src/regreader/agents/claude_agent.py`)
 - 添加 `mcp_config: MCPConnectionConfig | None = None` 参数
 - 使用 `self._mcp_manager.get_claude_sdk_config()` 获取配置
 - SSE 模式自动回退到 stdio（Claude SDK 限制）
 
-**PydanticAIAgent** (`src/grid_code/agents/pydantic_agent.py`)
+**PydanticAIAgent** (`src/regreader/agents/pydantic_agent.py`)
 - 添加 `mcp_config: MCPConnectionConfig | None = None` 参数
 - 使用 `self._mcp_manager.get_pydantic_mcp_server()` 获取 MCP Server
 - 支持 stdio 和 SSE 两种模式
 
-**LangGraphAgent** (`src/grid_code/agents/langgraph_agent.py`)
+**LangGraphAgent** (`src/regreader/agents/langgraph_agent.py`)
 - 添加 `mcp_config: MCPConnectionConfig | None = None` 参数
 - 使用 `self._mcp_manager.get_langgraph_client()` 获取 MCP Client
 - 完整支持 stdio 和 SSE 两种模式
 
 #### 3. CLI 集成
 
-修改 `src/grid_code/cli.py` 的 `chat` 命令：
+修改 `src/regreader/cli.py` 的 `chat` 命令：
 ```python
 # 构建 MCP 配置（从全局状态）
 if state.mcp_transport == "sse" and state.mcp_url:
@@ -1221,7 +1221,7 @@ agent = ClaudeAgent(reg_id=reg_id, mcp_config=mcp_config)
 
 #### 4. 模块导出
 
-更新 `src/grid_code/agents/__init__.py`：
+更新 `src/regreader/agents/__init__.py`：
 ```python
 from .mcp_connection import MCPConnectionConfig, MCPConnectionManager, configure_mcp, get_mcp_manager
 
@@ -1239,12 +1239,12 @@ __all__ = [
 
 | 文件 | 修改内容 |
 |------|----------|
-| `src/grid_code/agents/mcp_connection.py` | 新建 - MCPConnectionConfig + MCPConnectionManager |
-| `src/grid_code/agents/claude_agent.py` | 添加 mcp_config 参数，使用统一管理器 |
-| `src/grid_code/agents/pydantic_agent.py` | 添加 mcp_config 参数，使用统一管理器 |
-| `src/grid_code/agents/langgraph_agent.py` | 添加 mcp_config 参数，使用统一管理器 |
-| `src/grid_code/agents/__init__.py` | 导出新的 MCP 连接管理类 |
-| `src/grid_code/cli.py` | chat 命令传递 MCP 配置 |
+| `src/regreader/agents/mcp_connection.py` | 新建 - MCPConnectionConfig + MCPConnectionManager |
+| `src/regreader/agents/claude_agent.py` | 添加 mcp_config 参数，使用统一管理器 |
+| `src/regreader/agents/pydantic_agent.py` | 添加 mcp_config 参数，使用统一管理器 |
+| `src/regreader/agents/langgraph_agent.py` | 添加 mcp_config 参数，使用统一管理器 |
+| `src/regreader/agents/__init__.py` | 导出新的 MCP 连接管理类 |
+| `src/regreader/cli.py` | chat 命令传递 MCP 配置 |
 | `tests/dev/test_mcp_connection.py` | 新建 - 13 个单元测试 |
 
 ### 测试结果
@@ -1269,7 +1269,7 @@ tests/dev/test_mcp_connection.py - 13 passed
 agent = ClaudeAgent(reg_id="angui_2024")
 
 # 方式2: 显式指定 stdio 配置
-from grid_code.agents import MCPConnectionConfig
+from regreader.agents import MCPConnectionConfig
 config = MCPConnectionConfig.stdio()
 agent = ClaudeAgent(reg_id="angui_2024", mcp_config=config)
 
@@ -1278,7 +1278,7 @@ config = MCPConnectionConfig.sse("http://localhost:8080/sse")
 agent = LangGraphAgent(reg_id="angui_2024", mcp_config=config)
 
 # 方式4: 全局配置
-from grid_code.agents import configure_mcp
+from regreader.agents import configure_mcp
 configure_mcp(transport="sse", server_url="http://localhost:8080/sse")
 agent = PydanticAIAgent(reg_id="angui_2024")  # 自动使用 SSE
 ```
@@ -1286,7 +1286,7 @@ agent = PydanticAIAgent(reg_id="angui_2024")  # 自动使用 SSE
 ### 架构关系说明
 
 ```
-CLI (gridcode chat)
+CLI (regreader chat)
     │
     ├─→ MCPConnectionConfig.sse() / .stdio()
     │
@@ -1298,7 +1298,7 @@ CLI (gridcode chat)
                     ├─→ get_pydantic_mcp_server()  → Pydantic AI
                     └─→ get_langgraph_client()     → LangGraph
                             │
-                            └─→ GridCodeMCPClient
+                            └─→ RegReaderMCPClient
                                     │
                                     └─→ MCP Server (stdio/sse)
                                             │
@@ -1334,16 +1334,16 @@ CLI (gridcode chat)
 
 ```bash
 # stdio 模式（自动启动子进程）
-gridcode --mcp list
+regreader --mcp list
 
 # SSE 模式（连接外部服务器）
-gridcode --mcp --mcp-transport sse --mcp-url http://localhost:8080/sse list
+regreader --mcp --mcp-transport sse --mcp-url http://localhost:8080/sse list
 ```
 
 新增文件：
-- `src/grid_code/mcp/protocol.py` - MCP 模式配置 dataclass
-- `src/grid_code/mcp/factory.py` - 工具工厂，根据模式创建本地或远程工具
-- `src/grid_code/mcp/adapter.py` - MCP 工具适配器，封装异步 MCP 调用为同步接口
+- `src/regreader/mcp/protocol.py` - MCP 模式配置 dataclass
+- `src/regreader/mcp/factory.py` - 工具工厂，根据模式创建本地或远程工具
+- `src/regreader/mcp/adapter.py` - MCP 工具适配器，封装异步 MCP 调用为同步接口
 
 #### 2. Makefile 模式切换支持
 
@@ -1384,8 +1384,8 @@ make list-mcp-sse                # 等价于 MODE=mcp-sse
 - 解决：修改 `create_mcp_server()` 接受 host/port 参数，CLI 端动态创建服务器
 
 修改文件：
-- `src/grid_code/mcp/server.py` - create_mcp_server() 添加 host/port 参数
-- `src/grid_code/cli.py` - serve 命令动态创建服务器
+- `src/regreader/mcp/server.py` - create_mcp_server() 添加 host/port 参数
+- `src/regreader/cli.py` - serve 命令动态创建服务器
 
 #### 4. SSE 502 Bad Gateway 修复
 
@@ -1410,11 +1410,11 @@ transport = await stack.enter_async_context(
 
 | 文件 | 修改内容 |
 |------|----------|
-| `src/grid_code/mcp/protocol.py` | 新建 - MCP 模式配置 dataclass |
-| `src/grid_code/mcp/factory.py` | 新建 - 工具工厂 |
-| `src/grid_code/mcp/adapter.py` | 新建 - MCP 工具适配器 + trust_env 修复 |
-| `src/grid_code/mcp/server.py` | create_mcp_server() 添加 host/port 参数 |
-| `src/grid_code/cli.py` | 添加全局 --mcp 选项，修改 serve 命令 |
+| `src/regreader/mcp/protocol.py` | 新建 - MCP 模式配置 dataclass |
+| `src/regreader/mcp/factory.py` | 新建 - 工具工厂 |
+| `src/regreader/mcp/adapter.py` | 新建 - MCP 工具适配器 + trust_env 修复 |
+| `src/regreader/mcp/server.py` | create_mcp_server() 添加 host/port 参数 |
+| `src/regreader/cli.py` | 添加全局 --mcp 选项，修改 serve 命令 |
 | `Makefile` | 添加 MODE/MCP_FLAGS 变量，更新业务命令 |
 
 ### 测试结果
@@ -1491,18 +1491,18 @@ transport = await stack.enter_async_context(
 
 | 文件 | 修改内容 |
 |------|----------|
-| `src/grid_code/mcp/tools.py` | 新增8个工具方法 + ReferenceResolver类 |
-| `src/grid_code/mcp/server.py` | 注册8个新MCP工具 |
-| `src/grid_code/exceptions.py` | 新增3个异常类 |
-| `src/grid_code/agents/prompts.py` | 更新系统提示词 |
-| `src/grid_code/cli.py` | 新增12个CLI命令 + 增强toc命令 |
+| `src/regreader/mcp/tools.py` | 新增8个工具方法 + ReferenceResolver类 |
+| `src/regreader/mcp/server.py` | 注册8个新MCP工具 |
+| `src/regreader/exceptions.py` | 新增3个异常类 |
+| `src/regreader/agents/prompts.py` | 更新系统提示词 |
+| `src/regreader/cli.py` | 新增12个CLI命令 + 增强toc命令 |
 | `Makefile` | 添加新命令对应的Make目标 |
 
 ### 测试结果
 
-- ✅ `uv run gridcode --help` - 显示所有新命令
+- ✅ `uv run regreader --help` - 显示所有新命令
 - ✅ `make help` - 显示所有Make目标
-- ✅ `uv run gridcode toc angui_2024` - 树状显示正常工作
+- ✅ `uv run regreader toc angui_2024` - 树状显示正常工作
 
 ### 设计文档
 

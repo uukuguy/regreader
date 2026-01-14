@@ -1,6 +1,6 @@
 # Bash+FS Subagents 架构 API 参考
 
-本文档提供 GridCode Bash+FS Subagents 架构的公共 API 参考。
+本文档提供 RegReader Bash+FS Subagents 架构的公共 API 参考。
 
 ---
 
@@ -23,7 +23,7 @@
 导入方式：
 
 ```python
-from grid_code.infrastructure import (
+from regreader.infrastructure import (
     FileContext,
     SkillLoader,
     Skill,
@@ -41,7 +41,7 @@ from grid_code.infrastructure import (
 
 文件上下文管理器，为 Subagent 提供受控的文件系统访问，实现读写隔离。
 
-**模块路径**: `grid_code.infrastructure.file_context`
+**模块路径**: `regreader.infrastructure.file_context`
 
 #### 构造函数
 
@@ -97,7 +97,7 @@ FileContext(
 
 ```python
 from pathlib import Path
-from grid_code.infrastructure import FileContext
+from regreader.infrastructure import FileContext
 
 # 创建文件上下文
 fc = FileContext(
@@ -134,7 +134,7 @@ async def example():
 
 技能加载器，动态加载 SKILL.md 和 skills/ 目录中定义的技能包。
 
-**模块路径**: `grid_code.infrastructure.skill_loader`
+**模块路径**: `regreader.infrastructure.skill_loader`
 
 #### 构造函数
 
@@ -186,7 +186,7 @@ class Skill:
 #### 使用示例
 
 ```python
-from grid_code.infrastructure import SkillLoader
+from regreader.infrastructure import SkillLoader
 
 # 创建加载器
 loader = SkillLoader()
@@ -209,7 +209,7 @@ regsearch_skills = loader.get_skills_for_subagent("regsearch")
 
 事件总线，支持 Subagent 间松耦合通信和事件持久化。
 
-**模块路径**: `grid_code.infrastructure.event_bus`
+**模块路径**: `regreader.infrastructure.event_bus`
 
 #### 事件类型枚举
 
@@ -280,7 +280,7 @@ EventBus(
 #### 使用示例
 
 ```python
-from grid_code.infrastructure import EventBus, Event, SubagentEvent
+from regreader.infrastructure import EventBus, Event, SubagentEvent
 
 # 创建事件总线
 bus = EventBus()
@@ -310,7 +310,7 @@ recent = bus.get_recent_events(count=10)
 
 安全守卫，实现瑞士奶酪防御模型（目录隔离 + 权限控制）。
 
-**模块路径**: `grid_code.infrastructure.security_guard`
+**模块路径**: `regreader.infrastructure.security_guard`
 
 #### PermissionMatrix 数据类
 
@@ -349,7 +349,7 @@ SecurityGuard(
 
 ```python
 from pathlib import Path
-from grid_code.infrastructure import SecurityGuard, PermissionMatrix
+from regreader.infrastructure import SecurityGuard, PermissionMatrix
 
 # 创建安全守卫
 guard = SecurityGuard()
@@ -381,7 +381,7 @@ can_use_tool = guard.check_tool_access("regsearch", "smart_search")
 
 规程文档检索领域专家，整合搜索、表格、引用、发现功能。
 
-**模块路径**: `grid_code.subagents.regsearch`
+**模块路径**: `regreader.subagents.regsearch`
 
 #### 构造函数
 
@@ -425,8 +425,8 @@ RegSearchSubagent(
 #### 使用示例
 
 ```python
-from grid_code.subagents import RegSearchSubagent
-from grid_code.subagents.base import SubagentContext
+from regreader.subagents import RegSearchSubagent
+from regreader.subagents.base import SubagentContext
 
 # 创建子代理（内存模式）
 subagent = RegSearchSubagent()
@@ -456,7 +456,7 @@ print(f"来源: {result.sources}")
 
 系统的核心调度中心，整合查询分析、Subagent 路由和结果聚合。
 
-**模块路径**: `grid_code.orchestrator.coordinator`
+**模块路径**: `regreader.orchestrator.coordinator`
 
 #### SessionState 数据类
 
@@ -504,10 +504,10 @@ Coordinator(
 #### 使用示例
 
 ```python
-from grid_code.orchestrator import Coordinator
-from grid_code.infrastructure import EventBus
-from grid_code.subagents import RegSearchSubagent
-from grid_code.subagents.config import SubagentType
+from regreader.orchestrator import Coordinator
+from regreader.infrastructure import EventBus
+from regreader.subagents import RegSearchSubagent
+from regreader.subagents.config import SubagentType
 
 # 准备子代理
 subagents = {
@@ -538,7 +538,7 @@ print(f"会话状态: {coordinator.session_state.query_count} 次查询")
 ### 目录结构
 
 ```
-grid-code/
+regreader/
 ├── coordinator/                 # Coordinator 工作区
 │   ├── CLAUDE.md               # 项目导读入口
 │   ├── plan.md                 # 任务规划（运行时生成）

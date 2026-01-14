@@ -1,8 +1,8 @@
-# GridCode 长文本查询输入指南
+# RegReader 长文本查询输入指南
 
 ## 概述
 
-GridCode 支持多种方式输入长文本查询，特别适合处理复杂的多行查询、包含特殊字符的内容（如 YAML frontmatter）。
+RegReader 支持多种方式输入长文本查询，特别适合处理复杂的多行查询、包含特殊字符的内容（如 YAML frontmatter）。
 
 ## 快速开始
 
@@ -409,4 +409,4 @@ make ask-file QUERY_FILE=queries/temp_query.txt AGENT=claude
 
 - [Makefile 命令参考](../CLAUDE.md#makefile-commands)
 - [查询文件示例](../queries/README.md)
-- [GridCode CLI 文档](../CLAUDE.md#cli-commands-reference)
+- [RegReader CLI 文档](../CLAUDE.md#cli-commands-reference)

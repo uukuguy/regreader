@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from grid_code.infrastructure.skill_loader import Skill, SkillLoader
+from regreader.infrastructure.skill_loader import Skill, SkillLoader
 
 
 class TestSkill:

@@ -2,10 +2,10 @@
 import asyncio
 from rich.console import Console
 
-from grid_code.agents.display import AgentStatusDisplay
-from grid_code.agents.events import tool_start_event, tool_end_event, AgentEventType
-from grid_code.agents.hooks import pre_tool_audit_hook
-from grid_code.agents.callbacks import NullCallback
+from regreader.agents.display import AgentStatusDisplay
+from regreader.agents.events import tool_start_event, tool_end_event, AgentEventType
+from regreader.agents.hooks import pre_tool_audit_hook
+from regreader.agents.callbacks import NullCallback
 
 
 async def test_decision_hint_flow():

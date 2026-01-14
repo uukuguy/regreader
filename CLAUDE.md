@@ -1,8 +1,8 @@
-# GridCode Development Guide
+# RegReader Development Guide
 
 ## Project Overview
 
-GridCode is an intelligent retrieval agent for power system safety regulations, using a **Page-Based Agentic Search** architecture with **Bash+FS Subagents** paradigm.
+RegReader is an intelligent retrieval agent for power system safety regulations, using a **Page-Based Agentic Search** architecture with **Bash+FS Subagents** paradigm.
 
 **Core Design Principles**:
 - Store documents by page, not arbitrary chunks
@@ -15,7 +15,7 @@ GridCode is an intelligent retrieval agent for power system safety regulations, 
 
 ## Architecture Layers
 
-GridCode implements a 7-layer architecture:
+RegReader implements a 7-layer architecture:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -44,7 +44,7 @@ GridCode implements a 7-layer architecture:
 ## Project Structure
 
 ```
-grid-code/
+regreader/
 ├── coordinator/                      # Coordinator workspace (Bash+FS)
 │   ├── CLAUDE.md                     # Project entry point
 │   ├── plan.md                       # Task planning (runtime)
@@ -70,7 +70,7 @@ grid-code/
 │   ├── table_lookup/
 │   └── cross_ref/
 │
-├── src/grid_code/                    # Source code
+├── src/regreader/                    # Source code
 │   ├── infrastructure/               # Infrastructure layer (NEW)
 │   │   ├── file_context.py           # File context manager
 │   │   ├── skill_loader.py           # Skill loader
@@ -183,12 +183,12 @@ grid-code/
 | Python | 3.12+ | Use modern type hint syntax |
 | Document Parser | Docling | OCR + table structure extraction |
 | Keyword Index | SQLite FTS5 (default) | Built-in |
-| Keyword Index | Tantivy (optional) | `pip install grid-code[tantivy]` |
-| Keyword Index | Whoosh (optional) | `pip install grid-code[whoosh]` |
+| Keyword Index | Tantivy (optional) | `pip install regreader[tantivy]` |
+| Keyword Index | Whoosh (optional) | `pip install regreader[whoosh]` |
 | Vector Index | LanceDB (default) | Arrow-based columnar storage |
-| Vector Index | Qdrant (optional) | `pip install grid-code[qdrant]` |
+| Vector Index | Qdrant (optional) | `pip install regreader[qdrant]` |
 | Embedding | SentenceTransformer (default) | BGE-small-zh-v1.5 |
-| Embedding | FlagEmbedding (optional) | `pip install grid-code[flag]` |
+| Embedding | FlagEmbedding (optional) | `pip install regreader[flag]` |
 | MCP Server | FastMCP | stdio/SSE transport |
 | Data Models | Pydantic v2 | BaseModel |
 | CLI | Typer + Rich | Colorful output |
@@ -211,7 +211,7 @@ grid-code/
 - Index layer can be synchronous (SQLite/LanceDB operations are fast)
 
 ### Error Handling
-- Use custom exception classes defined in `src/grid_code/exceptions.py`
+- Use custom exception classes defined in `src/regreader/exceptions.py`
 - Use `loguru` for logging
 
 ## Key Components
@@ -456,37 +456,37 @@ read_chapter_content(reg_id, section_number) -> ChapterContent
 
 ### Document Ingestion
 ```bash
-gridcode ingest --file document.pdf --reg-id angui_2024
-gridcode ingest --dir docs/ --format pdf
-gridcode enrich-metadata angui_2024  # Generate metadata with LLM
+regreader ingest --file document.pdf --reg-id angui_2024
+regreader ingest --dir docs/ --format pdf
+regreader enrich-metadata angui_2024  # Generate metadata with LLM
 ```
 
 ### MCP Server
 ```bash
-gridcode serve --transport sse --port 8080   # SSE mode
-gridcode serve --transport stdio             # stdio mode
+regreader serve --transport sse --port 8080   # SSE mode
+regreader serve --transport stdio             # stdio mode
 ```
 
 ### Search
 ```bash
-gridcode search "母线失压" -r angui_2024 --chapter "第六章"
-gridcode search "处理方法" --types text,table --limit 20
-gridcode search "keyword" --all              # Search across all regulations
+regreader search "母线失压" -r angui_2024 --chapter "第六章"
+regreader search "处理方法" --types text,table --limit 20
+regreader search "keyword" --all              # Search across all regulations
 ```
 
 ### Agent Chat (Standard Mode)
 ```bash
 # Basic chat
-gridcode chat -r angui_2024 --agent pydantic   # Interactive mode
-gridcode ask "母线失压如何处理?" -r angui_2024   # Single query
-gridcode ask "..." --json                       # JSON output
+regreader chat -r angui_2024 --agent pydantic   # Interactive mode
+regreader ask "母线失压如何处理?" -r angui_2024   # Single query
+regreader ask "..." --json                       # JSON output
 
 # Long query input methods (for complex multi-line queries)
 # Method 1: Read from file (recommended)
-gridcode ask "$(cat queries/query.txt)" -r angui_2024 --agent claude
+regreader ask "$(cat queries/query.txt)" -r angui_2024 --agent claude
 
 # Method 2: Here-document (Bash native)
-gridcode ask "$(cat <<'EOF'
+regreader ask "$(cat <<'EOF'
 请详细说明母线失压的处理流程，包括：
 1. 故障判断标准
 2. 应急处理步骤
@@ -495,57 +495,57 @@ EOF
 )" -r angui_2024 --agent claude
 
 # Framework-specific commands
-gridcode chat-claude -r angui_2024             # Claude SDK agent
-gridcode chat-pydantic -r angui_2024           # Pydantic AI agent
-gridcode chat-langgraph -r angui_2024          # LangGraph agent
+regreader chat-claude -r angui_2024             # Claude SDK agent
+regreader chat-pydantic -r angui_2024           # Pydantic AI agent
+regreader chat-langgraph -r angui_2024          # LangGraph agent
 
 # SSE mode (non-blocking)
-gridcode chat-claude-sse -r angui_2024
-gridcode chat-pydantic-sse -r angui_2024
-gridcode chat-langgraph-sse -r angui_2024
+regreader chat-claude-sse -r angui_2024
+regreader chat-pydantic-sse -r angui_2024
+regreader chat-langgraph-sse -r angui_2024
 ```
 
 ### Agent Chat (Orchestrator Mode)
 ```bash
 # Use orchestrator for context-efficient queries
-gridcode chat -r angui_2024 --agent pydantic --orchestrator
-gridcode chat -r angui_2024 --agent pydantic -o  # Short form
-gridcode ask "..." -r angui_2024 --orchestrator
+regreader chat -r angui_2024 --agent pydantic --orchestrator
+regreader chat -r angui_2024 --agent pydantic -o  # Short form
+regreader ask "..." -r angui_2024 --orchestrator
 
 # Framework-specific orchestrator commands
-gridcode chat-claude-orch -r angui_2024
-gridcode chat-pydantic-orch -r angui_2024
-gridcode chat-langgraph-orch -r angui_2024
+regreader chat-claude-orch -r angui_2024
+regreader chat-pydantic-orch -r angui_2024
+regreader chat-langgraph-orch -r angui_2024
 ```
 
 ### MCP Tools (CLI interface)
 ```bash
 # Basic tools
-gridcode toc angui_2024 --level 3 --expand
-gridcode read-pages -r angui_2024 -s 10 -e 15
-gridcode read-chapter -r angui_2024 -s "2.1.4.1.6"
+regreader toc angui_2024 --level 3 --expand
+regreader read-pages -r angui_2024 -s 10 -e 15
+regreader read-chapter -r angui_2024 -s "2.1.4.1.6"
 
 # Multi-hop tools
-gridcode lookup-annotation -r angui_2024 "注1" --page 45
-gridcode search-tables "母线失压" -r angui_2024 --mode hybrid
-gridcode resolve-reference -r angui_2024 "见第六章"
+regreader lookup-annotation -r angui_2024 "注1" --page 45
+regreader search-tables "母线失压" -r angui_2024 --mode hybrid
+regreader resolve-reference -r angui_2024 "见第六章"
 
 # Context tools
-gridcode get-table angui_2024 table_001
-gridcode get-block-context block_001 -r angui_2024
+regreader get-table angui_2024 table_001
+regreader get-block-context block_001 -r angui_2024
 
 # Discovery tools
-gridcode find-similar -r angui_2024 --query "故障处理"
-gridcode compare-sections "2.1.4" "2.1.5" -r angui_2024
+regreader find-similar -r angui_2024 --query "故障处理"
+regreader compare-sections "2.1.4" "2.1.5" -r angui_2024
 ```
 
 ### Utility Commands
 ```bash
-gridcode list                     # List all regulations
-gridcode inspect angui_2024 10    # Inspect page data
-gridcode delete angui_2024        # Delete regulation
-gridcode mcp-tools --live         # List MCP tools
-gridcode version                  # Show version
+regreader list                     # List all regulations
+regreader inspect angui_2024 10    # Inspect page data
+regreader delete angui_2024        # Delete regulation
+regreader mcp-tools --live         # List MCP tools
+regreader version                  # Show version
 ```
 
 ### Makefile Commands
@@ -584,52 +584,52 @@ make conda-ask QUERY="..." AGENT=pydantic REG=angui_2024
 
 ## Configuration
 
-Configuration via environment variables (`GRIDCODE_*`) or `.env` file:
+Configuration via environment variables (`REGREADER_*`) or `.env` file:
 
 ```bash
 # Storage paths
-GRIDCODE_DATA_DIR=./data/storage
-GRIDCODE_PAGES_DIR=./data/storage/pages
-GRIDCODE_INDEX_DIR=./data/storage/index
+REGREADER_DATA_DIR=./data/storage
+REGREADER_PAGES_DIR=./data/storage/pages
+REGREADER_INDEX_DIR=./data/storage/index
 
 # Embedding
-GRIDCODE_EMBEDDING_BACKEND=sentence_transformer  # or flag
-GRIDCODE_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
-GRIDCODE_EMBEDDING_DIMENSION=512
+REGREADER_EMBEDDING_BACKEND=sentence_transformer  # or flag
+REGREADER_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+REGREADER_EMBEDDING_DIMENSION=512
 
 # MCP
-GRIDCODE_MCP_HOST=127.0.0.1
-GRIDCODE_MCP_PORT=8080
-GRIDCODE_MCP_TRANSPORT=stdio  # or sse
+REGREADER_MCP_HOST=127.0.0.1
+REGREADER_MCP_PORT=8080
+REGREADER_MCP_TRANSPORT=stdio  # or sse
 
 # LLM (supports multiple backends)
-GRIDCODE_LLM_MODEL_NAME=claude-sonnet-4-20250514
-GRIDCODE_LLM_API_KEY=your-api-key
-GRIDCODE_LLM_BASE_URL=https://api.anthropic.com
+REGREADER_LLM_MODEL_NAME=claude-sonnet-4-20250514
+REGREADER_LLM_API_KEY=your-api-key
+REGREADER_LLM_BASE_URL=https://api.anthropic.com
 
 # Ollama backend (auto-detected, no additional config needed)
-# GRIDCODE_LLM_BASE_URL=http://localhost:11434  # /v1 suffix auto-added
-# GRIDCODE_LLM_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
-# GRIDCODE_OLLAMA_DISABLE_STREAMING=false  # set to true for some models
+# REGREADER_LLM_BASE_URL=http://localhost:11434  # /v1 suffix auto-added
+# REGREADER_LLM_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
+# REGREADER_OLLAMA_DISABLE_STREAMING=false  # set to true for some models
 
 # Compatible with OPENAI_* environment variables (via validation_alias)
 # OPENAI_BASE_URL=http://localhost:11434/v1
 # OPENAI_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
 
 # Index backends
-GRIDCODE_KEYWORD_INDEX_BACKEND=fts5   # fts5, tantivy, whoosh
-GRIDCODE_VECTOR_INDEX_BACKEND=lancedb # lancedb, qdrant
+REGREADER_KEYWORD_INDEX_BACKEND=fts5   # fts5, tantivy, whoosh
+REGREADER_VECTOR_INDEX_BACKEND=lancedb # lancedb, qdrant
 
 # Search weights
-GRIDCODE_FTS_WEIGHT=0.4
-GRIDCODE_VECTOR_WEIGHT=0.6
-GRIDCODE_SEARCH_TOP_K=10
+REGREADER_FTS_WEIGHT=0.4
+REGREADER_VECTOR_WEIGHT=0.6
+REGREADER_SEARCH_TOP_K=10
 
 # LLM API Timing & Observability
-GRIDCODE_TIMING_BACKEND=httpx        # httpx (CLI display) or otel (production monitoring)
-GRIDCODE_OTEL_EXPORTER_TYPE=console  # console, otlp, jaeger, zipkin
-GRIDCODE_OTEL_SERVICE_NAME=gridcode-agent
-GRIDCODE_OTEL_ENDPOINT=http://localhost:4317  # For OTLP/Jaeger/Zipkin exporters
+REGREADER_TIMING_BACKEND=httpx        # httpx (CLI display) or otel (production monitoring)
+REGREADER_OTEL_EXPORTER_TYPE=console  # console, otlp, jaeger, zipkin
+REGREADER_OTEL_SERVICE_NAME=regreader-agent
+REGREADER_OTEL_ENDPOINT=http://localhost:4317  # For OTLP/Jaeger/Zipkin exporters
 ```
 
 ## Testing Standards
@@ -642,7 +642,7 @@ GRIDCODE_OTEL_ENDPOINT=http://localhost:4317  # For OTLP/Jaeger/Zipkin exporters
 ## Exception Hierarchy
 
 ```python
-GridCodeError (base)
+RegReaderError (base)
 ├── ParserError              # Document parsing error
 ├── StorageError             # Storage operation error
 ├── IndexError               # Index operation error
@@ -677,7 +677,7 @@ GridCodeError (base)
 
 ## Architecture Evolution
 
-GridCode has evolved through multiple architectural iterations:
+RegReader has evolved through multiple architectural iterations:
 
 ### Phase 1: Basic Page-Based Storage (Completed)
 - Docling document parsing with OCR support

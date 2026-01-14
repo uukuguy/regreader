@@ -2,7 +2,7 @@
 
 ## 概述
 
-本次实施完成了 GridCode Bash+FS Subagents 架构演进的所有五个阶段，将规程检索功能封装为领域子代理（RegSearch-Subagent），并建立了完整的公共基础设施层。
+本次实施完成了 RegReader Bash+FS Subagents 架构演进的所有五个阶段，将规程检索功能封装为领域子代理（RegSearch-Subagent），并建立了完整的公共基础设施层。
 
 ## 实施时间线
 
@@ -12,11 +12,11 @@
 
 | 文件 | 说明 |
 |------|------|
-| `src/grid_code/infrastructure/__init__.py` | 模块导出 |
-| `src/grid_code/infrastructure/file_context.py` | FileContext 文件上下文管理器 |
-| `src/grid_code/infrastructure/skill_loader.py` | SkillLoader 技能加载器 |
-| `src/grid_code/infrastructure/event_bus.py` | EventBus 事件总线 |
-| `src/grid_code/infrastructure/security_guard.py` | SecurityGuard 安全守卫 |
+| `src/regreader/infrastructure/__init__.py` | 模块导出 |
+| `src/regreader/infrastructure/file_context.py` | FileContext 文件上下文管理器 |
+| `src/regreader/infrastructure/skill_loader.py` | SkillLoader 技能加载器 |
+| `src/regreader/infrastructure/event_bus.py` | EventBus 事件总线 |
+| `src/regreader/infrastructure/security_guard.py` | SecurityGuard 安全守卫 |
 
 #### 组件功能
 
@@ -78,16 +78,16 @@ skills/
 
 | 文件 | 变更 |
 |------|------|
-| `src/grid_code/subagents/config.py` | 新增 REGSEARCH/EXEC/VALIDATOR 类型，添加文件系统配置字段 |
-| `src/grid_code/subagents/base.py` | 添加 FileContext 可选参数和文件系统方法 |
-| `src/grid_code/subagents/__init__.py` | 导出 RegSearchSubagent |
+| `src/regreader/subagents/config.py` | 新增 REGSEARCH/EXEC/VALIDATOR 类型，添加文件系统配置字段 |
+| `src/regreader/subagents/base.py` | 添加 FileContext 可选参数和文件系统方法 |
+| `src/regreader/subagents/__init__.py` | 导出 RegSearchSubagent |
 
 #### 创建的文件
 
 | 文件 | 说明 |
 |------|------|
-| `src/grid_code/subagents/regsearch/__init__.py` | 模块导出 |
-| `src/grid_code/subagents/regsearch/subagent.py` | RegSearchSubagent 实现 |
+| `src/regreader/subagents/regsearch/__init__.py` | 模块导出 |
+| `src/regreader/subagents/regsearch/subagent.py` | RegSearchSubagent 实现 |
 
 #### 关键设计
 
@@ -115,7 +115,7 @@ skills/
 
 | 文件 | 说明 |
 |------|------|
-| `src/grid_code/orchestrator/coordinator.py` | Coordinator 实现 |
+| `src/regreader/orchestrator/coordinator.py` | Coordinator 实现 |
 
 #### 功能
 
@@ -162,7 +162,7 @@ skills/
 **完整功能验证** (2026-01-11)：
 ```
 ============================================================
-GridCode Bash+FS Subagents 架构 - 完整验证
+RegReader Bash+FS Subagents 架构 - 完整验证
 ============================================================
 
 [Phase 1] 基础设施层
@@ -281,18 +281,18 @@ class BaseSubagent(ABC):
 ### 新增文件 (27 个)
 
 ```
-src/grid_code/infrastructure/
+src/regreader/infrastructure/
 ├── __init__.py
 ├── file_context.py
 ├── skill_loader.py
 ├── event_bus.py
 └── security_guard.py
 
-src/grid_code/subagents/regsearch/
+src/regreader/subagents/regsearch/
 ├── __init__.py
 └── subagent.py
 
-src/grid_code/orchestrator/
+src/regreader/orchestrator/
 └── coordinator.py
 
 coordinator/
@@ -330,10 +330,10 @@ docs/bash-fs-paradiam/
 ### 修改文件 (3 个)
 
 ```
-src/grid_code/subagents/config.py
-src/grid_code/subagents/base.py
-src/grid_code/subagents/__init__.py
-src/grid_code/orchestrator/__init__.py
+src/regreader/subagents/config.py
+src/regreader/subagents/base.py
+src/regreader/subagents/__init__.py
+src/regreader/orchestrator/__init__.py
 Makefile
 ```
 
@@ -395,7 +395,7 @@ Makefile: 696 → 247 行 (-64.5%)
 
 **核心改进:**
 - Python 一行代码: 3 → 0 (全部提取为独立脚本)
-- UV 命令前缀重复: 70+ → 0 (使用 `$(GRIDCODE_CMD)` 变量)
+- UV 命令前缀重复: 70+ → 0 (使用 `$(REGREADER_CMD)` 变量)
 - Conda 依赖重复: 5 × 200+ 字符 → 1 个变量引用
 - Agent 目标数: 21 → 6 个通用命令 + 别名
 - 代码重复率: 显著减少
@@ -404,7 +404,7 @@ Makefile: 696 → 247 行 (-64.5%)
 
 1. **创建 makefiles/variables.mk**
    - 集中管理所有变量和默认值
-   - 定义命令前缀 (`GRIDCODE_CMD`, `PY_CMD`)
+   - 定义命令前缀 (`REGREADER_CMD`, `PY_CMD`)
    - 定义 Conda 依赖包列表
    - 配置 MCP 模式标志
 
@@ -447,8 +447,8 @@ Makefile: 696 → 247 行 (-64.5%)
 **变量使用模式:**
 ```makefile
 # 消除重复的命令前缀
-$(GRIDCODE_CMD) chat --reg-id $(REG_ID)
-# 代替: $(UV) run gridcode chat --reg-id angui_2024
+$(REGREADER_CMD) chat --reg-id $(REG_ID)
+# 代替: $(UV) run regreader chat --reg-id angui_2024
 
 # 简化依赖列表
 pip install $(CONDA_INSTALL_FLAGS) $(CONDA_BASE_DEPS)
@@ -463,7 +463,7 @@ chat-claude: chat
 
 # 或直接调用
 chat-claude:
-	$(GRIDCODE_CMD) chat --reg-id $(REG_ID) --agent claude
+	$(REGREADER_CMD) chat --reg-id $(REG_ID) --agent claude
 ```
 
 ### 向后兼容性

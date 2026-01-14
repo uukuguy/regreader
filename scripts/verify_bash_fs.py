@@ -12,7 +12,7 @@ from pathlib import Path
 def main() -> int:
     """Run verification and return exit code."""
     print("=" * 60)
-    print("GridCode Bash+FS Subagents Architecture - Verification")
+    print("RegReader Bash+FS Subagents Architecture - Verification")
     print("=" * 60)
     print()
 
@@ -23,7 +23,7 @@ def main() -> int:
     print("-" * 40)
 
     try:
-        from grid_code.infrastructure import FileContext
+        from regreader.infrastructure import FileContext
 
         print("  ✓ FileContext imported")
     except Exception as e:
@@ -31,7 +31,7 @@ def main() -> int:
         print(f"  ✗ FileContext: {e}")
 
     try:
-        from grid_code.infrastructure import SkillLoader
+        from regreader.infrastructure import SkillLoader
 
         print("  ✓ SkillLoader imported")
     except Exception as e:
@@ -39,7 +39,7 @@ def main() -> int:
         print(f"  ✗ SkillLoader: {e}")
 
     try:
-        from grid_code.infrastructure import Event, EventBus, SubagentEvent
+        from regreader.infrastructure import Event, EventBus, SubagentEvent
 
         print("  ✓ EventBus imported")
     except Exception as e:
@@ -47,7 +47,7 @@ def main() -> int:
         print(f"  ✗ EventBus: {e}")
 
     try:
-        from grid_code.infrastructure import PermissionMatrix, SecurityGuard
+        from regreader.infrastructure import PermissionMatrix, SecurityGuard
 
         print("  ✓ SecurityGuard imported")
     except Exception as e:
@@ -61,11 +61,11 @@ def main() -> int:
     print("-" * 40)
 
     try:
-        from grid_code.subagents import RegSearchSubagent
+        from regreader.subagents import RegSearchSubagent
 
         print("  ✓ RegSearchSubagent imported")
 
-        from grid_code.subagents.config import SUBAGENT_CONFIGS, SubagentType
+        from regreader.subagents.config import SUBAGENT_CONFIGS, SubagentType
 
         cfg = SUBAGENT_CONFIGS[SubagentType.REGSEARCH]
         print(f"  ✓ Config: {cfg.name}, tools: {len(cfg.tools)}")
@@ -80,7 +80,7 @@ def main() -> int:
     print("-" * 40)
 
     try:
-        from grid_code.orchestrator import Coordinator
+        from regreader.orchestrator import Coordinator
 
         print("  ✓ Coordinator imported")
     except Exception as e:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from grid_code.infrastructure.file_context import FileContext
+from regreader.infrastructure.file_context import FileContext
 
 
 class TestFileContext:

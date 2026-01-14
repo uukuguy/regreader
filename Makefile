@@ -1,4 +1,4 @@
-# GridCode Makefile
+# RegReader Makefile
 # Power Grid Regulations Intelligent Retrieval Agent
 
 # 导入变量定义
@@ -28,7 +28,7 @@ include makefiles/mcp-tools.mk
 #----------------------------------------------------------------------
 
 help: ## Show this help message
-	@echo "$(BLUE)GridCode - Power Grid Regulations Intelligent Retrieval Agent$(NC)"
+	@echo "$(BLUE)RegReader - Power Grid Regulations Intelligent Retrieval Agent$(NC)"
 	@echo ""
 	@echo "$(GREEN)Available targets:$(NC)"
 	@awk 'BEGIN {FS = ":.*##"; printf ""} /^[a-zA-Z_-]+:.*?##/ { printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -127,16 +127,16 @@ install-qdrant: ## Install with Qdrant vector index
 #----------------------------------------------------------------------
 
 lint: ## Run ruff linter
-	$(UV_RUN) $(RUFF) check src/grid_code tests
+	$(UV_RUN) $(RUFF) check src/regreader tests
 
 lint-fix: ## Run ruff linter with auto-fix
-	$(UV_RUN) $(RUFF) check --fix src/grid_code tests
+	$(UV_RUN) $(RUFF) check --fix src/regreader tests
 
 format: ## Format code with ruff
-	$(UV_RUN) $(RUFF) format src/grid_code tests
+	$(UV_RUN) $(RUFF) format src/regreader tests
 
 format-check: ## Check code formatting without changes
-	$(UV_RUN) $(RUFF) format --check src/grid_code tests
+	$(UV_RUN) $(RUFF) format --check src/regreader tests
 
 check: lint format-check ## Run all code quality checks
 
@@ -148,7 +148,7 @@ test: ## Run all tests
 	$(UV_RUN) $(PYTEST) tests/ -v
 
 test-cov: ## Run tests with coverage report
-	$(UV_RUN) $(PYTEST) tests/ -v --cov=src/grid_code --cov-report=term-missing
+	$(UV_RUN) $(PYTEST) tests/ -v --cov=src/regreader --cov-report=term-missing
 
 test-fast: ## Run tests without slow markers
 	$(UV_RUN) $(PYTEST) tests/ -v -m "not slow"
@@ -181,28 +181,28 @@ verify-bash-fs: ## Run complete Bash+FS architecture verification (no pytest req
 #----------------------------------------------------------------------
 
 serve: ## Start MCP server (SSE mode, port 8080)
-	$(GRIDCODE_CMD) serve --transport sse --port 8080
+	$(REGREADER_CMD) serve --transport sse --port 8080
 
 serve-stdio: ## Start MCP server (stdio mode, for Claude Desktop)
-	$(GRIDCODE_CMD) serve --transport stdio
+	$(REGREADER_CMD) serve --transport stdio
 
 PORT ?= 8080
 serve-port: ## Start MCP server on custom port (usage: make serve-port PORT=9000)
-	$(GRIDCODE_CMD) serve --transport sse --port $(PORT)
+	$(REGREADER_CMD) serve --transport sse --port $(PORT)
 
 list: ## List all ingested regulations
-	$(GRIDCODE_CMD) $(MCP_FLAGS) list
+	$(REGREADER_CMD) $(MCP_FLAGS) list
 
 QUERY ?= 母线失压
 search: ## Search regulations (usage: make search QUERY="母线失压" REG_ID=angui)
-	$(GRIDCODE_CMD) $(MCP_FLAGS) search "$(QUERY)" $(REG_ID_FLAG)
+	$(REGREADER_CMD) $(MCP_FLAGS) search "$(QUERY)" $(REG_ID_FLAG)
 
 #----------------------------------------------------------------------
 # Multi-Regulation Search
 #----------------------------------------------------------------------
 
 search-smart: ## Smart search - auto-detect regulation (usage: make search-smart QUERY="母线失压")
-	$(GRIDCODE_CMD) $(MCP_FLAGS) search "$(QUERY)"
+	$(REGREADER_CMD) $(MCP_FLAGS) search "$(QUERY)"
 
 REG_IDS ?= angui_2024,wengui_2024
 search-multi: ## Search multiple regulations (usage: make search-multi QUERY="稳定控制" REG_IDS="angui_2024,wengui_2024")
@@ -211,20 +211,20 @@ search-multi: ## Search multiple regulations (usage: make search-multi QUERY="�
 	for reg in "$${REGS[@]}"; do \
 		REG_ARGS="$$REG_ARGS -r $$reg"; \
 	done; \
-	$(GRIDCODE_CMD) $(MCP_FLAGS) search "$(QUERY)" $$REG_ARGS
+	$(REGREADER_CMD) $(MCP_FLAGS) search "$(QUERY)" $$REG_ARGS
 
 search-all: ## Search all regulations (usage: make search-all QUERY="故障处理")
-	$(GRIDCODE_CMD) $(MCP_FLAGS) search "$(QUERY)" --all
+	$(REGREADER_CMD) $(MCP_FLAGS) search "$(QUERY)" --all
 
 #----------------------------------------------------------------------
 # Metadata Enrichment
 #----------------------------------------------------------------------
 
 enrich-metadata: ## Generate metadata for a regulation (usage: make enrich-metadata REG_ID=angui_2024)
-	$(GRIDCODE_CMD) enrich-metadata $(REG_ID)
+	$(REGREADER_CMD) enrich-metadata $(REG_ID)
 
 enrich-metadata-all: ## Generate metadata for all regulations
-	$(GRIDCODE_CMD) enrich-metadata --all
+	$(REGREADER_CMD) enrich-metadata --all
 
 # REG_ID ?= angui_2024
 # FILE ?= ./data/raw/angui_2024.pdf
@@ -235,22 +235,22 @@ ingest: ## Ingest a document (usage: make ingest FILE=/path/to/doc.docx REG_ID=a
 		echo "Error: FILE is required. Usage: make ingest FILE=/path/to/doc.docx REG_ID=angui"; \
 		exit 1; \
 	fi
-	$(GRIDCODE_CMD) ingest --file $(FILE) --reg-id $(REG_ID)
+	$(REGREADER_CMD) ingest --file $(FILE) --reg-id $(REG_ID)
 
-version: ## Show GridCode version
-	$(GRIDCODE_CMD) version
+version: ## Show RegReader version
+	$(REGREADER_CMD) version
 
 PAGE_NUM ?= 7
 OUTPUT ?=
 inspect: ## Inspect page data across indexes (usage: make inspect REG_ID=angui PAGE_NUM=25)
 	@if [ -z "$(OUTPUT)" ]; then \
-		$(GRIDCODE_CMD) inspect $(REG_ID) $(PAGE_NUM); \
+		$(REGREADER_CMD) inspect $(REG_ID) $(PAGE_NUM); \
 	else \
-		$(GRIDCODE_CMD) inspect $(REG_ID) $(PAGE_NUM) --output $(OUTPUT); \
+		$(REGREADER_CMD) inspect $(REG_ID) $(PAGE_NUM) --output $(OUTPUT); \
 	fi
 
 inspect-vectors: ## Inspect page data with vector display
-	$(GRIDCODE_CMD) inspect $(REG_ID) $(PAGE_NUM) --show-vectors
+	$(REGREADER_CMD) inspect $(REG_ID) $(PAGE_NUM) --show-vectors
 
 
 # Litellm Proxy

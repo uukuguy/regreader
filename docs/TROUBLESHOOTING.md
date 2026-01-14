@@ -178,8 +178,8 @@ make help
 # 查看示例
 make ask-examples
 
-# 查看 gridcode CLI 帮助
-uv run gridcode ask --help
+# 查看 regreader CLI 帮助
+uv run regreader ask --help
 ```
 
 ### 查看文档

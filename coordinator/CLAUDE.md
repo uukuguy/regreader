@@ -1,7 +1,7 @@
-# GridCode Coordinator
+# RegReader Coordinator
 
 ## 角色定位
-GridCode 协调器是系统的核心调度中心，负责：
+RegReader 协调器是系统的核心调度中心，负责：
 1. 接收用户查询请求
 2. 分析查询意图
 3. 调度合适的 Subagent 执行任务

@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/grid_code/`: library code; `agents/` hosts Claude/Pydantic/LangGraph flows, `mcp/` serves MCP tools, `parser/` handles Docling ingestion, `index/` controls retrieval backends, `storage/` manages page persistence, `cli.py` is the Typer entrypoint.
+- `src/regreader/`: library code; `agents/` hosts Claude/Pydantic/LangGraph flows, `mcp/` serves MCP tools, `parser/` handles Docling ingestion, `index/` controls retrieval backends, `storage/` manages page persistence, `cli.py` is the Typer entrypoint.
 - `scripts/`: utilities like `reindex_document.py`, `verify_chapters.py`, and `stats_headings.py` for maintenance and debugging.
 - `data/` and `outputs/`: ingested regulation data, backups, and generated artifacts (git-ignored); keep large files local and reference paths in PRs if relevant.
 - `tests/`: pytest suites (e.g., heading detection in `tests/test_heading_detection.py`, scenarios in `tests/main/`).
@@ -19,7 +19,7 @@
 - Python only; prefer 4-space indents and type hints. Functions/modules stay `snake_case`; classes use `CamelCase`.
 - Ruff enforces style (`line-length = 100`, `py312` target, `select = ["E","F","I","N","W","UP"]`); run `make format` before PRs.
 - Favor small, composable functions and explicit logging via `loguru`; keep CLI entrypoints thin and delegate to services.
-- Config via environment variables (e.g., `GRIDCODE_KEYWORD_INDEX_BACKEND`, `GRIDCODE_VECTOR_INDEX_BACKEND`, provider API keys); never commit `.env` or data assets.
+- Config via environment variables (e.g., `REGREADER_KEYWORD_INDEX_BACKEND`, `REGREADER_VECTOR_INDEX_BACKEND`, provider API keys); never commit `.env` or data assets.
 
 ## Testing Guidelines
 - Add/extend pytest cases under `tests/`; name files `test_*.py` and keep deterministic inputs.

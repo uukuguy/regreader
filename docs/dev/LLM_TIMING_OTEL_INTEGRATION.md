@@ -7,7 +7,7 @@
 
 ## 概述
 
-本文档描述了 GridCode 项目中 LLM API 时间追踪的双轨架构实现，包括 httpx hooks（用于 CLI 显示）和 OpenTelemetry（用于生产环境监控）两种后端，以及答案生成步骤的可见性改进。
+本文档描述了 RegReader 项目中 LLM API 时间追踪的双轨架构实现，包括 httpx hooks（用于 CLI 显示）和 OpenTelemetry（用于生产环境监控）两种后端，以及答案生成步骤的可见性改进。
 
 ## 背景与动机
 
@@ -54,7 +54,7 @@
 
 #### 1. TimingBackend 抽象接口
 
-位置: `src/grid_code/agents/timing/base.py`
+位置: `src/regreader/agents/timing/base.py`
 
 ```python
 class TimingBackend(ABC):
@@ -84,7 +84,7 @@ class TimingBackend(ABC):
 
 #### 2. HttpxTimingBackend 实现
 
-位置: `src/grid_code/agents/timing/httpx_timing.py`
+位置: `src/regreader/agents/timing/httpx_timing.py`
 
 **特性**:
 - 使用 httpx `event_hooks` 拦截 HTTP 请求/响应
@@ -115,7 +115,7 @@ class HttpxTimingBackend(TimingBackend):
 
 #### 3. OTelTimingBackend 实现
 
-位置: `src/grid_code/agents/timing/otel_timing.py`
+位置: `src/regreader/agents/timing/otel_timing.py`
 
 **特性**:
 - 使用 `opentelemetry-instrumentation-httpx` 自动追踪 HTTP 调用
@@ -146,7 +146,7 @@ class OTelTimingBackend(TimingBackend):
 
 #### 4. 工厂函数
 
-位置: `src/grid_code/agents/timing/__init__.py`
+位置: `src/regreader/agents/timing/__init__.py`
 
 ```python
 def create_timing_backend(
@@ -166,7 +166,7 @@ def create_timing_backend_from_config(
     callback: StatusCallback | None = None,
 ) -> TimingBackend:
     """从全局配置创建时间追踪后端"""
-    from grid_code.config import settings
+    from regreader.config import settings
     return create_timing_backend(
         backend_type=settings.timing_backend,
         callback=callback,
@@ -180,7 +180,7 @@ def create_timing_backend_from_config(
 
 ### 新增事件类型
 
-位置: `src/grid_code/agents/events.py`
+位置: `src/regreader/agents/events.py`
 
 ```python
 class AgentEventType(str, Enum):
@@ -201,7 +201,7 @@ def answer_generation_end_event(
 
 ### Agent 集成
 
-**PydanticAIAgent** (`src/grid_code/agents/pydantic_agent.py`):
+**PydanticAIAgent** (`src/regreader/agents/pydantic_agent.py`):
 
 ```python
 async def chat(self, message: str, ...) -> AgentResponse:
@@ -226,11 +226,11 @@ async def chat(self, message: str, ...) -> AgentResponse:
         )
 ```
 
-**LangGraphAgent** (`src/grid_code/agents/langgraph_agent.py`): 同样的集成方式
+**LangGraphAgent** (`src/regreader/agents/langgraph_agent.py`): 同样的集成方式
 
 ### Display 层处理
 
-位置: `src/grid_code/agents/display.py`
+位置: `src/regreader/agents/display.py`
 
 ```python
 def _format_answer_generation_start(self) -> Text:
@@ -259,7 +259,7 @@ def _format_answer_generation_end(self, event: AgentEvent) -> Text:
 
 ### otel_hooks 模块
 
-位置: `src/grid_code/agents/otel_hooks.py`
+位置: `src/regreader/agents/otel_hooks.py`
 
 **功能**: 为 Claude Agent SDK 的 hooks 机制提供 OpenTelemetry 支持
 
@@ -326,7 +326,7 @@ def get_combined_hooks(
 
 ### ClaudeAgent 集成
 
-位置: `src/grid_code/agents/claude_agent.py`
+位置: `src/regreader/agents/claude_agent.py`
 
 ```python
 def _build_hooks(self) -> dict[str, list[HookMatcher]] | None:
@@ -334,7 +334,7 @@ def _build_hooks(self) -> dict[str, list[HookMatcher]] | None:
     settings = get_settings()
     enable_otel = settings.timing_backend == "otel"
 
-    from grid_code.agents.otel_hooks import get_combined_hooks
+    from regreader.agents.otel_hooks import get_combined_hooks
 
     combined = get_combined_hooks(
         enable_audit=True,
@@ -358,10 +358,10 @@ def _build_hooks(self) -> dict[str, list[HookMatcher]] | None:
 
 ### 新增配置项
 
-位置: `src/grid_code/config.py`
+位置: `src/regreader/config.py`
 
 ```python
-class GridCodeSettings(BaseSettings):
+class RegReaderSettings(BaseSettings):
     # 时间追踪配置
     timing_backend: str = Field(
         default="httpx",
@@ -374,7 +374,7 @@ class GridCodeSettings(BaseSettings):
         description="OTel 导出器类型: console, otlp, jaeger, zipkin",
     )
     otel_service_name: str = Field(
-        default="gridcode-agent",
+        default="regreader-agent",
         description="OTel 服务名称（用于追踪标识）",
     )
     otel_endpoint: str | None = Field(
@@ -387,17 +387,17 @@ class GridCodeSettings(BaseSettings):
 
 ```bash
 # 时间追踪后端选择
-export GRIDCODE_TIMING_BACKEND=httpx    # 默认，CLI 显示
-export GRIDCODE_TIMING_BACKEND=otel     # 生产环境监控
+export REGREADER_TIMING_BACKEND=httpx    # 默认，CLI 显示
+export REGREADER_TIMING_BACKEND=otel     # 生产环境监控
 
 # OpenTelemetry 配置
-export GRIDCODE_OTEL_EXPORTER_TYPE=console     # 控制台输出
-export GRIDCODE_OTEL_EXPORTER_TYPE=otlp        # OTLP 导出
-export GRIDCODE_OTEL_EXPORTER_TYPE=jaeger      # Jaeger 导出
-export GRIDCODE_OTEL_EXPORTER_TYPE=zipkin      # Zipkin 导出
+export REGREADER_OTEL_EXPORTER_TYPE=console     # 控制台输出
+export REGREADER_OTEL_EXPORTER_TYPE=otlp        # OTLP 导出
+export REGREADER_OTEL_EXPORTER_TYPE=jaeger      # Jaeger 导出
+export REGREADER_OTEL_EXPORTER_TYPE=zipkin      # Zipkin 导出
 
-export GRIDCODE_OTEL_SERVICE_NAME=gridcode-agent  # 服务名称
-export GRIDCODE_OTEL_ENDPOINT=http://localhost:4317  # 导出端点
+export REGREADER_OTEL_SERVICE_NAME=regreader-agent  # 服务名称
+export REGREADER_OTEL_ENDPOINT=http://localhost:4317  # 导出端点
 ```
 
 ## 依赖管理
@@ -436,15 +436,15 @@ otel-zipkin = [
 
 ```bash
 # 基础安装（httpx 后端）
-pip install grid-code
+pip install regreader
 
 # 安装 OTel 支持（控制台导出）
-pip install grid-code[otel]
+pip install regreader[otel]
 
 # 安装特定导出器
-pip install grid-code[otel-otlp]    # OTLP 导出到 Jaeger/OTLP Collector
-pip install grid-code[otel-jaeger]  # Jaeger 原生导出
-pip install grid-code[otel-zipkin]  # Zipkin 导出
+pip install regreader[otel-otlp]    # OTLP 导出到 Jaeger/OTLP Collector
+pip install regreader[otel-jaeger]  # Jaeger 原生导出
+pip install regreader[otel-zipkin]  # Zipkin 导出
 ```
 
 ## 使用指南
@@ -453,7 +453,7 @@ pip install grid-code[otel-zipkin]  # Zipkin 导出
 
 ```bash
 # 使用默认 httpx 后端
-gridcode chat -r angui_2024 --agent pydantic
+regreader chat -r angui_2024 --agent pydantic
 
 # 显示效果：
 # ⟳ 调用工具: smart_search
@@ -470,10 +470,10 @@ gridcode chat -r angui_2024 --agent pydantic
 
 ```bash
 # 设置 OTel 后端
-export GRIDCODE_TIMING_BACKEND=otel
-export GRIDCODE_OTEL_EXPORTER_TYPE=console
+export REGREADER_TIMING_BACKEND=otel
+export REGREADER_OTEL_EXPORTER_TYPE=console
 
-gridcode chat -r angui_2024 --agent claude
+regreader chat -r angui_2024 --agent claude
 
 # 控制台输出（示例）：
 # {
@@ -496,7 +496,7 @@ gridcode chat -r angui_2024 --agent claude
 
 ```bash
 # 安装 OTLP 导出器
-pip install grid-code[otel-otlp]
+pip install regreader[otel-otlp]
 
 # 启动 Jaeger（Docker）
 docker run -d --name jaeger \
@@ -504,14 +504,14 @@ docker run -d --name jaeger \
   -p 16686:16686 \
   jaegertracing/all-in-one:latest
 
-# 配置 GridCode
-export GRIDCODE_TIMING_BACKEND=otel
-export GRIDCODE_OTEL_EXPORTER_TYPE=otlp
-export GRIDCODE_OTEL_ENDPOINT=http://localhost:4317
-export GRIDCODE_OTEL_SERVICE_NAME=gridcode-production
+# 配置 RegReader
+export REGREADER_TIMING_BACKEND=otel
+export REGREADER_OTEL_EXPORTER_TYPE=otlp
+export REGREADER_OTEL_ENDPOINT=http://localhost:4317
+export REGREADER_OTEL_SERVICE_NAME=regreader-production
 
 # 运行 agent
-gridcode chat -r angui_2024 --agent pydantic
+regreader chat -r angui_2024 --agent pydantic
 
 # 访问 Jaeger UI: http://localhost:16686
 # 可以看到完整的 trace：
@@ -524,11 +524,11 @@ gridcode chat -r angui_2024 --agent pydantic
 
 ```bash
 # ClaudeAgent 同时支持工具调用追踪
-export GRIDCODE_TIMING_BACKEND=otel
-export GRIDCODE_OTEL_EXPORTER_TYPE=otlp
-export GRIDCODE_OTEL_ENDPOINT=http://localhost:4317
+export REGREADER_TIMING_BACKEND=otel
+export REGREADER_OTEL_EXPORTER_TYPE=otlp
+export REGREADER_OTEL_ENDPOINT=http://localhost:4317
 
-gridcode chat -r angui_2024 --agent claude
+regreader chat -r angui_2024 --agent claude
 
 # Jaeger trace 结构：
 # ├── llm.chat.completions (520ms)
@@ -545,16 +545,16 @@ gridcode chat -r angui_2024 --agent claude
 
 ### llm_timing.py 兼容层
 
-位置: `src/grid_code/agents/llm_timing.py`
+位置: `src/regreader/agents/llm_timing.py`
 
 ```python
 """LLM API 调用时间收集器（兼容层）
 
-此模块已迁移到 grid_code.agents.timing 包。
+此模块已迁移到 regreader.agents.timing 包。
 保留此文件以保持向后兼容性。
 """
 
-from grid_code.agents.timing import (
+from regreader.agents.timing import (
     HttpxTimingBackend,
     LLMCallMetric,
     StepMetrics,
@@ -574,11 +574,11 @@ __all__ = [
 
 ```python
 # 旧代码（仍然支持）
-from grid_code.agents.llm_timing import LLMTimingCollector
+from regreader.agents.llm_timing import LLMTimingCollector
 collector = LLMTimingCollector()
 
 # 新代码（推荐）
-from grid_code.agents.timing import create_timing_backend
+from regreader.agents.timing import create_timing_backend
 backend = create_timing_backend("httpx")
 ```
 
@@ -614,23 +614,23 @@ backend = create_timing_backend("httpx")
 
 | 文件 | 功能 |
 |------|------|
-| `src/grid_code/agents/timing/__init__.py` | 工厂函数和导出 |
-| `src/grid_code/agents/timing/base.py` | TimingBackend 抽象接口 |
-| `src/grid_code/agents/timing/httpx_timing.py` | httpx 事件钩子实现 |
-| `src/grid_code/agents/timing/otel_timing.py` | OpenTelemetry 实现 |
-| `src/grid_code/agents/otel_hooks.py` | Claude SDK OTel hooks |
+| `src/regreader/agents/timing/__init__.py` | 工厂函数和导出 |
+| `src/regreader/agents/timing/base.py` | TimingBackend 抽象接口 |
+| `src/regreader/agents/timing/httpx_timing.py` | httpx 事件钩子实现 |
+| `src/regreader/agents/timing/otel_timing.py` | OpenTelemetry 实现 |
+| `src/regreader/agents/otel_hooks.py` | Claude SDK OTel hooks |
 
 ### 修改文件
 
 | 文件 | 修改内容 |
 |------|----------|
-| `src/grid_code/agents/events.py` | 添加 ANSWER_GENERATION 事件 |
-| `src/grid_code/agents/pydantic_agent.py` | 发送答案生成事件 |
-| `src/grid_code/agents/langgraph_agent.py` | 发送答案生成事件 |
-| `src/grid_code/agents/display.py` | 处理答案生成事件，修复汇总条件 |
-| `src/grid_code/agents/claude_agent.py` | 使用组合 hooks |
-| `src/grid_code/agents/llm_timing.py` | 更新为兼容层 |
-| `src/grid_code/config.py` | 添加 OTel 配置项 |
+| `src/regreader/agents/events.py` | 添加 ANSWER_GENERATION 事件 |
+| `src/regreader/agents/pydantic_agent.py` | 发送答案生成事件 |
+| `src/regreader/agents/langgraph_agent.py` | 发送答案生成事件 |
+| `src/regreader/agents/display.py` | 处理答案生成事件，修复汇总条件 |
+| `src/regreader/agents/claude_agent.py` | 使用组合 hooks |
+| `src/regreader/agents/llm_timing.py` | 更新为兼容层 |
+| `src/regreader/config.py` | 添加 OTel 配置项 |
 | `pyproject.toml` | 添加 otel 可选依赖 |
 
 ## 测试与验证
@@ -639,12 +639,12 @@ backend = create_timing_backend("httpx")
 
 ```bash
 $ python -c "
-from grid_code.agents.timing import (
+from regreader.agents.timing import (
     create_timing_backend,
     TimingBackend,
     HttpxTimingBackend,
 )
-from grid_code.agents.otel_hooks import get_combined_hooks, OTEL_AVAILABLE
+from regreader.agents.otel_hooks import get_combined_hooks, OTEL_AVAILABLE
 print('✓ All imports successful')
 print(f'✓ OTEL_AVAILABLE={OTEL_AVAILABLE}')
 "
@@ -658,8 +658,8 @@ print(f'✓ OTEL_AVAILABLE={OTEL_AVAILABLE}')
 
 ```bash
 $ python -c "
-from grid_code.agents.llm_timing import LLMTimingCollector
-from grid_code.agents.timing import HttpxTimingBackend
+from regreader.agents.llm_timing import LLMTimingCollector
+from regreader.agents.timing import HttpxTimingBackend
 assert LLMTimingCollector is HttpxTimingBackend
 print('✓ Backward compatibility verified')
 "

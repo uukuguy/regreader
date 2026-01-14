@@ -1,9 +1,9 @@
-# GridCode Bash+FS Subagents 架构演进方案
+# RegReader Bash+FS Subagents 架构演进方案
 
 ## 一、背景与目标
 
 ### 1.1 当前状态
-GridCode 已实现完善的 Subagents 架构：
+RegReader 已实现完善的 Subagents 架构：
 - **4 种 Subagent**：SEARCH / TABLE / REFERENCE / DISCOVERY
 - **协调层**：QueryAnalyzer → SubagentRouter → ResultAggregator
 - **三框架并行**：Claude SDK / Pydantic AI / LangGraph
@@ -52,7 +52,7 @@ GridCode 已实现完善的 Subagents 架构：
 ## 三、目录结构设计
 
 ```
-grid-code/
+regreader/
 ├── coordinator/                      # Coordinator 工作区（新增）
 │   ├── CLAUDE.md                     # 项目导读入口
 │   ├── plan.md                       # 任务规划
@@ -84,7 +84,7 @@ grid-code/
 │   ├── table_lookup/
 │   └── cross_ref/
 │
-└── src/grid_code/                    # 源代码（增强）
+└── src/regreader/                    # 源代码（增强）
     ├── infrastructure/               # 公共基础设施（新增）
     │   ├── file_context.py
     │   ├── skill_loader.py
@@ -106,7 +106,7 @@ grid-code/
 **职责**：实现 Bash+FS 范式的文件读写隔离
 
 ```python
-# src/grid_code/infrastructure/file_context.py
+# src/regreader/infrastructure/file_context.py
 
 @dataclass
 class FileContext:
@@ -130,7 +130,7 @@ class FileContext:
 **职责**：动态加载 SKILL.md 定义的技能包
 
 ```python
-# src/grid_code/infrastructure/skill_loader.py
+# src/regreader/infrastructure/skill_loader.py
 
 @dataclass
 class Skill:
@@ -153,7 +153,7 @@ class SkillLoader:
 **职责**：Subagent 间松耦合通信 + 文件持久化
 
 ```python
-# src/grid_code/infrastructure/event_bus.py
+# src/regreader/infrastructure/event_bus.py
 
 class SubagentEvent(Enum):
     TASK_STARTED = "task_started"
@@ -179,7 +179,7 @@ class EventBus:
 **职责**：瑞士奶酪防御（目录隔离 + 权限控制）
 
 ```python
-# src/grid_code/infrastructure/security_guard.py
+# src/regreader/infrastructure/security_guard.py
 
 @dataclass
 class PermissionMatrix:
@@ -238,7 +238,7 @@ class SubagentType(str, Enum):
 ### 5.3 增强 BaseSubagent
 
 ```python
-# src/grid_code/subagents/base.py 增强
+# src/regreader/subagents/base.py 增强
 
 class BaseSubagent(ABC):
     def __init__(
@@ -267,7 +267,7 @@ class BaseSubagent(ABC):
 ### 5.4 增强 SubagentConfig
 
 ```python
-# src/grid_code/subagents/config.py 增强
+# src/regreader/subagents/config.py 增强
 
 @dataclass
 class SubagentConfig:
@@ -316,18 +316,18 @@ Coordinator                    RegSearch-Subagent
 **目标**：创建公共基础设施组件
 
 **任务**：
-1. 创建 `src/grid_code/infrastructure/` 目录
+1. 创建 `src/regreader/infrastructure/` 目录
 2. 实现 `FileContext` - 文件上下文管理器
 3. 实现 `SkillLoader` - 技能加载器
 4. 实现 `EventBus` - 事件总线
 5. 实现 `SecurityGuard` - 安全守卫
 
 **关键文件**：
-- `src/grid_code/infrastructure/__init__.py`
-- `src/grid_code/infrastructure/file_context.py`
-- `src/grid_code/infrastructure/skill_loader.py`
-- `src/grid_code/infrastructure/event_bus.py`
-- `src/grid_code/infrastructure/security_guard.py`
+- `src/regreader/infrastructure/__init__.py`
+- `src/regreader/infrastructure/file_context.py`
+- `src/regreader/infrastructure/skill_loader.py`
+- `src/regreader/infrastructure/event_bus.py`
+- `src/regreader/infrastructure/security_guard.py`
 
 ### Phase 2: 目录结构
 
@@ -357,10 +357,10 @@ Coordinator                    RegSearch-Subagent
 5. 保持现有 4 个 Subagent 作为内部组件
 
 **关键文件**：
-- `src/grid_code/subagents/base.py` (增强)
-- `src/grid_code/subagents/config.py` (增强)
-- `src/grid_code/subagents/regsearch/__init__.py` (新增)
-- `src/grid_code/subagents/regsearch/subagent.py` (新增)
+- `src/regreader/subagents/base.py` (增强)
+- `src/regreader/subagents/config.py` (增强)
+- `src/regreader/subagents/regsearch/__init__.py` (新增)
+- `src/regreader/subagents/regsearch/subagent.py` (新增)
 
 ### Phase 4: Coordinator 升级
 
@@ -373,8 +373,8 @@ Coordinator                    RegSearch-Subagent
 4. 添加任务状态持久化
 
 **关键文件**：
-- `src/grid_code/orchestrator/coordinator.py` (新增)
-- `src/grid_code/orchestrator/aggregator.py` (增强)
+- `src/regreader/orchestrator/coordinator.py` (新增)
+- `src/regreader/orchestrator/aggregator.py` (增强)
 
 ### Phase 5: 测试与验证
 
@@ -409,7 +409,7 @@ pytest tests/bash-fs-paradiam/test_regsearch_subagent.py -xvs
 
 ```bash
 # 验证完整工作流
-gridcode chat -r angui_2024 --agent pydantic
+regreader chat -r angui_2024 --agent pydantic
 # 测试查询：母线失压如何处理?
 
 # 验证文件系统状态
@@ -421,10 +421,10 @@ cat subagents/regsearch/scratch/results.json
 
 ```bash
 # 验证 CLI 命令
-gridcode search "母线失压" -r angui_2024
+regreader search "母线失压" -r angui_2024
 
 # 验证技能加载
-gridcode skills list
+regreader skills list
 
 # 验证事件日志
 cat coordinator/logs/events.jsonl

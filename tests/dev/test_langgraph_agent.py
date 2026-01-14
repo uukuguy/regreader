@@ -6,7 +6,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from grid_code.agents.base import AgentResponse
+from regreader.agents.base import AgentResponse
 
 
 class TestLangGraphAgentInit:
@@ -21,7 +21,7 @@ class TestLangGraphAgentInit:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
 
@@ -38,7 +38,7 @@ class TestLangGraphAgentInit:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
                 old_thread_id = agent.thread_id
@@ -57,7 +57,7 @@ class TestLangGraphAgentInit:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
                 target_thread_id = "gridcode-test1234"
@@ -79,8 +79,8 @@ class TestLangGraphAgentSystemPrompt:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
-                from grid_code.agents.prompts import SYSTEM_PROMPT
+                from regreader.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.prompts import SYSTEM_PROMPT
 
                 agent = LangGraphAgent()
 
@@ -97,8 +97,8 @@ class TestLangGraphAgentSystemPrompt:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
-                from grid_code.agents.prompts import SYSTEM_PROMPT
+                from regreader.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.prompts import SYSTEM_PROMPT
 
                 agent = LangGraphAgent(reg_id="angui_2024")
 
@@ -120,7 +120,7 @@ class TestSourceExtraction:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
                 agent._sources = []
@@ -139,7 +139,7 @@ class TestSourceExtraction:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
                 agent._sources = []
@@ -168,7 +168,7 @@ class TestArgsSchemaCreation:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
 
@@ -198,7 +198,7 @@ class TestArgsSchemaCreation:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
 
@@ -231,7 +231,7 @@ class TestAgentProperties:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
                 assert agent.name == "LangGraphAgent"
@@ -245,7 +245,7 @@ class TestAgentProperties:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
                 assert agent.model == "claude-sonnet-4-20250514"
@@ -264,7 +264,7 @@ class TestAgentReset:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
                 old_thread_id = agent.thread_id
@@ -289,7 +289,7 @@ class TestGetSessionHistory:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.langgraph_agent import LangGraphAgent
+                from regreader.agents.langgraph_agent import LangGraphAgent
 
                 agent = LangGraphAgent()
                 agent._graph = None

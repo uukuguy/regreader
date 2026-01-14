@@ -1,6 +1,6 @@
 # Bash+FS Subagents 架构使用指南
 
-本指南介绍如何使用 GridCode 的 Bash+FS Subagents 架构进行规程检索开发。
+本指南介绍如何使用 RegReader 的 Bash+FS Subagents 架构进行规程检索开发。
 
 ---
 
@@ -11,8 +11,8 @@
 最简单的使用方式，适合快速开发和测试：
 
 ```python
-from grid_code.subagents import RegSearchSubagent
-from grid_code.subagents.base import SubagentContext
+from regreader.subagents import RegSearchSubagent
+from regreader.subagents.base import SubagentContext
 
 # 创建子代理
 subagent = RegSearchSubagent()
@@ -34,7 +34,7 @@ print(result.content)
 
 ```python
 from pathlib import Path
-from grid_code.subagents import RegSearchSubagent
+from regreader.subagents import RegSearchSubagent
 
 # 创建子代理（启用文件系统）
 subagent = RegSearchSubagent(
@@ -50,10 +50,10 @@ subagent = RegSearchSubagent(
 ### 3. 使用 Coordinator 协调多个子代理
 
 ```python
-from grid_code.orchestrator import Coordinator
-from grid_code.infrastructure import EventBus
-from grid_code.subagents import RegSearchSubagent
-from grid_code.subagents.config import SubagentType
+from regreader.orchestrator import Coordinator
+from regreader.infrastructure import EventBus
+from regreader.subagents import RegSearchSubagent
+from regreader.subagents.config import SubagentType
 
 # 准备子代理
 subagents = {
@@ -111,7 +111,7 @@ skills/                        # 工作流级：可复用技能包
 
 ```python
 from pathlib import Path
-from grid_code.infrastructure import FileContext
+from regreader.infrastructure import FileContext
 
 fc = FileContext(
     subagent_name="regsearch",
@@ -137,7 +137,7 @@ fc.log("任务完成", "info")
 支持 Subagent 间松耦合通信：
 
 ```python
-from grid_code.infrastructure import EventBus, Event, SubagentEvent
+from regreader.infrastructure import EventBus, Event, SubagentEvent
 
 bus = EventBus()
 
@@ -167,7 +167,7 @@ bus.publish(event)
 动态加载技能定义：
 
 ```python
-from grid_code.infrastructure import SkillLoader
+from regreader.infrastructure import SkillLoader
 
 loader = SkillLoader()
 skills = loader.load_all()
@@ -185,7 +185,7 @@ regsearch_skills = loader.get_skills_for_subagent("regsearch")
 实现权限控制和审计：
 
 ```python
-from grid_code.infrastructure import SecurityGuard, PermissionMatrix
+from regreader.infrastructure import SecurityGuard, PermissionMatrix
 
 guard = SecurityGuard()
 
@@ -211,7 +211,7 @@ if guard.check_file_access("regsearch", Path("shared/data.json"), "read"):
 完整的项目目录结构：
 
 ```
-grid-code/
+regreader/
 ├── coordinator/                 # Coordinator 工作区
 │   ├── CLAUDE.md               # 项目导读入口
 │   ├── plan.md                 # 任务规划（运行时）
@@ -391,7 +391,7 @@ content = await fc.aread_scratch("large_result.json")
 正确处理文件访问异常：
 
 ```python
-from grid_code.infrastructure.file_context import (
+from regreader.infrastructure.file_context import (
     FileAccessError,
     FileNotFoundInContextError,
 )

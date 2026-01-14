@@ -6,7 +6,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from grid_code.agents.base import AgentResponse
+from regreader.agents.base import AgentResponse
 
 
 class TestClaudeAgentInit:
@@ -21,7 +21,7 @@ class TestClaudeAgentInit:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.claude_agent import ClaudeAgent
 
                     agent = ClaudeAgent()
 
@@ -38,7 +38,7 @@ class TestClaudeAgentInit:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.claude_agent import ClaudeAgent
 
                     agent = ClaudeAgent(reg_id="angui_2024")
 
@@ -53,7 +53,7 @@ class TestClaudeAgentInit:
                     anthropic_api_key=None,
                 )
 
-                from grid_code.agents.claude_agent import ClaudeAgent
+                from regreader.agents.claude_agent import ClaudeAgent
 
                 with pytest.raises(ValueError, match="未配置 Anthropic API Key"):
                     ClaudeAgent()
@@ -67,7 +67,7 @@ class TestClaudeAgentInit:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.claude_agent import ClaudeAgent
 
                     agent = ClaudeAgent(model="claude-opus-4-20250514")
 
@@ -86,8 +86,8 @@ class TestClaudeAgentSystemPrompt:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
-                    from grid_code.agents.prompts import SYSTEM_PROMPT
+                    from regreader.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.prompts import SYSTEM_PROMPT
 
                     agent = ClaudeAgent()
 
@@ -104,8 +104,8 @@ class TestClaudeAgentSystemPrompt:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
-                    from grid_code.agents.prompts import SYSTEM_PROMPT
+                    from regreader.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.prompts import SYSTEM_PROMPT
 
                     agent = ClaudeAgent(reg_id="angui_2024")
 
@@ -127,7 +127,7 @@ class TestMCPConfiguration:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.claude_agent import ClaudeAgent
 
                     agent = ClaudeAgent()
 
@@ -147,7 +147,7 @@ class TestMCPConfiguration:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.claude_agent import ClaudeAgent
 
                     agent = ClaudeAgent()
 
@@ -173,7 +173,7 @@ class TestHooksConfiguration:
                     with patch("grid_code.agents.claude_agent.HookMatcher") as mock_matcher:
                         mock_matcher.return_value = MagicMock()
 
-                        from grid_code.agents.claude_agent import ClaudeAgent
+                        from regreader.agents.claude_agent import ClaudeAgent
 
                         agent = ClaudeAgent(enable_hooks=True)
 
@@ -192,7 +192,7 @@ class TestHooksConfiguration:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.claude_agent import ClaudeAgent
 
                     agent = ClaudeAgent(enable_hooks=False)
 
@@ -213,8 +213,8 @@ class TestSourceExtraction:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
-                    from grid_code.agents.session import SessionState
+                    from regreader.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.session import SessionState
                     from datetime import datetime
 
                     agent = ClaudeAgent()
@@ -238,8 +238,8 @@ class TestSourceExtraction:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
-                    from grid_code.agents.session import SessionState
+                    from regreader.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.session import SessionState
                     from datetime import datetime
 
                     agent = ClaudeAgent()
@@ -269,8 +269,8 @@ class TestSourceExtraction:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
-                    from grid_code.agents.session import SessionState
+                    from regreader.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.session import SessionState
                     from datetime import datetime
                     import json
 
@@ -299,7 +299,7 @@ class TestAgentProperties:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.claude_agent import ClaudeAgent
 
                     agent = ClaudeAgent()
                     assert agent.name == "ClaudeAgent"
@@ -313,7 +313,7 @@ class TestAgentProperties:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.claude_agent import ClaudeAgent
 
                     agent = ClaudeAgent()
                     assert agent.model == "claude-sonnet-4-20250514"
@@ -331,7 +331,7 @@ class TestSessionManagement:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.claude_agent import ClaudeAgent
+                from regreader.agents.claude_agent import ClaudeAgent
 
                 agent = ClaudeAgent()
 
@@ -348,7 +348,7 @@ class TestSessionManagement:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.claude_agent import ClaudeAgent
+                from regreader.agents.claude_agent import ClaudeAgent
 
                 agent = ClaudeAgent()
 
@@ -369,7 +369,7 @@ class TestAgentReset:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.claude_agent import ClaudeAgent
+                from regreader.agents.claude_agent import ClaudeAgent
 
                 agent = ClaudeAgent()
 
@@ -393,7 +393,7 @@ class TestAgentReset:
                     anthropic_api_key="test-key",
                 )
 
-                from grid_code.agents.claude_agent import ClaudeAgent
+                from regreader.agents.claude_agent import ClaudeAgent
 
                 agent = ClaudeAgent()
 
@@ -421,8 +421,8 @@ class TestAssembledText:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
-                    from grid_code.agents.session import SessionState
+                    from regreader.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.session import SessionState
                     from datetime import datetime
 
                     agent = ClaudeAgent()
@@ -444,8 +444,8 @@ class TestAssembledText:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
-                    from grid_code.agents.session import SessionState
+                    from regreader.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.session import SessionState
                     from datetime import datetime
 
                     agent = ClaudeAgent()
@@ -474,8 +474,8 @@ class TestAssembledText:
                     anthropic_api_key="test-key",
                 )
                 with patch("grid_code.agents.claude_agent.SessionManager"):
-                    from grid_code.agents.claude_agent import ClaudeAgent
-                    from grid_code.agents.session import SessionState
+                    from regreader.agents.claude_agent import ClaudeAgent
+                    from regreader.agents.session import SessionState
                     from datetime import datetime
 
                     agent = ClaudeAgent()

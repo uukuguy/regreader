@@ -1,16 +1,16 @@
-# GridCode
+# RegReader
 
-**Agentic Search for Power Grid Regulations**
+**Agentic Reader for Power Grid Regulations**
 
 [中文版](README_CN.md)
 
-GridCode is an intelligent retrieval and reasoning agent for power system safety regulations (安规). Instead of traditional RAG chunking, it adopts a **page-based agentic search** approach—letting the LLM dynamically "flip through" documents, stitch cross-page tables, and trace references just like a human expert would.
+RegReader is an intelligent retrieval and reasoning agent for power system safety regulations (安规). Instead of traditional RAG chunking, it adopts a **page-based agentic search** approach—letting the LLM dynamically "flip through" documents, stitch cross-page tables, and trace references just like a human expert would.
 
-## Why GridCode?
+## Why RegReader?
 
 Power grid regulations present unique challenges that conventional RAG systems fail to address:
 
-| Challenge | Traditional RAG | GridCode |
+| Challenge | Traditional RAG | RegReader |
 |-----------|-----------------|----------|
 | **Complex Tables** | Chunks break table structure | Page-level storage preserves tables intact |
 | **Cross-page Tables** | Lost context at chunk boundaries | Agent detects truncation, fetches next page |
@@ -21,7 +21,7 @@ Power grid regulations present unique challenges that conventional RAG systems f
 
 ## Design Philosophy
 
-Inspired by how Claude Code searches codebases, GridCode treats regulations as "books to browse" rather than "vectors to match":
+Inspired by how Claude Code searches codebases, RegReader treats regulations as "books to browse" rather than "vectors to match":
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -150,15 +150,15 @@ User: "How to handle 110kV bus voltage loss?"
 
 ```bash
 # Basic installation
-pip install grid-code
+pip install regreader
 
 # With optional index backends
-pip install grid-code[tantivy]     # High-performance keyword search
-pip install grid-code[whoosh]      # Chinese tokenization support
-pip install grid-code[qdrant]      # Production vector database
+pip install regreader[tantivy]     # High-performance keyword search
+pip install regreader[whoosh]      # Chinese tokenization support
+pip install regreader[qdrant]      # Production vector database
 
 # Install all index backends
-pip install grid-code[all-indexes]
+pip install regreader[all-indexes]
 ```
 
 ## Configuration
@@ -167,18 +167,18 @@ Configure index backends via environment variables:
 
 ```bash
 # Select keyword index backend (fts5/tantivy/whoosh)
-export GRIDCODE_KEYWORD_INDEX_BACKEND=fts5
+export REGREADER_KEYWORD_INDEX_BACKEND=fts5
 
 # Select vector index backend (lancedb/qdrant)
-export GRIDCODE_VECTOR_INDEX_BACKEND=lancedb
+export REGREADER_VECTOR_INDEX_BACKEND=lancedb
 
 # Qdrant server configuration (if using qdrant)
-export GRIDCODE_QDRANT_URL=http://localhost:6333
+export REGREADER_QDRANT_URL=http://localhost:6333
 ```
 
 ## Agent Setup
 
-GridCode provides three agent implementations, each supporting both standard and orchestrator modes:
+RegReader provides three agent implementations, each supporting both standard and orchestrator modes:
 
 ### Standard Mode vs Orchestrator Mode
 
@@ -197,14 +197,14 @@ Uses the official Claude Agent SDK with native MCP support:
 
 ```bash
 # Set API key
-export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
+export REGREADER_ANTHROPIC_API_KEY="your-api-key"
 
 # Standard mode
-gridcode chat --agent claude --reg-id angui_2024
+regreader chat --agent claude --reg-id angui_2024
 
 # Orchestrator mode (context-efficient)
-gridcode chat --agent claude --reg-id angui_2024 --orchestrator
-gridcode chat-claude-orch --reg-id angui_2024  # Shortcut
+regreader chat --agent claude --reg-id angui_2024 --orchestrator
+regreader chat-claude-orch --reg-id angui_2024  # Shortcut
 ```
 
 ### Pydantic AI Agent (Multi-model support)
@@ -213,17 +213,17 @@ Type-safe agent supporting multiple LLM providers:
 
 ```bash
 # For Anthropic models
-export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
+export REGREADER_ANTHROPIC_API_KEY="your-api-key"
 
 # For OpenAI models
-export GRIDCODE_OPENAI_API_KEY="your-api-key"
+export REGREADER_OPENAI_API_KEY="your-api-key"
 
 # Standard mode
-gridcode chat --agent pydantic --reg-id angui_2024
+regreader chat --agent pydantic --reg-id angui_2024
 
 # Orchestrator mode
-gridcode chat --agent pydantic --reg-id angui_2024 -o  # -o is short for --orchestrator
-gridcode chat-pydantic-orch --reg-id angui_2024  # Shortcut
+regreader chat --agent pydantic --reg-id angui_2024 -o  # -o is short for --orchestrator
+regreader chat-pydantic-orch --reg-id angui_2024  # Shortcut
 ```
 
 ### LangGraph Agent (Complex workflows)
@@ -231,14 +231,14 @@ gridcode chat-pydantic-orch --reg-id angui_2024  # Shortcut
 For advanced workflow orchestration:
 
 ```bash
-export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
+export REGREADER_ANTHROPIC_API_KEY="your-api-key"
 
 # Standard mode
-gridcode chat --agent langgraph --reg-id angui_2024
+regreader chat --agent langgraph --reg-id angui_2024
 
 # Orchestrator mode
-gridcode chat --agent langgraph --reg-id angui_2024 --orchestrator
-gridcode chat-langgraph-orch --reg-id angui_2024  # Shortcut
+regreader chat --agent langgraph --reg-id angui_2024 --orchestrator
+regreader chat-langgraph-orch --reg-id angui_2024  # Shortcut
 ```
 
 ### Ollama Backend (Local LLM)
@@ -250,16 +250,16 @@ All agents support Ollama for local LLM deployment:
 export OPENAI_BASE_URL=http://localhost:11434/v1
 export OPENAI_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
 
-# Option 2: Use GRIDCODE_* environment variables
-export GRIDCODE_LLM_BASE_URL=http://localhost:11434
-export GRIDCODE_LLM_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
+# Option 2: Use REGREADER_* environment variables
+export REGREADER_LLM_BASE_URL=http://localhost:11434
+export REGREADER_LLM_MODEL_NAME=Qwen3-4B-Instruct-2507:Q8_0
 
 # Optional: Disable streaming for certain models
-export GRIDCODE_OLLAMA_DISABLE_STREAMING=false
+export REGREADER_OLLAMA_DISABLE_STREAMING=false
 
 # Start chat (works with all agents)
-gridcode chat --agent pydantic --reg-id angui_2024
-gridcode chat --agent langgraph --reg-id angui_2024
+regreader chat --agent pydantic --reg-id angui_2024
+regreader chat --agent langgraph --reg-id angui_2024
 ```
 
 **Auto-detection**: Ollama backend is automatically detected when:
@@ -289,13 +289,13 @@ All agents access page data through MCP protocol, with optional orchestrator mod
 │   └─────────────────────────────────────────────────┘       │
 │         │                 │                   │              │
 │         │                 ▼                   │              │
-│         │         GridCodeMCPClient           │              │
+│         │         RegReaderMCPClient           │              │
 └─────────┼─────────────────┬───────────────────┼──────────────┘
           │                 │                   │
           │   stdio         │   stdio           │   stdio
           ▼                 ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              GridCode MCP Server (16+ tools)                 │
+│              RegReader MCP Server (16+ tools)                 │
 │   get_toc | smart_search | read_page_range | ...            │
 └─────────────────────────────────────────────────────────────┘
 ```

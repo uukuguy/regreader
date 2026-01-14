@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from grid_code.infrastructure.file_context import FileContext
-from grid_code.subagents.base import SubagentContext
-from grid_code.subagents.config import REGSEARCH_AGENT_CONFIG
-from grid_code.subagents.regsearch import RegSearchSubagent
-from grid_code.subagents.result import SubagentResult
+from regreader.infrastructure.file_context import FileContext
+from regreader.subagents.base import SubagentContext
+from regreader.subagents.config import REGSEARCH_AGENT_CONFIG
+from regreader.subagents.regsearch import RegSearchSubagent
+from regreader.subagents.result import SubagentResult
 
 
 class TestRegSearchSubagent:

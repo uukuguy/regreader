@@ -36,7 +36,7 @@
 ```
 
 ### 修改文件
-- `src/grid_code/mcp/server.py`：更新所有工具的 description
+- `src/regreader/mcp/server.py`：更新所有工具的 description
 
 ---
 
@@ -69,9 +69,9 @@
 ```
 
 ### 修改文件
-- `src/grid_code/mcp/server.py`：添加 get_tool_guide 工具
-- `src/grid_code/mcp/tools.py`：实现 get_tool_guide 方法
-- `src/grid_code/mcp/protocol.py`：添加协议定义
+- `src/regreader/mcp/server.py`：添加 get_tool_guide 工具
+- `src/regreader/mcp/tools.py`：实现 get_tool_guide 方法
+- `src/regreader/mcp/protocol.py`：添加协议定义
 
 ---
 
@@ -297,19 +297,19 @@ MCP 工具列表 (16 个)
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/grid_code/mcp/tool_metadata.py` | **新建** | 工具元数据定义和注册表 |
-| `src/grid_code/mcp/server.py` | 修改 | 1) 更新描述 2) 添加 meta 3) 添加 get_tool_guide |
-| `src/grid_code/mcp/tools.py` | 修改 | 实现 get_tool_guide 方法 |
-| `src/grid_code/mcp/protocol.py` | 修改 | 添加 get_tool_guide 协议定义 |
-| `src/grid_code/cli.py` | 修改 | 添加 mcp-tools 命令 |
-| `src/grid_code/mcp/__init__.py` | 修改 | 导出新模块 |
+| `src/regreader/mcp/tool_metadata.py` | **新建** | 工具元数据定义和注册表 |
+| `src/regreader/mcp/server.py` | 修改 | 1) 更新描述 2) 添加 meta 3) 添加 get_tool_guide |
+| `src/regreader/mcp/tools.py` | 修改 | 实现 get_tool_guide 方法 |
+| `src/regreader/mcp/protocol.py` | 修改 | 添加 get_tool_guide 协议定义 |
+| `src/regreader/cli.py` | 修改 | 添加 mcp-tools 命令 |
+| `src/regreader/mcp/__init__.py` | 修改 | 导出新模块 |
 
 ---
 
 ## 实现步骤
 
 ### 第一步：创建工具元数据系统
-1. 新建 `src/grid_code/mcp/tool_metadata.py`
+1. 新建 `src/regreader/mcp/tool_metadata.py`
 2. 定义 `ToolMetadata` 数据类
 3. 创建完整的 `TOOL_METADATA` 注册表
 

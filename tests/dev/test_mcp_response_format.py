@@ -1,6 +1,6 @@
 """Test MCP tool response format to debug parsing issue."""
 
-from grid_code.index.hybrid_search import HybridSearch
+from regreader.index.hybrid_search import HybridSearch
 
 
 def test_smart_search_response():

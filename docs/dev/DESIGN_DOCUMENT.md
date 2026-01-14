@@ -1,4 +1,4 @@
-# GridCode 系统设计与实现文档
+# RegReader 系统设计与实现文档
 
 > 更新日期: 2026-01-02
 > 版本: 0.1.0
@@ -8,7 +8,7 @@
 
 ### 1.1 项目定位
 
-GridCode 是一个电力系统安全规程智能检索 Agent 系统，采用 **Page-Based Agentic Search** 架构。与传统 RAG 系统不同，GridCode 将文档按页面存储，通过 MCP 协议提供工具接口，让 LLM 动态"翻阅"页面进行多跳检索。
+RegReader 是一个电力系统安全规程智能检索 Agent 系统，采用 **Page-Based Agentic Search** 架构。与传统 RAG 系统不同，RegReader 将文档按页面存储，通过 MCP 协议提供工具接口，让 LLM 动态"翻阅"页面进行多跳检索。
 
 ### 1.2 核心设计理念
 
@@ -142,7 +142,7 @@ TocItem (目录项)
 
 ### 3.1 PageStore
 
-**文件**: `src/grid_code/storage/page_store.py`
+**文件**: `src/regreader/storage/page_store.py`
 
 **存储结构**:
 ```
@@ -198,7 +198,7 @@ class TableRegistry:
 
 ### 4.1 抽象接口
 
-**文件**: `src/grid_code/index/base.py`
+**文件**: `src/regreader/index/base.py`
 
 ```python
 class BaseKeywordIndex(ABC):
@@ -230,7 +230,7 @@ class BaseVectorIndex(ABC):
 
 #### FTS5Index (默认)
 
-**文件**: `src/grid_code/index/keyword/fts5.py`
+**文件**: `src/regreader/index/keyword/fts5.py`
 
 ```python
 class FTS5Index(BaseKeywordIndex):
@@ -256,25 +256,25 @@ class FTS5Index(BaseKeywordIndex):
 
 #### TantivyIndex (可选)
 
-**文件**: `src/grid_code/index/keyword/tantivy.py`
+**文件**: `src/regreader/index/keyword/tantivy.py`
 
 - 使用 Rust Tantivy 引擎
 - 高性能，支持复杂查询语法
-- 需要: `pip install grid-code[tantivy]`
+- 需要: `pip install regreader[tantivy]`
 
 #### WhooshIndex (可选)
 
-**文件**: `src/grid_code/index/keyword/whoosh.py`
+**文件**: `src/regreader/index/keyword/whoosh.py`
 
 - 纯 Python 实现
 - 支持中文分词 (jieba)
-- 需要: `pip install grid-code[whoosh]`
+- 需要: `pip install regreader[whoosh]`
 
 ### 4.3 向量索引实现
 
 #### LanceDBIndex (默认)
 
-**文件**: `src/grid_code/index/vector/lancedb.py`
+**文件**: `src/regreader/index/vector/lancedb.py`
 
 ```python
 class LanceDBIndex(BaseVectorIndex):
@@ -293,14 +293,14 @@ class LanceDBIndex(BaseVectorIndex):
 
 #### QdrantIndex (可选)
 
-**文件**: `src/grid_code/index/vector/qdrant.py`
+**文件**: `src/regreader/index/vector/qdrant.py`
 
 - 支持本地磁盘或远程服务器模式
-- 需要: `pip install grid-code[qdrant]`
+- 需要: `pip install regreader[qdrant]`
 
 ### 4.4 混合检索
 
-**文件**: `src/grid_code/index/hybrid_search.py`
+**文件**: `src/regreader/index/hybrid_search.py`
 
 ```python
 class HybridSearch:
@@ -351,7 +351,7 @@ class HybridSearch:
 
 ### 5.1 抽象接口
 
-**文件**: `src/grid_code/embedding/base.py`
+**文件**: `src/regreader/embedding/base.py`
 
 ```python
 class BaseEmbedding(ABC):
@@ -373,7 +373,7 @@ class BaseEmbedding(ABC):
 
 #### SentenceTransformerEmbedding (默认)
 
-**文件**: `src/grid_code/embedding/sentence_transformer.py`
+**文件**: `src/regreader/embedding/sentence_transformer.py`
 
 ```python
 class SentenceTransformerEmbedding(BaseEmbedding):
@@ -390,10 +390,10 @@ class SentenceTransformerEmbedding(BaseEmbedding):
 
 #### FlagEmbedding (可选)
 
-**文件**: `src/grid_code/embedding/flag.py`
+**文件**: `src/regreader/embedding/flag.py`
 
 - 使用 FlagEmbedding 库
-- 需要: `pip install grid-code[flag]`
+- 需要: `pip install regreader[flag]`
 
 ---
 
@@ -420,10 +420,10 @@ class SentenceTransformerEmbedding(BaseEmbedding):
 
 ### 6.2 核心工具实现
 
-**文件**: `src/grid_code/mcp/tools.py`
+**文件**: `src/regreader/mcp/tools.py`
 
 ```python
-class GridCodeTools:
+class RegReaderTools:
     def __init__(self):
         self.page_store = PageStore()
         self.hybrid_search = HybridSearch(...)
@@ -520,7 +520,7 @@ class GridCodeTools:
 
 ### 6.3 MCP Server 实现
 
-**文件**: `src/grid_code/mcp/server.py`
+**文件**: `src/regreader/mcp/server.py`
 
 ```python
 from mcp.server.fastmcp import FastMCP
@@ -530,12 +530,12 @@ def create_mcp_server(
     port: int = 8080,
 ) -> FastMCP:
     mcp = FastMCP(
-        name="gridcode",
+        name="regreader",
         host=host,
         port=port,
     )
 
-    tools = GridCodeTools()
+    tools = RegReaderTools()
 
     @mcp.tool(meta=TOOL_METADATA["get_toc"].to_dict())
     def get_toc(reg_id: str) -> dict:
@@ -565,7 +565,7 @@ def create_mcp_server(
 
 ### 7.1 抽象基类
 
-**文件**: `src/grid_code/agents/base.py`
+**文件**: `src/regreader/agents/base.py`
 
 ```python
 class AgentResponse(BaseModel):
@@ -575,8 +575,8 @@ class AgentResponse(BaseModel):
     tool_calls: list[dict]
     thinking: str | None = None
 
-class BaseGridCodeAgent(ABC):
-    """GridCode Agent 抽象基类"""
+class BaseRegReaderAgent(ABC):
+    """RegReader Agent 抽象基类"""
 
     @abstractmethod
     async def chat(self, message: str) -> AgentResponse:
@@ -599,10 +599,10 @@ class BaseGridCodeAgent(ABC):
 
 ### 7.2 Claude Agent SDK 实现
 
-**文件**: `src/grid_code/agents/claude_agent.py`
+**文件**: `src/regreader/agents/claude_agent.py`
 
 ```python
-class ClaudeAgent(BaseGridCodeAgent):
+class ClaudeAgent(BaseRegReaderAgent):
     """Claude Agent SDK 实现"""
 
     def __init__(
@@ -624,7 +624,7 @@ class ClaudeAgent(BaseGridCodeAgent):
             model=self._model,
             mcp_servers=[
                 MCPServerStdio(
-                    command="gridcode",
+                    command="regreader",
                     args=["serve", "--transport", "stdio"],
                 )
             ],
@@ -662,10 +662,10 @@ class ClaudeAgent(BaseGridCodeAgent):
 
 ### 7.3 Pydantic AI 实现
 
-**文件**: `src/grid_code/agents/pydantic_agent.py`
+**文件**: `src/regreader/agents/pydantic_agent.py`
 
 ```python
-class PydanticAIAgent(BaseGridCodeAgent):
+class PydanticAIAgent(BaseRegReaderAgent):
     """Pydantic AI 实现"""
 
     def __init__(
@@ -688,7 +688,7 @@ class PydanticAIAgent(BaseGridCodeAgent):
             self._model,
             mcp_servers=[
                 MCPServerStdio(
-                    command="gridcode",
+                    command="regreader",
                     args=["serve", "--transport", "stdio"],
                 )
             ],
@@ -729,10 +729,10 @@ class PydanticAIAgent(BaseGridCodeAgent):
 
 ### 7.4 LangGraph 实现
 
-**文件**: `src/grid_code/agents/langgraph_agent.py`
+**文件**: `src/regreader/agents/langgraph_agent.py`
 
 ```python
-class LangGraphAgent(BaseGridCodeAgent):
+class LangGraphAgent(BaseRegReaderAgent):
     """LangGraph 实现"""
 
     def __init__(
@@ -807,7 +807,7 @@ class LangGraphAgent(BaseGridCodeAgent):
 
 ### 7.5 对话历史管理
 
-**文件**: `src/grid_code/agents/memory.py`
+**文件**: `src/regreader/agents/memory.py`
 
 ```python
 class ContentChunk(BaseModel):
@@ -865,13 +865,13 @@ class AgentMemory:
 
 ### 8.1 命令结构
 
-**文件**: `src/grid_code/cli.py`
+**文件**: `src/regreader/cli.py`
 
 ```python
 import typer
 from rich.console import Console
 
-app = typer.Typer(name="gridcode", help="GridCode CLI")
+app = typer.Typer(name="regreader", help="RegReader CLI")
 console = Console()
 
 # 文档管理命令
@@ -965,14 +965,14 @@ def read_pages(
 
 ### 9.1 配置类
 
-**文件**: `src/grid_code/config.py`
+**文件**: `src/regreader/config.py`
 
 ```python
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-class GridCodeSettings(BaseSettings):
+class RegReaderSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="GRIDCODE_",
+        env_prefix="REGREADER_",
         env_file=".env",
         env_file_encoding="utf-8",
     )
@@ -1026,71 +1026,71 @@ class GridCodeSettings(BaseSettings):
         return "unknown"
 
 # 全局单例
-settings = GridCodeSettings()
+settings = RegReaderSettings()
 ```
 
 ---
 
 ## 10. 异常体系
 
-**文件**: `src/grid_code/exceptions.py`
+**文件**: `src/regreader/exceptions.py`
 
 ```python
-class GridCodeError(Exception):
-    """GridCode 基础异常"""
+class RegReaderError(Exception):
+    """RegReader 基础异常"""
     pass
 
-class ParserError(GridCodeError):
+class ParserError(RegReaderError):
     """文档解析错误"""
     pass
 
-class StorageError(GridCodeError):
+class StorageError(RegReaderError):
     """存储操作错误"""
     pass
 
-class IndexError(GridCodeError):
+class IndexError(RegReaderError):
     """索引操作错误"""
     pass
 
-class RegulationNotFoundError(GridCodeError):
+class RegulationNotFoundError(RegReaderError):
     """规程不存在"""
     def __init__(self, reg_id: str):
         super().__init__(f"规程不存在: {reg_id}")
         self.reg_id = reg_id
 
-class PageNotFoundError(GridCodeError):
+class PageNotFoundError(RegReaderError):
     """页面不存在"""
     def __init__(self, reg_id: str, page_num: int):
         super().__init__(f"页面不存在: {reg_id} 第 {page_num} 页")
         self.reg_id = reg_id
         self.page_num = page_num
 
-class InvalidPageRangeError(GridCodeError):
+class InvalidPageRangeError(RegReaderError):
     """无效页码范围"""
     pass
 
-class ChapterNotFoundError(GridCodeError):
+class ChapterNotFoundError(RegReaderError):
     """章节不存在"""
     def __init__(self, reg_id: str, section_number: str):
         super().__init__(f"章节不存在: {reg_id} {section_number}")
         self.reg_id = reg_id
         self.section_number = section_number
 
-class AnnotationNotFoundError(GridCodeError):
+class AnnotationNotFoundError(RegReaderError):
     """注释不存在"""
     def __init__(self, reg_id: str, annotation_id: str):
         super().__init__(f"注释不存在: {reg_id} {annotation_id}")
         self.reg_id = reg_id
         self.annotation_id = annotation_id
 
-class TableNotFoundError(GridCodeError):
+class TableNotFoundError(RegReaderError):
     """表格不存在"""
     def __init__(self, reg_id: str, table_id: str):
         super().__init__(f"表格不存在: {reg_id} {table_id}")
         self.reg_id = reg_id
         self.table_id = table_id
 
-class ReferenceResolutionError(GridCodeError):
+class ReferenceResolutionError(RegReaderError):
     """交叉引用解析错误"""
     def __init__(self, reference_text: str):
         super().__init__(f"无法解析引用: {reference_text}")
@@ -1133,10 +1133,10 @@ class ReferenceResolutionError(GridCodeError):
 
 | 模块 | 状态 | 依赖 |
 |------|------|------|
-| index/keyword/tantivy.py | ✅ 可用 | `grid-code[tantivy]` |
-| index/keyword/whoosh.py | ✅ 可用 | `grid-code[whoosh]` |
-| index/vector/qdrant.py | ✅ 可用 | `grid-code[qdrant]` |
-| embedding/flag.py | ✅ 可用 | `grid-code[flag]` |
+| index/keyword/tantivy.py | ✅ 可用 | `regreader[tantivy]` |
+| index/keyword/whoosh.py | ✅ 可用 | `regreader[whoosh]` |
+| index/vector/qdrant.py | ✅ 可用 | `regreader[qdrant]` |
+| embedding/flag.py | ✅ 可用 | `regreader[flag]` |
 
 ---
 
@@ -1199,15 +1199,15 @@ sentence-transformers>=3.3.0
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| GRIDCODE_DATA_DIR | ./data/storage | 数据目录 |
-| GRIDCODE_EMBEDDING_BACKEND | sentence_transformer | 嵌入后端 |
-| GRIDCODE_EMBEDDING_MODEL | BAAI/bge-small-zh-v1.5 | 嵌入模型 |
-| GRIDCODE_MCP_HOST | 127.0.0.1 | MCP 主机 |
-| GRIDCODE_MCP_PORT | 8080 | MCP 端口 |
-| GRIDCODE_MCP_TRANSPORT | stdio | MCP 传输方式 |
-| GRIDCODE_LLM_MODEL_NAME | claude-sonnet-4-20250514 | LLM 模型 |
-| GRIDCODE_LLM_API_KEY | - | LLM API Key |
-| GRIDCODE_KEYWORD_INDEX_BACKEND | fts5 | 关键词索引后端 |
-| GRIDCODE_VECTOR_INDEX_BACKEND | lancedb | 向量索引后端 |
-| GRIDCODE_FTS_WEIGHT | 0.4 | FTS 权重 |
-| GRIDCODE_VECTOR_WEIGHT | 0.6 | 向量权重 |
+| REGREADER_DATA_DIR | ./data/storage | 数据目录 |
+| REGREADER_EMBEDDING_BACKEND | sentence_transformer | 嵌入后端 |
+| REGREADER_EMBEDDING_MODEL | BAAI/bge-small-zh-v1.5 | 嵌入模型 |
+| REGREADER_MCP_HOST | 127.0.0.1 | MCP 主机 |
+| REGREADER_MCP_PORT | 8080 | MCP 端口 |
+| REGREADER_MCP_TRANSPORT | stdio | MCP 传输方式 |
+| REGREADER_LLM_MODEL_NAME | claude-sonnet-4-20250514 | LLM 模型 |
+| REGREADER_LLM_API_KEY | - | LLM API Key |
+| REGREADER_KEYWORD_INDEX_BACKEND | fts5 | 关键词索引后端 |
+| REGREADER_VECTOR_INDEX_BACKEND | lancedb | 向量索引后端 |
+| REGREADER_FTS_WEIGHT | 0.4 | FTS 权重 |
+| REGREADER_VECTOR_WEIGHT | 0.6 | 向量权重 |

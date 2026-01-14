@@ -2,7 +2,7 @@
 
 ## 概述
 
-本文档提供 GridCode Makefile 命令的完整 API 参考，包括所有参数、选项和使用示例。
+本文档提供 RegReader Makefile 命令的完整 API 参考，包括所有参数、选项和使用示例。
 
 ## 长文本查询命令
 
@@ -60,7 +60,7 @@ make ask-file QUERY_FILE=queries/query.txt MODE=mcp-sse
 
 命令内部使用 `--` 参数分隔符来处理特殊字符：
 ```bash
-gridcode ask --agent claude -- "$(cat file.txt)"
+regreader ask --agent claude -- "$(cat file.txt)"
 ```
 
 这确保文件内容中的 `---`、`--` 等字符不会被误解析为命令选项。
@@ -141,7 +141,7 @@ make ask-examples
 - 方案 1：从文件读取
 - 方案 2：从 stdin 读取
 - 方案 3：Here-Document
-- 方案 4：直接使用 gridcode CLI
+- 方案 4：直接使用 regreader CLI
 
 ---
 

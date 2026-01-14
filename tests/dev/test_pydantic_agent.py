@@ -6,7 +6,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from grid_code.agents.base import AgentResponse
+from regreader.agents.base import AgentResponse
 
 
 class TestPydanticAIAgentInit:
@@ -17,7 +17,7 @@ class TestPydanticAIAgentInit:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     # 测试各种 Claude 模型名称
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
@@ -32,7 +32,7 @@ class TestPydanticAIAgentInit:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent.reg_id = None
@@ -46,7 +46,7 @@ class TestPydanticAIAgentInit:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent.reg_id = None
@@ -59,7 +59,7 @@ class TestPydanticAIAgentInit:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent.reg_id = None
@@ -77,8 +77,8 @@ class TestPydanticAIAgentSystemPrompt:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
-                    from grid_code.agents.prompts import SYSTEM_PROMPT
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.prompts import SYSTEM_PROMPT
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent.reg_id = None
@@ -92,8 +92,8 @@ class TestPydanticAIAgentSystemPrompt:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
-                    from grid_code.agents.prompts import SYSTEM_PROMPT
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.prompts import SYSTEM_PROMPT
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent.reg_id = "angui_2024"
@@ -112,7 +112,7 @@ class TestSourceExtraction:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent._sources = []
@@ -127,7 +127,7 @@ class TestSourceExtraction:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent._sources = []
@@ -148,7 +148,7 @@ class TestSourceExtraction:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent._sources = []
@@ -167,7 +167,7 @@ class TestMessageHistory:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent._message_history = []
@@ -179,7 +179,7 @@ class TestMessageHistory:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent._message_history = ["msg1", "msg2"]
@@ -200,7 +200,7 @@ class TestAgentProperties:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     assert agent.name == "PydanticAIAgent"
@@ -210,7 +210,7 @@ class TestAgentProperties:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent._model_name = "anthropic:claude-3-5-sonnet"
@@ -226,7 +226,7 @@ class TestAgentReset:
         with patch("grid_code.agents.pydantic_agent.HAS_PYDANTIC_AI", True):
             with patch("grid_code.agents.pydantic_agent.MCPServerStdio"):
                 with patch("grid_code.agents.pydantic_agent.Agent"):
-                    from grid_code.agents.pydantic_agent import PydanticAIAgent
+                    from regreader.agents.pydantic_agent import PydanticAIAgent
 
                     agent = PydanticAIAgent.__new__(PydanticAIAgent)
                     agent._message_history = ["msg1", "msg2"]

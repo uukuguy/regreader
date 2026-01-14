@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from grid_code.infrastructure.event_bus import Event, EventBus, SubagentEvent
+from regreader.infrastructure.event_bus import Event, EventBus, SubagentEvent
 
 
 class TestSubagentEvent:

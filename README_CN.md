@@ -1,16 +1,16 @@
-# GridCode
+# RegReader
 
 **电力规程智能检索 Agent**
 
 [English](README.md)
 
-GridCode 是一个面向电力系统安全规程（安规）的智能检索与推理 Agent。不同于传统 RAG 的切片策略，GridCode 采用 **基于页面的 Agentic Search** 方法——让 LLM 像人类专家一样动态"翻书"、拼接跨页表格、追踪引用注释。
+RegReader 是一个面向电力系统安全规程（安规）的智能检索与推理 Agent。不同于传统 RAG 的切片策略，RegReader 采用 **基于页面的 Agentic Search** 方法——让 LLM 像人类专家一样动态"翻书"、拼接跨页表格、追踪引用注释。
 
-## 为什么需要 GridCode？
+## 为什么需要 RegReader？
 
 电力规程文档具有传统 RAG 难以处理的特殊挑战：
 
-| 挑战 | 传统 RAG | GridCode |
+| 挑战 | 传统 RAG | RegReader |
 |------|----------|----------|
 | **复杂表格** | 切片破坏表格结构 | 页面级存储保持表格完整 |
 | **跨页表格** | 切片边界丢失上下文 | Agent 检测截断标记，主动获取下一页 |
@@ -19,7 +19,7 @@ GridCode 是一个面向电力系统安全规程（安规）的智能检索与�
 
 ## 设计思路
 
-受 Claude Code 搜索代码库方式的启发，GridCode 将规程文档视为"可翻阅的书籍"而非"待匹配的向量"：
+受 Claude Code 搜索代码库方式的启发，RegReader 将规程文档视为"可翻阅的书籍"而非"待匹配的向量"：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -130,15 +130,15 @@ PageDocument
 
 ```bash
 # 基础安装
-pip install grid-code
+pip install regreader
 
 # 安装可选索引后端
-pip install grid-code[tantivy]     # 高性能关键词搜索
-pip install grid-code[whoosh]      # 中文分词支持
-pip install grid-code[qdrant]      # 生产级向量数据库
+pip install regreader[tantivy]     # 高性能关键词搜索
+pip install regreader[whoosh]      # 中文分词支持
+pip install regreader[qdrant]      # 生产级向量数据库
 
 # 安装所有索引后端
-pip install grid-code[all-indexes]
+pip install regreader[all-indexes]
 ```
 
 ## 配置
@@ -147,18 +147,18 @@ pip install grid-code[all-indexes]
 
 ```bash
 # 选择关键词索引后端 (fts5/tantivy/whoosh)
-export GRIDCODE_KEYWORD_INDEX_BACKEND=fts5
+export REGREADER_KEYWORD_INDEX_BACKEND=fts5
 
 # 选择向量索引后端 (lancedb/qdrant)
-export GRIDCODE_VECTOR_INDEX_BACKEND=lancedb
+export REGREADER_VECTOR_INDEX_BACKEND=lancedb
 
 # Qdrant 服务器配置 (使用 qdrant 时)
-export GRIDCODE_QDRANT_URL=http://localhost:6333
+export REGREADER_QDRANT_URL=http://localhost:6333
 ```
 
 ## Agent 使用
 
-GridCode 提供三种 Agent 实现，每个 Agent 都通过 MCP 协议与 MCP Server 通信：
+RegReader 提供三种 Agent 实现，每个 Agent 都通过 MCP 协议与 MCP Server 通信：
 
 ### Claude Agent SDK（推荐用于 Claude 模型）
 
@@ -166,10 +166,10 @@ GridCode 提供三种 Agent 实现，每个 Agent 都通过 MCP 协议与 MCP Se
 
 ```bash
 # 设置 API Key
-export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
+export REGREADER_ANTHROPIC_API_KEY="your-api-key"
 
 # 启动 Claude Agent 对话
-gridcode chat --agent claude --reg-id angui_2024
+regreader chat --agent claude --reg-id angui_2024
 ```
 
 ### Pydantic AI Agent（多模型支持）
@@ -178,13 +178,13 @@ gridcode chat --agent claude --reg-id angui_2024
 
 ```bash
 # Anthropic 模型
-export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
+export REGREADER_ANTHROPIC_API_KEY="your-api-key"
 
 # OpenAI 模型
-export GRIDCODE_OPENAI_API_KEY="your-api-key"
+export REGREADER_OPENAI_API_KEY="your-api-key"
 
 # 启动对话
-gridcode chat --agent pydantic --reg-id angui_2024
+regreader chat --agent pydantic --reg-id angui_2024
 ```
 
 ### LangGraph Agent（复杂工作流）
@@ -192,9 +192,9 @@ gridcode chat --agent pydantic --reg-id angui_2024
 用于高级工作流编排：
 
 ```bash
-export GRIDCODE_ANTHROPIC_API_KEY="your-api-key"
+export REGREADER_ANTHROPIC_API_KEY="your-api-key"
 
-gridcode chat --agent langgraph --reg-id angui_2024
+regreader chat --agent langgraph --reg-id angui_2024
 ```
 
 ### 架构说明
@@ -212,13 +212,13 @@ gridcode chat --agent langgraph --reg-id angui_2024
 │         │         ┌──────┴───────────────┘       │
 │         │         │                              │
 │         │         ▼                              │
-│         │  GridCodeMCPClient                     │
+│         │  RegReaderMCPClient                     │
 └─────────┼─────────┬──────────────────────────────┘
           │         │
           │  stdio  │  stdio
           ▼         ▼
 ┌─────────────────────────────────────────────────┐
-│            GridCode MCP Server                   │
+│            RegReader MCP Server                   │
 │   get_toc | smart_search | read_page_range      │
 └─────────────────────────────────────────────────┘
 ```

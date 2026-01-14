@@ -9,11 +9,11 @@ from pathlib import Path
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from grid_code.mcp.tools import GridCodeTools
+from regreader.mcp.tools import RegReaderTools
 from loguru import logger
 
 
-def test_list_regulations(tools: GridCodeTools):
+def test_list_regulations(tools: RegReaderTools):
     """测试 list_regulations 工具"""
     print("\n=== 测试 list_regulations ===")
     result = tools.list_regulations()
@@ -23,7 +23,7 @@ def test_list_regulations(tools: GridCodeTools):
     return len(result) > 0
 
 
-def test_get_toc(tools: GridCodeTools, reg_id: str):
+def test_get_toc(tools: RegReaderTools, reg_id: str):
     """测试 get_toc 工具"""
     print(f"\n=== 测试 get_toc ({reg_id}) ===")
     result = tools.get_toc(reg_id)
@@ -36,7 +36,7 @@ def test_get_toc(tools: GridCodeTools, reg_id: str):
     return result['total_pages'] > 0
 
 
-def test_get_chapter_structure(tools: GridCodeTools, reg_id: str):
+def test_get_chapter_structure(tools: RegReaderTools, reg_id: str):
     """测试 get_chapter_structure 工具"""
     print(f"\n=== 测试 get_chapter_structure ({reg_id}) ===")
     result = tools.get_chapter_structure(reg_id)
@@ -47,7 +47,7 @@ def test_get_chapter_structure(tools: GridCodeTools, reg_id: str):
     return result['total_chapters'] > 0
 
 
-def test_read_page_range(tools: GridCodeTools, reg_id: str):
+def test_read_page_range(tools: RegReaderTools, reg_id: str):
     """测试 read_page_range 工具"""
     print(f"\n=== 测试 read_page_range ({reg_id}, P7-8) ===")
     result = tools.read_page_range(reg_id, 7, 8)
@@ -58,7 +58,7 @@ def test_read_page_range(tools: GridCodeTools, reg_id: str):
     return len(result['content_markdown']) > 0
 
 
-def test_read_chapter_content(tools: GridCodeTools, reg_id: str):
+def test_read_chapter_content(tools: RegReaderTools, reg_id: str):
     """测试 read_chapter_content 工具"""
     print(f"\n=== 测试 read_chapter_content ({reg_id}, 2.1.1) ===")
     result = tools.read_chapter_content(reg_id, "2.1.1", include_children=False)
@@ -72,7 +72,7 @@ def test_read_chapter_content(tools: GridCodeTools, reg_id: str):
     return result['block_count'] > 0
 
 
-def test_smart_search(tools: GridCodeTools, reg_id: str):
+def test_smart_search(tools: RegReaderTools, reg_id: str):
     """测试 smart_search 工具"""
     print(f"\n=== 测试 smart_search ({reg_id}, '复龙站') ===")
     result = tools.smart_search(
@@ -91,10 +91,10 @@ def main():
     reg_id = "angui_2024"
 
     print("=" * 60)
-    print("GridCode MCP 工具测试")
+    print("RegReader MCP 工具测试")
     print("=" * 60)
 
-    tools = GridCodeTools()
+    tools = RegReaderTools()
 
     results = {
         "list_regulations": test_list_regulations(tools),

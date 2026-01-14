@@ -28,8 +28,8 @@ class StderrCapture:
 
 async def test_claude_agent():
     """测试 ClaudeAgent 的 MCP 日志"""
-    from grid_code.agents import ClaudeAgent
-    from grid_code.agents.mcp_connection import MCPConnectionConfig
+    from regreader.agents import ClaudeAgent
+    from regreader.agents.mcp_connection import MCPConnectionConfig
 
     print("\n=== Testing ClaudeAgent ===", file=sys.stderr)
 
@@ -49,8 +49,8 @@ async def test_claude_agent():
 
 async def test_pydantic_agent():
     """测试 PydanticAIAgent 的 MCP 日志"""
-    from grid_code.agents import PydanticAIAgent
-    from grid_code.agents.mcp_connection import MCPConnectionConfig
+    from regreader.agents import PydanticAIAgent
+    from regreader.agents.mcp_connection import MCPConnectionConfig
 
     print("\n=== Testing PydanticAIAgent ===", file=sys.stderr)
 
@@ -69,8 +69,8 @@ async def test_pydantic_agent():
 
 async def test_langgraph_agent():
     """测试 LangGraphAgent 的 MCP 日志"""
-    from grid_code.agents import LangGraphAgent
-    from grid_code.agents.mcp_connection import MCPConnectionConfig
+    from regreader.agents import LangGraphAgent
+    from regreader.agents.mcp_connection import MCPConnectionConfig
 
     print("\n=== Testing LangGraphAgent ===", file=sys.stderr)
 
