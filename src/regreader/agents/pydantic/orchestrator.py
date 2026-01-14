@@ -1,27 +1,22 @@
 """Pydantic AI Orchestrator 实现
 
-使用 Pydantic AI 原生的 Agent 委托模式:
-- Orchestrator 是主 Agent，通过 @tool 装饰器注册委托工具
-- 每个 @tool 内部调用对应的 Subagent
-- 使用 deps/usage 传递实现依赖注入和使用量追踪
+使用 Pydantic AI 原生 @tool 委托模式实现 LLM 自主选择子智能体。
 
 架构:
-    OrchestratorAgent (主协调器 Agent)
-        ├── @tool call_search_agent(ctx, query) -> 调用 SearchSubagent
-        ├── @tool call_table_agent(ctx, query) -> 调用 TableSubagent
-        ├── @tool call_reference_agent(ctx, query) -> 调用 ReferenceSubagent
-        └── @tool call_discovery_agent(ctx, query) -> 调用 DiscoverySubagent
+    PydanticOrchestrator
+        ├── Main Agent (协调器)
+        │   └── 根据子智能体描述自主选择
+        └── Subagents (专家代理，通过 @tool 注册)
+            ├── SearchSubagent
+            ├── TableSubagent
+            ├── ReferenceSubagent
+            └── DiscoverySubagent
 
-    执行流程:
-    1. 用户查询 -> OrchestratorAgent
-    2. OrchestratorAgent 决定调用哪个 @tool
-    3. @tool 内部: result = await subagent.run(query, deps=ctx.deps, usage=ctx.usage)
-    4. 返回聚合结果
-
-关键特性:
-    - 原生委托模式：Subagent 作为工具被调用
-    - 依赖注入：通过 ctx.deps 传递共享依赖
-    - 使用量聚合：通过 ctx.usage 追踪所有 token 消耗
+关键变更:
+- 移除 SubagentBuilder（硬编码构建）
+- 使用 @tool 装饰器动态注册子智能体委托工具
+- 工具的 docstring 使用 SubagentConfig.description
+- LLM 根据 docstring 自主决策调用哪个工具
 """
 
 import os
@@ -39,17 +34,14 @@ from regreader.agents.events import (
     thinking_event,
 )
 from regreader.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
-from regreader.agents.pydantic.subagents import (
-    SubagentBuilder,
-    SubagentDependencies,
-    SubagentOutput,
-    create_subagent_builder,
-)
 from regreader.config import get_settings
+from regreader.orchestrator.analyzer import QueryAnalyzer
+from regreader.orchestrator.coordinator import Coordinator
 from regreader.subagents.config import (
     DISCOVERY_AGENT_CONFIG,
     REFERENCE_AGENT_CONFIG,
     SEARCH_AGENT_CONFIG,
+    SUBAGENT_CONFIGS,
     TABLE_AGENT_CONFIG,
     SubagentType,
 )
@@ -77,8 +69,25 @@ if TYPE_CHECKING:
 
 
 # ============================================================================
-# Orchestrator Dependencies
+# Dependencies
 # ============================================================================
+
+
+@dataclass
+class SubagentDependencies:
+    """Subagent 共享依赖
+
+    通过 ctx.deps 传递给 Subagent。
+
+    Attributes:
+        reg_id: 规程 ID
+        mcp_server: MCP Server
+        hints: 额外提示信息
+    """
+
+    reg_id: str | None = None
+    mcp_server: Any = None  # MCPServerStdio
+    hints: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -90,222 +99,14 @@ class OrchestratorDependencies:
     Attributes:
         reg_id: 规程 ID
         mcp_server: MCP Server
-        subagent_builders: Subagent 构建器映射
         subagent_agents: 已构建的 Subagent Agent 映射
         hints: 额外提示信息
     """
 
     reg_id: str | None = None
     mcp_server: Any = None  # MCPServerStdio
-    subagent_builders: dict[SubagentType, SubagentBuilder] = field(default_factory=dict)
     subagent_agents: dict[SubagentType, Any] = field(default_factory=dict)  # Agent instances
     hints: dict[str, Any] = field(default_factory=dict)
-
-
-# ============================================================================
-# Orchestrator System Prompt
-# ============================================================================
-
-
-ORCHESTRATOR_SYSTEM_PROMPT = """你是电力系统安全规程智能问答系统的协调器。
-
-你的职责是：
-1. 理解用户的问题意图
-2. 选择合适的专家代理来回答问题
-3. 综合专家代理的回答，给出最终答案
-
-可用的专家代理：
-- call_search_agent: 搜索专家，用于规程发现、目录导航、内容搜索
-- call_table_agent: 表格专家，用于表格搜索、跨页合并、注释追踪
-- call_reference_agent: 引用专家，用于交叉引用解析、引用内容提取
-- call_discovery_agent: 发现专家，用于相似内容发现、章节比较
-
-工作流程：
-1. 分析用户问题，确定需要调用哪些专家
-2. 调用相应的专家代理工具
-3. 根据专家返回的信息，组织最终答案
-
-注意：
-- 如果问题涉及表格内容（如"表X-X"），优先使用表格专家
-- 如果问题涉及引用（如"见第X章"、"注1"），使用引用专家
-- 对于一般搜索问题，使用搜索专家
-- 可以同时调用多个专家获取更全面的信息
-"""
-
-
-# ============================================================================
-# Orchestrator Agent Factory
-# ============================================================================
-
-
-def create_orchestrator_agent(
-    model: str,
-    mcp_server: "MCPServerStdio",
-    enabled_subagents: set[str],
-) -> tuple["Agent[OrchestratorDependencies, str]", dict[SubagentType, SubagentBuilder]]:
-    """创建 Orchestrator Agent 和 Subagent Builders
-
-    Args:
-        model: LLM 模型标识
-        mcp_server: MCP Server
-        enabled_subagents: 启用的 Subagent 名称集合
-
-    Returns:
-        (Orchestrator Agent, SubagentBuilders 映射)
-    """
-    # 创建 Subagent Builders
-    subagent_builders: dict[SubagentType, SubagentBuilder] = {}
-
-    configs = {
-        SubagentType.SEARCH: SEARCH_AGENT_CONFIG,
-        SubagentType.TABLE: TABLE_AGENT_CONFIG,
-        SubagentType.REFERENCE: REFERENCE_AGENT_CONFIG,
-        SubagentType.DISCOVERY: DISCOVERY_AGENT_CONFIG,
-    }
-
-    for agent_type, config in configs.items():
-        if agent_type.value not in enabled_subagents:
-            continue
-        if not config.enabled:
-            continue
-
-        builder = create_subagent_builder(config, model)
-        subagent_builders[agent_type] = builder
-
-    # 创建 Orchestrator Agent
-    orchestrator = Agent(
-        model,
-        deps_type=OrchestratorDependencies,
-        system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
-    )
-
-    # 注册 Subagent 委托工具
-    _register_subagent_tools(orchestrator, subagent_builders)
-
-    return orchestrator, subagent_builders
-
-
-def _register_subagent_tools(
-    orchestrator: "Agent[OrchestratorDependencies, str]",
-    subagent_builders: dict[SubagentType, SubagentBuilder],
-) -> None:
-    """注册 Subagent 委托工具
-
-    使用 @orchestrator.tool 装饰器为每个 Subagent 注册委托工具。
-    """
-
-    if SubagentType.SEARCH in subagent_builders:
-        @orchestrator.tool
-        async def call_search_agent(
-            ctx: "RunContext[OrchestratorDependencies]",
-            query: str,
-        ) -> str:
-            """调用搜索专家代理
-
-            用于规程发现、目录导航、内容搜索等任务。
-
-            Args:
-                query: 搜索查询内容
-            """
-            return await _invoke_subagent(ctx, SubagentType.SEARCH, query)
-
-    if SubagentType.TABLE in subagent_builders:
-        @orchestrator.tool
-        async def call_table_agent(
-            ctx: "RunContext[OrchestratorDependencies]",
-            query: str,
-        ) -> str:
-            """调用表格专家代理
-
-            用于表格搜索、跨页合并、注释追踪等任务。
-
-            Args:
-                query: 表格相关查询内容
-            """
-            return await _invoke_subagent(ctx, SubagentType.TABLE, query)
-
-    if SubagentType.REFERENCE in subagent_builders:
-        @orchestrator.tool
-        async def call_reference_agent(
-            ctx: "RunContext[OrchestratorDependencies]",
-            query: str,
-        ) -> str:
-            """调用引用专家代理
-
-            用于交叉引用解析、引用内容提取等任务。
-
-            Args:
-                query: 引用相关查询内容
-            """
-            return await _invoke_subagent(ctx, SubagentType.REFERENCE, query)
-
-    if SubagentType.DISCOVERY in subagent_builders:
-        @orchestrator.tool
-        async def call_discovery_agent(
-            ctx: "RunContext[OrchestratorDependencies]",
-            query: str,
-        ) -> str:
-            """调用发现专家代理
-
-            用于相似内容发现、章节比较等任务。
-
-            Args:
-                query: 发现相关查询内容
-            """
-            return await _invoke_subagent(ctx, SubagentType.DISCOVERY, query)
-
-
-async def _invoke_subagent(
-    ctx: "RunContext[OrchestratorDependencies]",
-    agent_type: SubagentType,
-    query: str,
-) -> str:
-    """调用 Subagent 的通用方法
-
-    实现 Pydantic AI 原生的委托模式：
-    - 从 ctx.deps 获取共享依赖
-    - 传递 ctx.usage 以聚合使用量
-
-    Args:
-        ctx: 运行上下文
-        agent_type: Subagent 类型
-        query: 查询内容
-
-    Returns:
-        Subagent 的回答内容
-    """
-    deps = ctx.deps
-    builder = deps.subagent_builders.get(agent_type)
-
-    if builder is None:
-        return f"错误: {agent_type.value} 专家代理未启用"
-
-    # 获取或创建 Subagent Agent 实例
-    if agent_type not in deps.subagent_agents:
-        deps.subagent_agents[agent_type] = builder.build(deps.mcp_server)
-
-    subagent = deps.subagent_agents[agent_type]
-
-    # 创建 Subagent 依赖
-    subagent_deps = SubagentDependencies(
-        reg_id=deps.reg_id,
-        mcp_server=deps.mcp_server,
-        hints=deps.hints,
-    )
-
-    # 调用 Subagent（传递 usage 以聚合使用量）
-    output = await builder.invoke(
-        subagent,
-        query,
-        subagent_deps,
-        usage=ctx.usage,  # 关键：传递 usage 以聚合 token 消耗
-    )
-
-    if not output.success:
-        return f"错误: {output.error}"
-
-    # 返回内容（来源信息已在 output 中追踪）
-    return output.content
 
 
 # ============================================================================
@@ -316,18 +117,18 @@ async def _invoke_subagent(
 class PydanticOrchestrator(BaseRegReaderAgent):
     """Pydantic AI 协调器
 
-    使用 Pydantic AI 原生的 Agent 委托模式协调多个专家代理。
+    使用 Pydantic AI 原生的 @tool 委托模式实现 LLM 自主选择子智能体。
 
     工作流程:
-    1. 用户查询 -> OrchestratorAgent
-    2. OrchestratorAgent 分析意图，决定调用哪个 @tool
-    3. @tool 内部调用 Subagent: result = await subagent.run(query, deps=ctx.deps, usage=ctx.usage)
-    4. OrchestratorAgent 综合结果，返回最终答案
+    1. QueryAnalyzer 提取查询提示（hints）
+    2. Main Agent 根据工具 docstring（SubagentConfig.description）自主选择
+    3. 通过 @tool 调用选定的子智能体
+    4. 子智能体执行并返回结果
 
-    关键特性:
-    - 原生委托模式：Subagent 作为工具被调用
-    - 依赖注入：通过 ctx.deps 传递共享依赖
-    - 使用量聚合：通过 ctx.usage 追踪所有 token 消耗
+    特性:
+    - LLM 自主决策：根据 @tool 的 docstring 选择子智能体
+    - 上下文隔离：每个 Subagent 持有独立的 Agent 实例
+    - 原生委托：使用 Pydantic AI 的 @tool 机制
 
     Usage:
         async with PydanticOrchestrator(reg_id="angui_2024") as agent:
@@ -342,6 +143,7 @@ class PydanticOrchestrator(BaseRegReaderAgent):
         mcp_config: MCPConnectionConfig | None = None,
         status_callback: StatusCallback | None = None,
         enabled_subagents: list[str] | None = None,
+        coordinator: "Coordinator | None" = None,
     ):
         """初始化 Pydantic AI 协调器
 
@@ -351,6 +153,7 @@ class PydanticOrchestrator(BaseRegReaderAgent):
             mcp_config: MCP 连接配置
             status_callback: 状态回调
             enabled_subagents: 启用的 Subagent 列表
+            coordinator: 协调器实例（可选，用于文件系统追踪）
         """
         super().__init__(reg_id)
 
@@ -388,17 +191,23 @@ class PydanticOrchestrator(BaseRegReaderAgent):
         # MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
 
+        # 查询分析器（仅提取 hints）
+        self._analyzer = QueryAnalyzer()
+
+        # 协调器（可选）
+        self._coordinator = coordinator
+
         # 延迟初始化的组件
         self._mcp_server: MCPServerStdio | None = None
-        self._orchestrator_agent: Agent | None = None
-        self._subagent_builders: dict[SubagentType, SubagentBuilder] = {}
+        self._main_agent: Agent | None = None
+        self._subagents: dict[SubagentType, Agent] = {}
 
         # 工具调用追踪
         self._tool_calls: list[dict] = []
         self._sources: list[str] = []
 
         # 连接状态
-        self._connected = False
+        self._initialized = False
 
         logger.info(
             f"PydanticOrchestrator initialized: model={self._model}, "
@@ -415,23 +224,344 @@ class PydanticOrchestrator(BaseRegReaderAgent):
 
     async def _ensure_initialized(self) -> None:
         """确保组件已初始化"""
-        if not self._connected:
+        if not self._initialized:
             # 获取 MCP Server
             self._mcp_server = self._mcp_manager.get_pydantic_mcp_server()
 
-            # 创建 Orchestrator Agent 和 Subagent Builders
-            self._orchestrator_agent, self._subagent_builders = create_orchestrator_agent(
-                self._model,
-                self._mcp_server,
-                self._enabled_subagents,
-            )
+            # 创建 Subagents
+            self._subagents = self._create_subagents()
 
-            self._connected = True
+            # 创建 Main Agent
+            self._main_agent = self._create_main_agent()
+
+            self._initialized = True
 
             logger.debug(
                 f"Orchestrator initialized with subagents: "
-                f"{list(self._subagent_builders.keys())}"
+                f"{list(self._subagents.keys())}"
             )
+
+    def _create_subagents(self) -> dict[SubagentType, Agent]:
+        """创建 Subagent Agent 实例
+
+        为每个启用的子智能体创建独立的 Agent 实例。
+
+        Returns:
+            SubagentType 到 Agent 的映射
+        """
+        subagents = {}
+
+        # 配置映射
+        configs = {
+            SubagentType.SEARCH: SEARCH_AGENT_CONFIG,
+            SubagentType.TABLE: TABLE_AGENT_CONFIG,
+            SubagentType.REFERENCE: REFERENCE_AGENT_CONFIG,
+            SubagentType.DISCOVERY: DISCOVERY_AGENT_CONFIG,
+        }
+
+        for agent_type, config in configs.items():
+            # 检查是否启用
+            if agent_type.value not in self._enabled_subagents:
+                continue
+
+            if not config.enabled:
+                continue
+
+            # 创建 Agent 实例
+            agent = self._create_subagent_agent(config)
+            subagents[agent_type] = agent
+
+            logger.debug(f"Created subagent: {config.name} ({agent_type.value})")
+
+        return subagents
+
+    def _create_subagent_agent(self, config) -> Agent:
+        """为单个子智能体创建 Agent 实例
+
+        Args:
+            config: SubagentConfig
+
+        Returns:
+            Agent 实例
+        """
+        # 构建系统提示词
+        instructions = self._build_subagent_domain_prompt(config)
+
+        # 创建 Agent
+        agent = Agent(
+            self._model,
+            deps_type=SubagentDependencies,
+            system_prompt=instructions,
+        )
+
+        return agent
+
+    def _build_subagent_domain_prompt(self, config) -> str:
+        """构建子智能体的领域特定提示词
+
+        Args:
+            config: SubagentConfig
+
+        Returns:
+            领域特定提示词
+        """
+        # 获取允许的工具列表
+        from regreader.agents.mcp_config import get_tool_name
+        allowed_tools = [get_tool_name(name) for name in config.tools]
+        tools_display = ", ".join(allowed_tools) if allowed_tools else "无"
+
+        prompt = f"""# 角色定位
+你是 {config.name}，专门负责{config.description}。
+
+# 电力规程领域知识
+
+## 文档结构规范
+- **章节编号格式**：X.X.X.X（如 2.1.4.1.6）
+- **表格命名规则**：表X-X（如 表6-2）
+- **注释引用**：注1、注2、注①、注一、选项A、选项B、方案甲等变体
+- **引用语法**："见第X章"、"参见X.X节"、"详见附录X"、"见注X"
+
+## 工具使用约束
+你**只能使用**以下MCP工具：
+{tools_display}
+
+**严格限制**：不得使用其他未列出的工具，不得尝试绕过工具限制。
+
+## 检索策略
+1. **精确匹配优先**：优先使用章节号、表格号、注释ID等精确标识符
+2. **语义搜索作为补充**：找不到精确匹配时使用语义搜索
+3. **表格查询完整性**：表格查询必须返回完整结构，注意跨页表格
+4. **注释引用追踪**：发现注释引用时必须回溯到原文获取完整内容
+
+## 输出要求（关键）
+**关键规则：在调用工具后，必须用自然语言总结工具返回的结果，而不是返回原始工具输出。**
+
+- 将搜索到的内容片段整理成自然语言描述
+- 附带准确的来源信息（规程名 + 页码 + 章节）
+- 如果发现「见注X」或「见第X章」等引用，在总结中明确指出
+- 如果工具返回JSON格式，提取关键信息并用自然语言表达
+- 使用清晰的段落结构，避免直接输出原始工具数据
+
+示例输出格式：
+```
+根据搜索结果，在《安规_2024》规程中找到以下相关内容：
+
+**第X章节（P123）**：
+具体内容描述...
+
+**来源**：angui_2024 P123（第X章 > X.X节）
+```
+"""
+        return prompt
+
+    def _create_main_agent(self) -> Agent:
+        """创建 Main Agent（协调器）
+
+        Main Agent 负责：
+        1. 理解用户查询
+        2. 根据工具 docstring（SubagentConfig.description）选择合适的工具
+        3. 通过 @tool 调用选定的子智能体
+
+        Returns:
+            Main Agent 实例
+        """
+        # 构建 Main Agent 提示词
+        instructions = self._build_main_agent_prompt()
+
+        # 创建 Main Agent
+        agent = Agent(
+            self._model,
+            deps_type=OrchestratorDependencies,
+            system_prompt=instructions,
+        )
+
+        # 动态注册子智能体委托工具
+        self._register_subagent_tools(agent)
+
+        logger.debug(f"Created Main Agent with {len(self._subagents)} tools")
+
+        return agent
+
+    def _build_main_agent_prompt(self) -> str:
+        """构建 Main Agent 提示词
+
+        包含所有启用的子智能体描述，让 LLM 自主选择。
+
+        Returns:
+            Main Agent 提示词
+        """
+        # 收集所有启用的子智能体描述
+        subagent_descriptions = []
+        for agent_type, agent in self._subagents.items():
+            config = SUBAGENT_CONFIGS.get(agent_type)
+            if config and config.enabled:
+                subagent_descriptions.append(f"""
+### {config.name}
+{config.description}
+""")
+
+        descriptions_text = "".join(subagent_descriptions)
+
+        prompt = f"""你是 RegReader 协调器，负责将用户查询分派给合适的专家子智能体。
+
+# 可用的专家子智能体
+
+{descriptions_text}
+
+# 你的职责
+
+1. **理解用户查询**：分析用户的问题，识别查询意图
+2. **选择合适的子智能体**：根据上述描述，选择最适合处理该查询的子智能体
+3. **调用工具**：使用对应的工具（call_search_agent、call_table_agent 等）调用子智能体
+
+# 决策指南
+
+- 如果查询涉及**搜索关键词、浏览目录、读取章节**，调用 call_search_agent
+- 如果查询涉及**表格查询、表格提取、注释查找**，调用 call_table_agent
+- 如果查询涉及**交叉引用、"见第X章"、"参见表X"**，调用 call_reference_agent
+- 如果查询涉及**语义分析、相似内容、章节对比**，调用 call_discovery_agent（如果启用）
+
+# 重要提示
+
+- **不要自己执行查询**：你的职责是选择和调用工具，不是直接回答
+- **立即调用工具**：分析完查询后，立即调用对应的工具
+- **信任子智能体**：子智能体会处理所有细节，你只需选择正确的专家
+"""
+
+        return prompt
+
+    def _register_subagent_tools(self, agent: Agent) -> None:
+        """动态注册子智能体委托工具
+
+        为每个启用的子智能体注册 @tool 装饰器。
+        工具的 docstring 使用 SubagentConfig.description。
+
+        Args:
+            agent: Main Agent 实例
+        """
+        # 为每个启用的子智能体注册工具
+        for agent_type, subagent in self._subagents.items():
+            config = SUBAGENT_CONFIGS.get(agent_type)
+            if not config:
+                continue
+
+            # 根据类型注册对应的工具
+            if agent_type == SubagentType.SEARCH:
+                self._register_search_tool(agent, config)
+            elif agent_type == SubagentType.TABLE:
+                self._register_table_tool(agent, config)
+            elif agent_type == SubagentType.REFERENCE:
+                self._register_reference_tool(agent, config)
+            elif agent_type == SubagentType.DISCOVERY:
+                self._register_discovery_tool(agent, config)
+
+    def _register_search_tool(self, agent: Agent, config) -> None:
+        """注册 SearchAgent 工具"""
+        @agent.tool
+        async def call_search_agent(
+            ctx: "RunContext[OrchestratorDependencies]",
+            query: str,
+        ) -> str:
+            f"""{config.description}
+
+Args:
+    query: 搜索查询内容
+"""
+            return await self._invoke_subagent(ctx, SubagentType.SEARCH, query)
+
+    def _register_table_tool(self, agent: Agent, config) -> None:
+        """注册 TableAgent 工具"""
+        @agent.tool
+        async def call_table_agent(
+            ctx: "RunContext[OrchestratorDependencies]",
+            query: str,
+        ) -> str:
+            f"""{config.description}
+
+Args:
+    query: 表格相关查询内容
+"""
+            return await self._invoke_subagent(ctx, SubagentType.TABLE, query)
+
+    def _register_reference_tool(self, agent: Agent, config) -> None:
+        """注册 ReferenceAgent 工具"""
+        @agent.tool
+        async def call_reference_agent(
+            ctx: "RunContext[OrchestratorDependencies]",
+            query: str,
+        ) -> str:
+            f"""{config.description}
+
+Args:
+    query: 引用相关查询内容
+"""
+            return await self._invoke_subagent(ctx, SubagentType.REFERENCE, query)
+
+    def _register_discovery_tool(self, agent: Agent, config) -> None:
+        """注册 DiscoveryAgent 工具"""
+        @agent.tool
+        async def call_discovery_agent(
+            ctx: "RunContext[OrchestratorDependencies]",
+            query: str,
+        ) -> str:
+            f"""{config.description}
+
+Args:
+    query: 发现相关查询内容
+"""
+            return await self._invoke_subagent(ctx, SubagentType.DISCOVERY, query)
+
+    async def _invoke_subagent(
+        self,
+        ctx: "RunContext[OrchestratorDependencies]",
+        agent_type: SubagentType,
+        query: str,
+    ) -> str:
+        """调用 Subagent 的通用方法
+
+        实现 Pydantic AI 原生的委托模式：
+        - 从 ctx.deps 获取共享依赖
+        - 传递 ctx.usage 以聚合使用量
+
+        Args:
+            ctx: 运行上下文
+            agent_type: Subagent 类型
+            query: 查询内容
+
+        Returns:
+            Subagent 的回答内容
+        """
+        deps = ctx.deps
+        subagent = self._subagents.get(agent_type)
+
+        if subagent is None:
+            return f"错误: {agent_type.value} 专家代理未启用"
+
+        # 创建 Subagent 依赖
+        subagent_deps = SubagentDependencies(
+            reg_id=deps.reg_id,
+            mcp_server=deps.mcp_server,
+            hints=deps.hints,
+        )
+
+        # 调用 Subagent（传递 usage 以聚合使用量）
+        try:
+            result = await subagent.run(
+                query,
+                deps=subagent_deps,
+                usage=ctx.usage,  # 关键：传递 usage 以聚合 token 消耗
+            )
+
+            # 提取来源信息
+            self._extract_sources_from_result(result)
+
+            # 返回内容
+            content = result.output if isinstance(result.output, str) else str(result.output)
+            return content
+
+        except Exception as e:
+            logger.exception(f"Subagent {agent_type.value} execution error: {e}")
+            return f"错误: {str(e)}"
 
     async def chat(self, message: str) -> AgentResponse:
         """与协调器对话
@@ -442,6 +572,7 @@ class PydanticOrchestrator(BaseRegReaderAgent):
         Returns:
             AgentResponse
         """
+        # 确保初始化
         await self._ensure_initialized()
 
         # 重置追踪
@@ -454,17 +585,28 @@ class PydanticOrchestrator(BaseRegReaderAgent):
         await self._callback.on_event(thinking_event(start=True))
 
         try:
-            # 构建依赖
+            # 1. 提取查询提示
+            hints = await self._analyzer.extract_hints(message)
+            logger.debug(f"Extracted hints: {hints}")
+
+            # 2. 如果使用 Coordinator，记录查询
+            if self._coordinator:
+                await self._coordinator.log_query(message, hints, self.reg_id)
+
+            # 3. 构建上下文信息（注入到查询中）
+            context_info = self._build_context_info(hints)
+            enhanced_message = f"{message}\n\n{context_info}" if context_info else message
+
+            # 3. 构建依赖
             deps = OrchestratorDependencies(
                 reg_id=self.reg_id,
                 mcp_server=self._mcp_server,
-                subagent_builders=self._subagent_builders,
                 subagent_agents={},  # 延迟初始化
-                hints={},
+                hints=hints,
             )
 
-            # 执行 Orchestrator Agent
-            result = await self._orchestrator_agent.run(message, deps=deps)
+            # 4. 执行 Main Agent
+            result = await self._main_agent.run(enhanced_message, deps=deps)
 
             # 提取工具调用和来源
             self._extract_tool_calls_and_sources(result)
@@ -501,6 +643,14 @@ class PydanticOrchestrator(BaseRegReaderAgent):
                 f"tool_calls={usage.tool_calls}"
             )
 
+            # 如果使用 Coordinator，写入结果
+            if self._coordinator:
+                await self._coordinator.write_result(
+                    content,
+                    list(set(self._sources)),
+                    self._tool_calls,
+                )
+
             return AgentResponse(
                 content=content,
                 sources=list(set(self._sources)),
@@ -517,6 +667,30 @@ class PydanticOrchestrator(BaseRegReaderAgent):
                 sources=list(set(self._sources)),
                 tool_calls=self._tool_calls,
             )
+
+    def _build_context_info(self, hints: dict) -> str:
+        """构建上下文信息字符串
+
+        将提取的 hints 和默认 reg_id 格式化为上下文信息。
+
+        Args:
+            hints: 提取的提示信息
+
+        Returns:
+            上下文信息字符串
+        """
+        context_parts = []
+
+        # 添加默认规程
+        if self.reg_id:
+            context_parts.append(f"默认规程: {self.reg_id}")
+
+        # 添加提示信息
+        if hints:
+            hints_lines = [f"- {k}: {v}" for k, v in hints.items()]
+            context_parts.append("查询提示:\n" + "\n".join(hints_lines))
+
+        return "\n\n".join(context_parts) if context_parts else ""
 
     def _extract_tool_calls_and_sources(self, result: Any) -> None:
         """从结果中提取工具调用和来源"""
@@ -558,22 +732,27 @@ class PydanticOrchestrator(BaseRegReaderAgent):
             except (json.JSONDecodeError, TypeError):
                 pass
 
+    def _extract_sources_from_result(self, result: Any) -> None:
+        """从 Subagent 结果中提取来源信息"""
+        if hasattr(result, "all_messages"):
+            for msg in result.all_messages():
+                if hasattr(msg, "parts"):
+                    for part in msg.parts:
+                        if hasattr(part, "content"):
+                            self._extract_sources_from_content(part.content)
+
     async def reset(self) -> None:
         """重置会话状态"""
         self._tool_calls = []
         self._sources = []
 
-        # 重置所有 Subagent Builder 追踪
-        for builder in self._subagent_builders.values():
-            builder.reset_tracking()
-
         logger.debug("Session reset")
 
     async def close(self) -> None:
         """关闭连接"""
-        self._orchestrator_agent = None
-        self._subagent_builders = {}
-        self._connected = False
+        self._main_agent = None
+        self._subagents = {}
+        self._initialized = False
 
         logger.debug("Orchestrator closed")
 

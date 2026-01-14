@@ -1,30 +1,34 @@
 """LangGraph Orchestrator 实现
 
-使用 LangGraph 原生的父图-子图模式协调多个 Subgraph 的执行。
+使用 LangGraph 原生的父图-子图模式实现 LLM 自主选择子智能体。
 
 架构:
-    OrchestratorGraph (父图)
-        ├── router (路由节点) - 分析查询意图，决定调用哪些子图
-        ├── search_subgraph (搜索子图)
-        ├── table_subgraph (表格子图)
-        ├── reference_subgraph (引用子图)
-        ├── discovery_subgraph (发现子图)
-        └── aggregator (聚合节点) - 合并所有子图结果
+    LangGraphOrchestrator
+        ├── Main Graph (父图)
+        │   ├── router_node (LLM 路由节点) - LLM 根据子图描述自主选择
+        │   ├── execute_subgraphs_node - 执行选中的子图
+        │   └── aggregator_node - 聚合结果
+        └── Subgraphs (子图，通过条件边路由)
+            ├── SearchSubgraph
+            ├── TableSubgraph
+            ├── ReferenceSubgraph
+            └── DiscoverySubgraph
 
-关键特性:
-    - 子图作为父图节点，通过节点函数调用 subgraph.invoke()
-    - 状态转换在节点函数中完成（父图状态 <-> 子图状态）
-    - 条件边实现动态路由
-    - 支持顺序和并行执行模式
+关键变更:
+- 移除 QueryAnalyzer.analyze()（硬编码路由）
+- 使用 QueryAnalyzer.extract_hints() 提取提示信息
+- router_node 使用 LLM 根据子图描述自主选择
+- LLM 分析查询并返回子图名称列表
 """
 
 import asyncio
+import json
 import time
 import uuid
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict
 
 import httpx
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -46,16 +50,18 @@ from regreader.agents.llm_timing import LLMTimingCollector
 from regreader.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from regreader.config import get_settings
 from regreader.orchestrator.aggregator import ResultAggregator
-from regreader.orchestrator.analyzer import QueryAnalyzer, QueryIntent
+from regreader.orchestrator.analyzer import QueryAnalyzer
+from regreader.orchestrator.coordinator import Coordinator
+from regreader.orchestrator.result import SubagentResult
 from regreader.subagents.config import (
     DISCOVERY_AGENT_CONFIG,
     REFERENCE_AGENT_CONFIG,
     SEARCH_AGENT_CONFIG,
+    SUBAGENT_CONFIGS,
     TABLE_AGENT_CONFIG,
     SubagentType,
 )
 from regreader.subagents.prompts import inject_prompt_to_config
-from regreader.subagents.result import SubagentResult
 
 # 在模块加载时注入提示词到配置
 inject_prompt_to_config()
@@ -84,8 +90,8 @@ class OrchestratorState(TypedDict):
     reg_id: str | None
     """规程 ID"""
 
-    intent: QueryIntent | None
-    """查询意图分析结果"""
+    hints: dict[str, Any]
+    """查询提示信息"""
 
     selected_subgraphs: list[str]
     """选中的子图列表"""
@@ -111,17 +117,18 @@ class OrchestratorState(TypedDict):
 class LangGraphOrchestrator(BaseRegReaderAgent):
     """LangGraph 协调器
 
-    使用 LangGraph 原生父图-子图模式协调多个专家代理。
+    使用 LangGraph 原生父图-子图模式实现 LLM 自主选择子智能体。
 
     工作流程:
-    1. router 节点: QueryAnalyzer 分析查询意图，选择子图
-    2. subgraph 节点: 执行选中的子图（顺序或并行）
-    3. aggregator 节点: 聚合所有子图结果
+    1. QueryAnalyzer 提取查询提示（hints）
+    2. router_node: LLM 根据子图描述自主选择要执行的子图
+    3. execute_subgraphs_node: 执行选中的子图（顺序或并行）
+    4. aggregator_node: 聚合所有子图结果
 
     特性:
+    - LLM 自主决策：根据 SubagentConfig.description 选择子图
     - 原生子图组合：子图作为父图节点，通过 invoke() 调用
     - 状态隔离：父图状态和子图状态分离
-    - 灵活路由：基于意图分析的条件边
     - 结果聚合：合并多个子图的结果
 
     Usage:
@@ -138,6 +145,7 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
         status_callback: StatusCallback | None = None,
         mode: str = "sequential",
         enabled_subagents: list[str] | None = None,
+        coordinator: "Coordinator | None" = None,
     ):
         """初始化 LangGraph 协调器
 
@@ -147,7 +155,8 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
             mcp_config: MCP 连接配置
             status_callback: 状态回调
             mode: 执行模式（"sequential" 或 "parallel"）
-            enabled_subagents: 启用的 Subagent 列表（默认全部启用，除 discovery）
+            enabled_subagents: 启用的 Subagent 列表
+            coordinator: 协调器实例（可选，用于文件系统追踪）
         """
         super().__init__(reg_id)
 
@@ -176,9 +185,12 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
         # Subgraph Builders（延迟初始化）
         self._subgraph_builders: dict[SubagentType, SubgraphBuilder] = {}
 
-        # 协调组件
+        # 查询分析器（仅提取 hints）
         self._analyzer = QueryAnalyzer()
         self._aggregator = ResultAggregator()
+
+        # 协调器（可选）
+        self._coordinator = coordinator
 
         # 父图（延迟初始化）
         self._orchestrator_graph: Any = None
@@ -291,51 +303,78 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
 
         return builders
 
+    def _build_router_prompt(self) -> str:
+        """构建路由提示词，包含所有子图描述
+
+        Returns:
+            路由提示词
+        """
+        # 收集所有启用的子图描述
+        subgraph_descriptions = []
+        for agent_type in self._subagraph_builders.keys():
+            config = SUBAGENT_CONFIGS.get(agent_type)
+            if config and config.enabled:
+                subgraph_descriptions.append(f"""
+### {agent_type.value} - {config.name}
+{config.description}
+""")
+
+        descriptions_text = "".join(subgraph_descriptions)
+
+        prompt = f"""分析用户查询，选择合适的子图（可多选）：
+
+# 可用的子图
+
+{descriptions_text}
+
+# 决策指南
+
+- 如果查询涉及**搜索关键词、浏览目录、读取章节**，选择 search
+- 如果查询涉及**表格查询、表格提取、注释查找**，选择 table
+- 如果查询涉及**交叉引用、"见第X章"、"参见表X"**，选择 reference
+- 如果查询涉及**语义分析、相似内容、章节对比**，选择 discovery（如果启用）
+
+# 输出格式
+
+返回 JSON 数组，包含选中的子图名称。例如：
+["search", "table"] 或 ["reference"] 或 ["search"]
+
+只返回 JSON 数组，不要其他内容。"""
+
+        return prompt
+
     def _build_orchestrator_graph(self) -> Any:
         """构建 Orchestrator 父图
 
         父图结构:
-            START -> router -> [subgraph nodes] -> aggregator -> END
+            START -> router -> execute_subgraphs -> aggregator -> END
         """
-        # 获取可用的子图类型
-        available_types = list(self._subgraph_builders.keys())
-
         # ====================================================================
         # 定义节点函数
         # ====================================================================
 
         async def router_node(state: OrchestratorState) -> dict:
-            """路由节点：分析意图并选择子图"""
+            """路由节点：LLM 分析查询并选择子图"""
             query = state["query"]
 
-            # 分析意图
-            intent = await self._analyzer.analyze(query)
-            logger.debug(
-                f"Query intent: primary={intent.primary_type}, "
-                f"secondary={intent.secondary_types}"
-            )
+            # 构建路由提示词
+            router_prompt = self._build_router_prompt()
 
-            # 确定要调用的子图
-            selected = []
+            # 调用 LLM 进行路由决策
+            messages = [
+                SystemMessage(content=router_prompt),
+                HumanMessage(content=query),
+            ]
 
-            # 添加主要子图
-            if intent.primary_type in self._subgraph_builders:
-                selected.append(intent.primary_type.value)
+            response = await self._llm.ainvoke(messages)
+            content = response.content
 
-            # 添加次要子图
-            for agent_type in intent.secondary_types:
-                if (
-                    agent_type in self._subgraph_builders
-                    and agent_type.value not in selected
-                ):
-                    selected.append(agent_type.value)
+            # 解析 LLM 输出
+            selected = self._parse_router_response(content)
 
-            # 如果没有匹配，回退到 SearchAgent
-            if not selected and SubagentType.SEARCH in self._subgraph_builders:
-                selected.append(SubagentType.SEARCH.value)
+            logger.debug(f"Router selected subgraphs: {selected}")
 
             return {
-                "intent": intent,
                 "selected_subgraphs": selected,
             }
 
@@ -347,8 +386,7 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
             selected = state["selected_subgraphs"]
             query = state["query"]
             reg_id = state["reg_id"]
-            intent = state["intent"]
-            hints = intent.hints if intent else {}
+            hints = state.get("hints", {})
 
             results: dict[str, SubgraphOutput] = {}
             all_sources: list[str] = []
@@ -396,27 +434,24 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
             }
 
         async def aggregator_node(state: OrchestratorState) -> dict:
-            """聚合节点：合并子图结果"""
+            """聚合节点：合并所有子图结果"""
             results = state["subgraph_results"]
-            query = state["query"]
 
             # 转换为 SubagentResult 列表
             subagent_results = []
             for type_value, output in results.items():
-                agent_type = SubagentType(type_value)
-                subagent_results.append(
-                    SubagentResult(
-                        agent_type=agent_type,
-                        success=output["success"],
-                        content=output["content"],
-                        sources=output["sources"],
-                        tool_calls=output["tool_calls"],
-                        error=output["error"],
+                if output["success"]:
+                    subagent_results.append(
+                        SubagentResult(
+                            agent_type=SubagentType(type_value),
+                            content=output["content"],
+                            sources=output["sources"],
+                            tool_calls=output["tool_calls"],
+                        )
                     )
-                )
 
-            # 使用 ResultAggregator 聚合
-            aggregated = self._aggregator.aggregate(subagent_results, query)
+            # 聚合结果
+            aggregated = self._aggregator.aggregate(subagent_results)
 
             return {
                 "final_content": aggregated.content,
@@ -439,8 +474,47 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
         builder.add_edge("execute_subgraphs", "aggregator")
         builder.add_edge("aggregator", END)
 
-        # 编译
+        # 编译父图
         return builder.compile()
+
+    def _parse_router_response(self, content: str) -> list[str]:
+        """解析 LLM 路由响应
+
+        Args:
+            content: LLM 输出内容
+
+        Returns:
+            选中的子图名称列表
+        """
+        try:
+            # 尝试直接解析 JSON
+            selected = json.loads(content)
+            if isinstance(selected, list):
+                return selected
+        except json.JSONDecodeError:
+            pass
+
+        # 尝试提取 JSON 数组
+        import re
+        match = re.search(r'\[([^\]]+)\]', content)
+        if match:
+            try:
+                selected = json.loads(match.group(0))
+                if isinstance(selected, list):
+                    return selected
+            except json.JSONDecodeError:
+                pass
+
+        # 回退：使用 SearchAgent
+        logger.warning(f"Failed to parse router response: {content}, falling back to search")
+        if SubagentType.SEARCH in self._subgraph_builders:
+            return [SubagentType.SEARCH.value]
+        
+        # 如果 SearchAgent 不可用，返回第一个可用的子图
+        if self._subgraph_builders:
+            return [list(self._subgraph_builders.keys())[0].value]
+        
+        return []
 
     async def chat(self, message: str) -> AgentResponse:
         """与协调器对话
@@ -464,30 +538,41 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
         await self._callback.on_event(thinking_event(start=True))
 
         try:
-            # 构建初始状态
-            initial_state: OrchestratorState = {
-                "messages": [],
-                "query": message,
-                "reg_id": self.reg_id,
-                "intent": None,
-                "selected_subgraphs": [],
-                "subgraph_results": {},
-                "final_content": "",
-                "all_sources": [],
-                "all_tool_calls": [],
-            }
+            # 1. 提取查询提示
+            hints = await self._analyzer.extract_hints(message)
+            logger.debug(f"Extracted hints: {hints}")
 
-            # 执行父图
-            result_state = await self._orchestrator_graph.ainvoke(initial_state)
+            # 2. 如果使用 Coordinator，记录查询
+            if self._coordinator:
+                await self._coordinator.log_query(message, hints, self.reg_id)
+
+            # 3. 构建上下文信息（注入到查询中）
+            context_info = self._build_context_info(hints)
+            enhanced_message = f"{message}\n\n{context_info}" if context_info else message
+
+            # 3. 构建初始状态
+            initial_state = OrchestratorState(
+                query=enhanced_message,
+                reg_id=self.reg_id,
+                hints=hints,
+                selected_subgraphs=[],
+                subgraph_results={},
+                final_answer="",
+                tool_calls=[],
+                sources=[],
+            )
+
+            # 4. 执行 Orchestrator Graph
+            result = await self._graph.ainvoke(initial_state)
 
             # 提取结果
-            final_content = result_state.get("final_content", "")
-            self._sources = result_state.get("all_sources", [])
-            self._tool_calls = result_state.get("all_tool_calls", [])
+            content = result.get("final_answer", "")
+            self._tool_calls = result.get("tool_calls", [])
+            self._sources = result.get("sources", [])
 
             # 发送文本事件
-            if final_content:
-                await self._callback.on_event(text_delta_event(final_content))
+            if content:
+                await self._callback.on_event(text_delta_event(content))
 
             # 发送思考结束事件
             await self._callback.on_event(thinking_event(start=False))
@@ -505,8 +590,16 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
                 )
             )
 
+            # 如果使用 Coordinator，写入结果
+            if self._coordinator:
+                await self._coordinator.write_result(
+                    content,
+                    list(set(self._sources)),
+                    self._tool_calls,
+                )
+
             return AgentResponse(
-                content=final_content,
+                content=content,
                 sources=list(set(self._sources)),
                 tool_calls=self._tool_calls,
             )
@@ -522,30 +615,44 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
                 tool_calls=self._tool_calls,
             )
 
+    def _build_context_info(self, hints: dict) -> str:
+        """构建上下文信息字符串
+
+        将提取的 hints 和默认 reg_id 格式化为上下文信息。
+
+        Args:
+            hints: 提取的提示信息
+
+        Returns:
+            上下文信息字符串
+        """
+        context_parts = []
+
+        # 添加默认规程
+        if self.reg_id:
+            context_parts.append(f"默认规程: {self.reg_id}")
+
+        # 添加提示信息
+        if hints:
+            hints_lines = [f"- {k}: {v}" for k, v in hints.items()]
+            context_parts.append("查询提示:\n" + "\n".join(hints_lines))
+
+        return "\n\n".join(context_parts) if context_parts else ""
+
     async def reset(self) -> None:
         """重置会话状态"""
-        self._thread_id = self._generate_thread_id()
         self._tool_calls = []
         self._sources = []
 
-        # 重置所有 SubgraphBuilder
-        for builder in self._subgraph_builders.values():
-            builder.reset_tracking()
-
-        logger.debug(f"Session reset, new thread_id: {self._thread_id}")
+        logger.debug("Session reset")
 
     async def close(self) -> None:
         """关闭连接"""
-        if self._mcp_client:
-            await self._mcp_client.disconnect()
-            self._mcp_client = None
-            self._subgraph_builders = {}
-            self._orchestrator_graph = None
-            logger.debug("MCP client disconnected")
+        self._graph = None
+        self._subgraph_builders = {}
+        self._initialized = False
 
-        if hasattr(self, "_ollama_http_client") and self._ollama_http_client:
-            await self._ollama_http_client.aclose()
-            self._ollama_http_client = None
+        logger.debug("Orchestrator closed")
 
     async def __aenter__(self) -> "LangGraphOrchestrator":
         """异步上下文管理器入口"""

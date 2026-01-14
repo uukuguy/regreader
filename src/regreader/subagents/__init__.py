@@ -1,17 +1,14 @@
 """RegReader Subagents Framework
 
-Unified subagent abstraction layer for multi-framework support.
+Pure configuration layer for multi-framework subagent support.
 
-This module provides the core abstractions shared across all three framework
+This module provides the shared configuration layer for all three framework
 implementations (Claude Agent SDK, Pydantic AI, LangGraph).
 
 Key Components:
-    BaseSubagent: Abstract base class for all subagent implementations.
-    SubagentContext: Execution context passed from Orchestrator to Subagent.
     SubagentConfig: Configuration defining a subagent's tools and behavior.
     SubagentResult: Standardized result format for aggregation.
     SubagentType: Enumeration of subagent types (search, table, reference, discovery).
-    SubagentRegistry: Registry for managing subagent instances.
     RegSearchSubagent: Domain expert for regulation document retrieval.
 
 Subagent Types:
@@ -28,28 +25,21 @@ Example:
     ['list_regulations', 'get_toc', 'smart_search', ...]
 """
 
-from regreader.subagents.base import BaseSubagent, SubagentContext
+from regreader.orchestrator.result import SubagentResult
 from regreader.subagents.config import (
     SUBAGENT_CONFIGS,
     SubagentConfig,
     SubagentType,
 )
-from regreader.subagents.registry import SubagentRegistry
 from regreader.subagents.regsearch import RegSearchSubagent
-from regreader.subagents.result import SubagentResult
 
 __all__ = [
-    # Base classes
-    "BaseSubagent",
-    "SubagentContext",
     # Config
     "SubagentConfig",
     "SubagentType",
     "SUBAGENT_CONFIGS",
     # Result
     "SubagentResult",
-    # Registry
-    "SubagentRegistry",
     # Domain Subagents
     "RegSearchSubagent",
 ]

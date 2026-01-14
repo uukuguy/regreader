@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from regreader.subagents.config import SubagentConfig, SubagentType
-from regreader.subagents.result import SubagentResult
+from regreader.orchestrator.result import SubagentResult
 
 # Pydantic AI imports
 try:
@@ -411,22 +411,38 @@ class BasePydanticSubagent(BaseSubagent):
 
 class SearchSubagent(BasePydanticSubagent):
     """搜索专家 Subagent (Legacy)"""
-    pass
+
+    @property
+    def name(self) -> str:
+        """Subagent 标识名"""
+        return "search"
 
 
 class TableSubagent(BasePydanticSubagent):
     """表格专家 Subagent (Legacy)"""
-    pass
+
+    @property
+    def name(self) -> str:
+        """Subagent 标识名"""
+        return "table"
 
 
 class ReferenceSubagent(BasePydanticSubagent):
     """引用专家 Subagent (Legacy)"""
-    pass
+
+    @property
+    def name(self) -> str:
+        """Subagent 标识名"""
+        return "reference"
 
 
 class DiscoverySubagent(BasePydanticSubagent):
     """语义发现专家 Subagent (Legacy)"""
-    pass
+
+    @property
+    def name(self) -> str:
+        """Subagent 标识名"""
+        return "discovery"
 
 
 PYDANTIC_SUBAGENT_CLASSES: dict[SubagentType, type[BasePydanticSubagent]] = {

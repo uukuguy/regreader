@@ -1,17 +1,22 @@
 """Claude Agent SDK Orchestrator 实现
 
-协调多个 Claude Subagent 的执行，实现查询路由和结果聚合。
+使用 Claude SDK 原生 Handoff Pattern 实现 LLM 自主选择子智能体。
 
 架构:
     ClaudeOrchestrator
-        ├── QueryAnalyzer (查询意图分析)
-        ├── SubagentRouter (路由调度)
-        ├── Subagents (专家代理)
-        │   ├── SearchSubagent
-        │   ├── TableSubagent
-        │   ├── ReferenceSubagent
-        │   └── DiscoverySubagent
-        └── ResultAggregator (结果聚合)
+        ├── Main Agent (协调器)
+        │   └── 根据子智能体描述自主选择
+        └── Subagents (专家代理，通过 handoffs 注册)
+            ├── SearchSubagent
+            ├── TableSubagent
+            ├── ReferenceSubagent
+            └── DiscoverySubagent
+
+关键变更:
+- 移除 SubagentRouter（硬编码路由）
+- 移除 QueryAnalyzer.analyze()（意图分析）
+- 使用 QueryAnalyzer.extract_hints() 提取提示信息
+- LLM 根据子智能体的 description 自主决策
 """
 
 import time
@@ -29,14 +34,13 @@ from regreader.agents.events import (
 )
 from regreader.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
 from regreader.config import get_settings
-from regreader.orchestrator.aggregator import ResultAggregator
 from regreader.orchestrator.analyzer import QueryAnalyzer
-from regreader.orchestrator.router import SubagentRouter
-from regreader.subagents.base import BaseSubagent, SubagentContext
+from regreader.orchestrator.coordinator import Coordinator
 from regreader.subagents.config import (
     DISCOVERY_AGENT_CONFIG,
     REFERENCE_AGENT_CONFIG,
     SEARCH_AGENT_CONFIG,
+    SUBAGENT_CONFIGS,
     TABLE_AGENT_CONFIG,
     SubagentType,
 )
@@ -47,12 +51,22 @@ inject_prompt_to_config()
 
 # Claude Agent SDK imports
 try:
-    from claude_agent_sdk import ClaudeSDKClient
+    from claude_agent_sdk import (
+        Agent,
+        ClaudeAgentOptions,
+        ClaudeSDKClient,
+        ClaudeSDKError,
+        ResultMessage,
+    )
 
     HAS_CLAUDE_SDK = True
 except ImportError:
     HAS_CLAUDE_SDK = False
+    Agent = None  # type: ignore
+    ClaudeAgentOptions = None  # type: ignore
     ClaudeSDKClient = None  # type: ignore
+    ClaudeSDKError = Exception  # type: ignore
+    ResultMessage = None  # type: ignore
 
 if TYPE_CHECKING:
     pass
@@ -61,18 +75,18 @@ if TYPE_CHECKING:
 class ClaudeOrchestrator(BaseRegReaderAgent):
     """Claude Agent SDK 协调器
 
-    使用 Handoff Pattern 协调多个专家代理。
+    使用 Handoff Pattern 实现 LLM 自主选择子智能体。
 
     工作流程:
-    1. QueryAnalyzer 分析查询意图
-    2. SubagentRouter 选择需要调用的 Subagent
-    3. 执行 Subagents（顺序或并行）
-    4. ResultAggregator 聚合结果
+    1. QueryAnalyzer 提取查询提示（hints）
+    2. Main Agent 根据子智能体描述自主选择
+    3. 通过 handoff 切换到选定的子智能体
+    4. 子智能体执行并返回结果
 
     特性:
-    - 上下文隔离：每个 Subagent 持有独立的 ClaudeSDKClient
-    - 灵活路由：基于关键词和意图分析选择 Subagent
-    - 结果聚合：合并多个 Subagent 的结果
+    - LLM 自主决策：根据 SubagentConfig.description 选择子智能体
+    - 上下文隔离：每个 Subagent 持有独立的 Agent 实例
+    - 原生 Handoff：使用 Claude SDK 的 handoffs 机制
 
     Usage:
         async with ClaudeOrchestrator(reg_id="angui_2024") as agent:
@@ -86,9 +100,9 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
         model: str | None = None,
         mcp_config: MCPConnectionConfig | None = None,
         status_callback: StatusCallback | None = None,
-        mode: str = "sequential",
         enabled_subagents: list[str] | None = None,
         use_preset: bool = True,
+        coordinator: "Coordinator | None" = None,
     ):
         """初始化 Claude 协调器
 
@@ -97,9 +111,9 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
             model: Claude 模型名称（如 haiku, sonnet）
             mcp_config: MCP 连接配置
             status_callback: 状态回调
-            mode: 执行模式（"sequential" 或 "parallel"）
             enabled_subagents: 启用的 Subagent 列表
             use_preset: 是否使用 preset: "claude_code"（默认True，使用Anthropic官方最佳实践）
+            coordinator: 协调器实例（可选，用于文件系统追踪）
         """
         super().__init__(reg_id)
 
@@ -113,7 +127,6 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
 
         # Claude 使用 Anthropic 专用配置
         self._model = model or settings.anthropic_model_name or ""
-        self._mode = mode
         self._use_preset = use_preset
 
         # 确定启用的 Subagent
@@ -127,13 +140,15 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
         # MCP 连接管理器
         self._mcp_manager = get_mcp_manager(mcp_config)
 
-        # Subagents（延迟初始化）
-        self._subagents: dict[SubagentType, BaseSubagent] = {}
-
-        # 协调组件
+        # 查询分析器（仅提取 hints）
         self._analyzer = QueryAnalyzer()
-        self._router: SubagentRouter | None = None
-        self._aggregator = ResultAggregator()
+
+        # 协调器（可选）
+        self._coordinator = coordinator
+
+        # Main Agent 和 Subagents（延迟初始化）
+        self._main_agent: Agent | None = None
+        self._subagents: dict[SubagentType, Agent] = {}
 
         # 工具调用追踪
         self._tool_calls: list[dict] = []
@@ -145,7 +160,7 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
         model_display = self._model or "(SDK default)"
         logger.info(
             f"ClaudeOrchestrator initialized: model={model_display}, "
-            f"mode={self._mode}, enabled_subagents={self._enabled_subagents}, "
+            f"enabled_subagents={self._enabled_subagents}, "
             f"use_preset={self._use_preset}"
         )
 
@@ -163,8 +178,8 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
             # 创建 Subagents
             self._subagents = self._create_subagents()
 
-            # 创建路由器
-            self._router = SubagentRouter(self._subagents, mode=self._mode)
+            # 创建 Main Agent
+            self._main_agent = self._create_main_agent()
 
             self._initialized = True
 
@@ -173,8 +188,14 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
                 f"{list(self._subagents.keys())}"
             )
 
-    def _create_subagents(self) -> dict[SubagentType, BaseSubagent]:
-        """创建 Subagent 实例"""
+    def _create_subagents(self) -> dict[SubagentType, Agent]:
+        """创建 Subagent Agent 实例
+
+        为每个启用的子智能体创建独立的 Agent 实例。
+
+        Returns:
+            SubagentType 到 Agent 的映射
+        """
         subagents = {}
 
         # 配置映射
@@ -193,13 +214,174 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
             if not config.enabled:
                 continue
 
-            # 创建 Subagent（传递 use_preset 参数）
-            subagent = create_claude_subagent(
-                config, self._model, self._mcp_manager, self._use_preset
-            )
-            subagents[agent_type] = subagent
+            # 创建 Agent 实例
+            agent = self._create_subagent_agent(config)
+            subagents[agent_type] = agent
+
+            logger.debug(f"Created subagent: {config.name} ({agent_type.value})")
 
         return subagents
+
+    def _create_subagent_agent(self, config) -> Agent:
+        """为单个子智能体创建 Agent 实例
+
+        Args:
+            config: SubagentConfig
+
+        Returns:
+            Agent 实例
+        """
+        # 构建系统提示词
+        if self._use_preset:
+            # Preset 模式：精简的领域特定指令
+            instructions = self._build_subagent_domain_prompt(config)
+        else:
+            # 手动模式：完整提示词
+            instructions = config.system_prompt_template
+
+        # 获取允许的工具列表
+        from regreader.agents.mcp_config import get_tool_name
+        allowed_tools = [get_tool_name(name) for name in config.tools]
+
+        # 创建 Agent
+        agent = Agent(
+            name=config.name,
+            instructions=instructions,
+            # 注意：工具过滤在 Main Agent 的 options 中配置
+        )
+
+        return agent
+
+    def _build_subagent_domain_prompt(self, config) -> str:
+        """构建子智能体的领域特定提示词（preset 模式）
+
+        Args:
+            config: SubagentConfig
+
+        Returns:
+            领域特定提示词
+        """
+        # 获取允许的工具列表
+        from regreader.agents.mcp_config import get_tool_name
+        allowed_tools = [get_tool_name(name) for name in config.tools]
+        tools_display = ", ".join(allowed_tools) if allowed_tools else "无"
+
+        prompt = f"""# 角色定位
+你是 {config.name}，专门负责{config.description}。
+
+# 电力规程领域知识
+
+## 文档结构规范
+- **章节编号格式**：X.X.X.X（如 2.1.4.1.6）
+- **表格命名规则**：表X-X（如 表6-2）
+- **注释引用**：注1、注2、注①、注一、选项A、选项B、方案甲等变体
+- **引用语法**："见第X章"、"参见X.X节"、"详见附录X"、"见注X"
+
+## 工具使用约束
+你**只能使用**以下MCP工具：
+{tools_display}
+
+**严格限制**：不得使用其他未列出的工具，不得尝试绕过工具限制。
+
+## 检索策略
+1. **精确匹配优先**：优先使用章节号、表格号、注释ID等精确标识符
+2. **语义搜索作为补充**：找不到精确匹配时使用语义搜索
+3. **表格查询完整性**：表格查询必须返回完整结构，注意跨页表格
+4. **注释引用追踪**：发现注释引用时必须回溯到原文获取完整内容
+
+## 输出要求（关键）
+**关键规则：在调用工具后，必须用自然语言总结工具返回的结果，而不是返回原始工具输出。**
+
+- 将搜索到的内容片段整理成自然语言描述
+- 附带准确的来源信息（规程名 + 页码 + 章节）
+- 如果发现「见注X」或「见第X章」等引用，在总结中明确指出
+- 如果工具返回JSON格式，提取关键信息并用自然语言表达
+- 使用清晰的段落结构，避免直接输出原始工具数据
+
+示例输出格式：
+```
+根据搜索结果，在《安规_2024》规程中找到以下相关内容：
+
+**第X章节（P123）**：
+具体内容描述...
+
+**来源**：angui_2024 P123（第X章 > X.X节）
+```
+"""
+        return prompt
+
+    def _create_main_agent(self) -> Agent:
+        """创建 Main Agent（协调器）
+
+        Main Agent 负责：
+        1. 理解用户查询
+        2. 根据子智能体描述选择合适的子智能体
+        3. 通过 handoff 切换到选定的子智能体
+
+        Returns:
+            Main Agent 实例
+        """
+        # 构建 Main Agent 提示词
+        instructions = self._build_main_agent_prompt()
+
+        # 创建 Main Agent，注册所有子智能体
+        agent = Agent(
+            name="MainCoordinator",
+            instructions=instructions,
+            handoffs=list(self._subagents.values()),  # 注册子智能体
+        )
+
+        logger.debug(f"Created Main Agent with {len(self._subagents)} handoffs")
+
+        return agent
+
+    def _build_main_agent_prompt(self) -> str:
+        """构建 Main Agent 提示词
+
+        包含所有启用的子智能体描述，让 LLM 自主选择。
+
+        Returns:
+            Main Agent 提示词
+        """
+        # 收集所有启用的子智能体描述
+        subagent_descriptions = []
+        for agent_type, agent in self._subagents.items():
+            config = SUBAGENT_CONFIGS.get(agent_type)
+            if config and config.enabled:
+                subagent_descriptions.append(f"""
+### {config.name}
+{config.description}
+""")
+
+        descriptions_text = "".join(subagent_descriptions)
+
+        prompt = f"""你是 RegReader 协调器，负责将用户查询分派给合适的专家子智能体。
+
+# 可用的专家子智能体
+
+{descriptions_text}
+
+# 你的职责
+
+1. **理解用户查询**：分析用户的问题，识别查询意图
+2. **选择合适的子智能体**：根据上述描述，选择最适合处理该查询的子智能体
+3. **使用 handoff 切换**：使用 handoff 功能切换到选定的子智能体
+
+# 决策指南
+
+- 如果查询涉及**搜索关键词、浏览目录、读取章节**，选择 SearchAgent
+- 如果查询涉及**表格查询、表格提取、注释查找**，选择 TableAgent
+- 如果查询涉及**交叉引用、"见第X章"、"参见表X"**，选择 ReferenceAgent
+- 如果查询涉及**语义分析、相似内容、章节对比**，选择 DiscoveryAgent（如果启用）
+
+# 重要提示
+
+- **不要自己执行查询**：你的职责是选择和切换，不是直接回答
+- **立即 handoff**：分析完查询后，立即使用 handoff 切换到选定的子智能体
+- **信任子智能体**：子智能体会处理所有细节，你只需选择正确的专家
+"""
+
+        return prompt
 
     async def chat(self, message: str) -> AgentResponse:
         """与协调器对话
@@ -223,37 +405,44 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
         await self._callback.on_event(thinking_event(start=True))
 
         try:
-            # 1. 分析查询意图
-            intent = await self._analyzer.analyze(message)
-            logger.debug(
-                f"Query intent: primary={intent.primary_type}, "
-                f"secondary={intent.secondary_types}, "
-                f"multi_hop={intent.requires_multi_hop}"
-            )
+            # 1. 提取查询提示
+            hints = await self._analyzer.extract_hints(message)
+            logger.debug(f"Extracted hints: {hints}")
 
-            # 2. 构建上下文
-            context = SubagentContext(
-                query=message,
-                reg_id=self.reg_id,
-                chapter_scope=intent.hints.get("chapter_scope"),
-                hints=intent.hints,
-                max_iterations=5,
-            )
+            # 2. 如果使用 Coordinator，记录查询
+            if self._coordinator:
+                await self._coordinator.log_query(message, hints, self.reg_id)
 
-            # 3. 路由和执行
-            results = await self._router.execute(intent, context)
+            # 3. 构建上下文信息（注入到查询中）
+            context_info = self._build_context_info(hints)
+            enhanced_message = f"{message}\n\n{context_info}" if context_info else message
 
-            # 4. 聚合结果
-            aggregated = self._aggregator.aggregate(results, message)
+            # 3. 构建 Agent 选项
+            options = self._build_main_agent_options()
 
-            # 收集所有工具调用和来源
-            for result in results:
-                self._tool_calls.extend(result.tool_calls)
-                self._sources.extend(result.sources)
+            # 4. 执行 Main Agent
+            final_content = ""
+            async with ClaudeSDKClient(options=options) as client:
+                # 发送查询
+                await client.query(enhanced_message)
+
+                # 接收响应
+                async for event in client.receive_response():
+                    # 处理事件（提取工具调用和来源）
+                    await self._process_event(event)
+
+                    # 检查最终结果
+                    if ResultMessage is not None and isinstance(event, ResultMessage):
+                        if event.result:
+                            final_content = event.result
+                            logger.debug(
+                                f"Got ResultMessage with content length={len(final_content)}"
+                            )
+                        break
 
             # 发送文本事件
-            if aggregated.content:
-                await self._callback.on_event(text_delta_event(aggregated.content))
+            if final_content:
+                await self._callback.on_event(text_delta_event(final_content))
 
             # 发送思考结束事件
             await self._callback.on_event(thinking_event(start=False))
@@ -271,7 +460,19 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
                 )
             )
 
-            return self._aggregator.to_agent_response(aggregated)
+            # 如果使用 Coordinator，写入结果
+            if self._coordinator:
+                await self._coordinator.write_result(
+                    final_content,
+                    list(set(self._sources)),
+                    self._tool_calls,
+                )
+
+            return AgentResponse(
+                content=final_content,
+                sources=list(set(self._sources)),
+                tool_calls=self._tool_calls,
+            )
 
         except Exception as e:
             logger.exception(f"Orchestrator execution error: {e}")
@@ -284,23 +485,200 @@ class ClaudeOrchestrator(BaseRegReaderAgent):
                 tool_calls=self._tool_calls,
             )
 
+    def _build_context_info(self, hints: dict) -> str:
+        """构建上下文信息字符串
+
+        将提取的 hints 和默认 reg_id 格式化为上下文信息。
+
+        Args:
+            hints: 提取的提示信息
+
+        Returns:
+            上下文信息字符串
+        """
+        context_parts = []
+
+        # 添加默认规程
+        if self.reg_id:
+            context_parts.append(f"默认规程: {self.reg_id}")
+
+        # 添加提示信息
+        if hints:
+            hints_lines = [f"- {k}: {v}" for k, v in hints.items()]
+            context_parts.append("查询提示:\n" + "\n".join(hints_lines))
+
+        return "\n\n".join(context_parts) if context_parts else ""
+
+    def _build_main_agent_options(self) -> ClaudeAgentOptions:
+        """构建 Main Agent 选项
+
+        Returns:
+            ClaudeAgentOptions
+        """
+        # 禁用内置工具（避免与MCP工具冲突）
+        disallowed = [
+            "Bash", "Read", "Write", "Edit", "Glob", "Grep",
+            "LS", "MultiEdit", "NotebookEdit", "NotebookRead",
+            "TodoRead", "TodoWrite", "WebFetch", "WebSearch",
+        ]
+
+        # 获取所有子智能体的工具列表（用于 allowed_tools）
+        from regreader.agents.mcp_config import get_tool_name
+        all_tools = set()
+        for agent_type in self._subagents.keys():
+            config = SUBAGENT_CONFIGS.get(agent_type)
+            if config:
+                all_tools.update(get_tool_name(name) for name in config.tools)
+
+        # 基础选项
+        options_kwargs = {
+            "mcp_servers": self._mcp_manager.get_claude_sdk_config(),
+            "allowed_tools": list(all_tools),  # 允许所有子智能体的工具
+            "disallowed_tools": disallowed,
+            "max_turns": 10,  # Main Agent 可能需要多次 handoff
+            "permission_mode": "bypassPermissions",
+            "include_partial_messages": False,
+        }
+
+        # 根据配置选择提示词模式
+        if self._use_preset:
+            # Preset模式：使用 claude_code preset
+            options_kwargs["system_prompt"] = {
+                "type": "preset",
+                "preset": "claude_code",
+                "append": "",  # Main Agent 的提示词已经在 instructions 中
+            }
+            logger.debug("Using preset: 'claude_code' for Main Agent")
+        else:
+            # 手动模式：提示词已在 Agent.instructions 中
+            pass
+
+        # 只有指定模型时才传递
+        if self._model:
+            options_kwargs["model"] = self._model
+
+        return ClaudeAgentOptions(**options_kwargs)
+
+    async def _process_event(self, event) -> None:
+        """处理 SDK 事件
+
+        提取工具调用和来源信息。
+
+        Args:
+            event: SDK 事件
+        """
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ToolResultBlock,
+            ToolUseBlock,
+            UserMessage,
+        )
+
+        # 记录事件类型
+        event_type = type(event).__name__
+        logger.debug(f"Processing event: {event_type}")
+
+        # 处理 AssistantMessage
+        if isinstance(event, AssistantMessage):
+            for block in event.content:
+                # ToolUseBlock - 工具调用
+                if isinstance(block, ToolUseBlock):
+                    tool_name = block.name
+                    tool_input = block.input if isinstance(block.input, dict) else {}
+                    tool_id = getattr(block, "id", "") or ""
+
+                    self._tool_calls.append({
+                        "name": tool_name,
+                        "input": tool_input,
+                        "tool_id": tool_id,
+                    })
+
+                    logger.debug(f"Tool call: {tool_name}")
+
+                # ToolResultBlock - 工具结果
+                elif isinstance(block, ToolResultBlock):
+                    content = getattr(block, "content", None)
+                    tool_use_id = getattr(block, "tool_use_id", "") or ""
+
+                    # 更新对应的工具调用
+                    for tc in reversed(self._tool_calls):
+                        if tc.get("tool_id") == tool_use_id:
+                            tc["output"] = content
+                            break
+
+                    # 提取来源
+                    self._extract_sources(content)
+
+        # 处理 UserMessage
+        if isinstance(event, UserMessage):
+            for block in event.content:
+                # ToolResultBlock - 工具结果
+                if isinstance(block, ToolResultBlock):
+                    content = getattr(block, "content", None)
+                    tool_use_id = getattr(block, "tool_use_id", "") or ""
+
+                    # 更新对应的工具调用
+                    for tc in reversed(self._tool_calls):
+                        if tc.get("tool_id") == tool_use_id:
+                            tc["output"] = content
+                            break
+
+                    # 提取来源
+                    self._extract_sources(content)
+
+        # 处理独立的 ToolResultBlock
+        if isinstance(event, ToolResultBlock):
+            content = getattr(event, "content", None)
+            tool_use_id = getattr(event, "tool_use_id", "") or ""
+
+            # 更新对应的工具调用
+            for tc in reversed(self._tool_calls):
+                if tc.get("tool_id") == tool_use_id:
+                    tc["output"] = content
+                    break
+
+            # 提取来源
+            self._extract_sources(content)
+
+    def _extract_sources(self, result) -> None:
+        """从结果中提取来源信息
+
+        Args:
+            result: 工具返回结果
+        """
+        if result is None:
+            return
+
+        if isinstance(result, dict):
+            if "source" in result and result["source"]:
+                self._sources.append(result["source"])
+            for key, value in result.items():
+                if key != "source":
+                    self._extract_sources(value)
+
+        elif isinstance(result, list):
+            for item in result:
+                self._extract_sources(item)
+
+        elif isinstance(result, str):
+            try:
+                import json
+                parsed = json.loads(result)
+                self._extract_sources(parsed)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
     async def reset(self) -> None:
         """重置会话状态"""
         self._tool_calls = []
         self._sources = []
 
-        # 重置所有 Subagent
-        for subagent in self._subagents.values():
-            await subagent.reset()
-
         logger.debug("Session reset")
 
     async def close(self) -> None:
         """关闭连接"""
-        # Claude SDK subagents 不需要显式关闭
-        # 但我们仍然清理状态
         self._subagents = {}
-        self._router = None
+        self._main_agent = None
         self._initialized = False
 
         logger.debug("Orchestrator closed")

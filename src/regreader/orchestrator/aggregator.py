@@ -6,7 +6,7 @@
 from typing import TYPE_CHECKING
 
 from regreader.subagents.config import SubagentType
-from regreader.subagents.result import AggregatedResult, SubagentResult
+from regreader.orchestrator.result import AggregatedResult, SubagentResult
 
 if TYPE_CHECKING:
     from regreader.agents.base import AgentResponse

@@ -18,7 +18,7 @@ from regreader.agents.mcp_config import get_tool_name
 from regreader.agents.mcp_connection import MCPConnectionManager
 from regreader.subagents.base import BaseSubagent, SubagentContext
 from regreader.subagents.config import SubagentConfig, SubagentType
-from regreader.subagents.result import SubagentResult
+from regreader.orchestrator.result import SubagentResult
 
 # Claude Agent SDK imports
 try:
@@ -32,6 +32,7 @@ try:
         ThinkingBlock,
         ToolResultBlock,
         ToolUseBlock,
+        UserMessage,
     )
 
     HAS_CLAUDE_SDK = True
@@ -43,6 +44,7 @@ except ImportError:
     ThinkingBlock = None  # type: ignore
     ToolUseBlock = None  # type: ignore
     ToolResultBlock = None  # type: ignore
+    UserMessage = None  # type: ignore
     ClaudeSDKError = Exception  # type: ignore
     ClaudeAgentOptions = None  # type: ignore
     ClaudeSDKClient = None  # type: ignore
@@ -198,6 +200,24 @@ class BaseClaudeSubagent(BaseSubagent):
 3. **表格查询完整性**：表格查询必须返回完整结构，注意跨页表格
 4. **注释引用追踪**：发现注释引用时必须回溯到原文获取完整内容
 
+## 输出要求（关键）
+**关键规则：在调用工具后，必须用自然语言总结工具返回的结果，而不是返回原始工具输出。**
+
+- 将搜索到的内容片段整理成自然语言描述
+- 附带准确的来源信息（规程名 + 页码 + 章节）
+- 如果发现「见注X」或「见第X章」等引用，在总结中明确指出
+- 如果工具返回JSON格式，提取关键信息并用自然语言表达
+- 使用清晰的段落结构，避免直接输出原始工具数据
+
+示例输出格式：
+```
+根据搜索结果，在《安规_2024》规程中找到以下相关内容：
+
+**第X章节（P123）**：
+具体内容描述...
+
+**来源**：angui_2024 P123（第X章 > X.X节）
+```
 """
 
         # 注入上下文信息
@@ -250,8 +270,12 @@ class BaseClaudeSubagent(BaseSubagent):
         # 根据配置选择提示词模式
         if self._use_preset:
             # Preset模式：使用 claude_code preset + 精简的领域特定指令
-            options_kwargs["preset"] = "claude_code"
-            options_kwargs["system_prompt"] = self._build_domain_prompt(context)
+            # SystemPromptPreset TypedDict 结构
+            options_kwargs["system_prompt"] = {
+                "type": "preset",
+                "preset": "claude_code",
+                "append": self._build_domain_prompt(context),
+            }
             logger.debug(f"[{self.name}] Using preset: 'claude_code' with domain prompt")
         else:
             # 手动模式：使用完整的手动编写提示词
@@ -292,11 +316,21 @@ class BaseClaudeSubagent(BaseSubagent):
                     if ResultMessage is not None and isinstance(event, ResultMessage):
                         if event.result:
                             final_content = event.result
+                            logger.debug(
+                                f"[{self.name}] Got ResultMessage with content "
+                                f"length={len(final_content)}"
+                            )
+                        else:
+                            logger.debug(f"[{self.name}] Got empty ResultMessage")
                         break
 
                 # 如果没有通过 ResultMessage 获取
                 if not final_content:
                     final_content = self._get_assembled_text()
+                    logger.debug(
+                        f"[{self.name}] Assembled text from tool calls: "
+                        f"length={len(final_content)}, tool_calls={len(self._tool_calls)}"
+                    )
 
             duration_ms = (time.time() - start_time) * 1000
 
@@ -350,9 +384,49 @@ class BaseClaudeSubagent(BaseSubagent):
         """
         import json
 
+        # 记录事件类型用于调试
+        event_type = type(event).__name__
+        logger.debug(f"[{self.name}] Processing event: {event_type}")
+
+        # 优先处理独立的 ToolResultBlock（Claude SDK 可能直接发送）
+        if ToolResultBlock is not None and isinstance(event, ToolResultBlock):
+            content = getattr(event, "content", None)
+            tool_use_id = getattr(event, "tool_use_id", "") or ""
+
+            logger.debug(
+                f"[{self.name}] Standalone ToolResultBlock: tool_use_id={tool_use_id}, "
+                f"has_content={content is not None}, "
+                f"content_type={type(content).__name__ if content else 'None'}"
+            )
+
+            # 更新对应的工具调用
+            found = False
+            for tc in reversed(self._tool_calls):
+                if tc.get("tool_id") == tool_use_id:
+                    tc["output"] = content
+                    found = True
+                    logger.debug(
+                        f"[{self.name}] Updated tool call output for {tc.get('name')} "
+                        f"(standalone ToolResultBlock)"
+                    )
+                    break
+
+            if not found:
+                logger.warning(
+                    f"[{self.name}] Could not find matching tool call for "
+                    f"tool_use_id={tool_use_id} (standalone ToolResultBlock)"
+                )
+
+            # 提取来源
+            self._extract_sources(content)
+            return  # 已处理，直接返回
+
         # 处理 AssistantMessage
         if AssistantMessage is not None and isinstance(event, AssistantMessage):
             for block in event.content:
+                block_type = type(block).__name__
+                logger.debug(f"[{self.name}]   Block in AssistantMessage: {block_type}")
+
                 # ToolUseBlock - 工具调用
                 if ToolUseBlock is not None and isinstance(block, ToolUseBlock):
                     tool_name = block.name
@@ -367,29 +441,81 @@ class BaseClaudeSubagent(BaseSubagent):
 
                     logger.debug(f"[{self.name}] Tool call: {tool_name}")
 
-                # ToolResultBlock - 工具结果
+                # ToolResultBlock - 工具结果（嵌入在 AssistantMessage 中）
                 elif ToolResultBlock is not None and isinstance(block, ToolResultBlock):
                     content = getattr(block, "content", None)
                     tool_use_id = getattr(block, "tool_use_id", "") or ""
 
+                    logger.debug(
+                        f"[{self.name}] ToolResultBlock in AssistantMessage: "
+                        f"tool_use_id={tool_use_id}, has_content={content is not None}, "
+                        f"content_type={type(content).__name__ if content else 'None'}"
+                    )
+
                     # 更新对应的工具调用
+                    found = False
                     for tc in reversed(self._tool_calls):
                         if tc.get("tool_id") == tool_use_id:
                             tc["output"] = content
+                            found = True
+                            logger.debug(
+                                f"[{self.name}] Updated tool call output for {tc.get('name')} "
+                                f"(embedded ToolResultBlock)"
+                            )
                             break
+
+                    if not found:
+                        logger.warning(
+                            f"[{self.name}] Could not find matching tool call for "
+                            f"tool_use_id={tool_use_id} (embedded ToolResultBlock)"
+                        )
 
                     # 提取来源
                     self._extract_sources(content)
 
-        # 处理独立的 ToolResultBlock
-        if ToolResultBlock is not None and isinstance(event, ToolResultBlock):
-            content = getattr(event, "content", None)
-            self._extract_sources(content)
+        # 处理 UserMessage（包含工具调用结果）
+        if UserMessage is not None and isinstance(event, UserMessage):
+            for block in event.content:
+                block_type = type(block).__name__
+                logger.debug(f"[{self.name}]   Block in UserMessage: {block_type}")
+
+                # ToolResultBlock - 工具结果
+                if ToolResultBlock is not None and isinstance(block, ToolResultBlock):
+                    content = getattr(block, "content", None)
+                    tool_use_id = getattr(block, "tool_use_id", "") or ""
+
+                    logger.debug(
+                        f"[{self.name}] ToolResultBlock in UserMessage: "
+                        f"tool_use_id={tool_use_id}, has_content={content is not None}, "
+                        f"content_type={type(content).__name__ if content else 'None'}"
+                    )
+
+                    # 更新对应的工具调用
+                    found = False
+                    for tc in reversed(self._tool_calls):
+                        if tc.get("tool_id") == tool_use_id:
+                            tc["output"] = content
+                            found = True
+                            logger.debug(
+                                f"[{self.name}] Updated tool call output for {tc.get('name')} "
+                                f"(from UserMessage)"
+                            )
+                            break
+
+                    if not found:
+                        logger.warning(
+                            f"[{self.name}] Could not find matching tool call for "
+                            f"tool_use_id={tool_use_id} (from UserMessage)"
+                        )
+
+                    # 提取来源
+                    self._extract_sources(content)
 
         # 兼容旧格式
         if hasattr(event, "type") and getattr(event, "type", None) == "tool_result":
             content = getattr(event, "content", None)
             if content:
+                logger.debug(f"[{self.name}] Legacy tool_result event")
                 self._extract_sources(content)
 
     def _extract_sources(self, result: Any) -> None:
@@ -422,18 +548,152 @@ class BaseClaudeSubagent(BaseSubagent):
 
     def _get_assembled_text(self) -> str:
         """从工具调用结果中组装文本"""
+        import json
+
         if not self._tool_calls:
+            logger.debug(f"[{self.name}] No tool calls to assemble text from")
             return ""
 
-        for tool_call in reversed(self._tool_calls):
+        logger.debug(
+            f"[{self.name}] Attempting to assemble text from {len(self._tool_calls)} tool calls"
+        )
+
+        for i, tool_call in enumerate(reversed(self._tool_calls)):
             output = tool_call.get("output")
+            tool_name = tool_call.get("name", "unknown")
+
+            logger.debug(
+                f"[{self.name}] Tool call #{len(self._tool_calls)-i}: "
+                f"name={tool_name}, has_output={output is not None}, "
+                f"output_type={type(output).__name__ if output else 'None'}"
+            )
+
             if output:
                 if isinstance(output, dict):
-                    return output.get("content_markdown", output.get("content", str(output)))
+                    content = output.get("content_markdown", output.get("content", str(output)))
+                    logger.debug(
+                        f"[{self.name}] Extracted content from dict output: "
+                        f"length={len(content)}"
+                    )
+                    return content
                 elif isinstance(output, str):
+                    # 尝试检测是否为原始JSON（agent未能正确格式化）
+                    if self._is_raw_json(output):
+                        logger.warning(
+                            f"[{self.name}] Detected raw JSON output from agent, "
+                            f"attempting fallback formatting"
+                        )
+                        formatted = self._format_json_fallback(output, tool_name)
+                        if formatted:
+                            return formatted
+
+                    logger.debug(
+                        f"[{self.name}] Using string output directly: length={len(output)}"
+                    )
                     return output
 
+        logger.warning(f"[{self.name}] No valid content found in any tool call output")
         return ""
+
+    def _is_raw_json(self, text: str) -> bool:
+        """检测文本是否为原始JSON输出
+
+        Args:
+            text: 待检测的文本
+
+        Returns:
+            是否为原始JSON
+        """
+        import json
+
+        # 去掉前后空白
+        text = text.strip()
+
+        # 基本的JSON检测：以 { 或 [ 开头，且包含 "result" 等关键字
+        if not (text.startswith("{") or text.startswith("[")):
+            return False
+
+        try:
+            # 尝试解析为JSON
+            json.loads(text)
+            # 检查是否包含典型的工具输出关键字
+            has_tool_keys = any(
+                key in text for key in ['"result":', '"sources":', '"snippet":']
+            )
+            return has_tool_keys
+        except json.JSONDecodeError:
+            return False
+
+    def _format_json_fallback(self, json_text: str, tool_name: str) -> str:
+        """格式化原始JSON为可读文本（回退方案）
+
+        当agent未能正确格式化工具输出时，此方法提供基本的格式化支持。
+
+        Args:
+            json_text: 原始JSON文本
+            tool_name: 工具名称
+
+        Returns:
+            格式化后的文本，如果无法格式化则返回空字符串
+        """
+        import json
+
+        try:
+            data = json.loads(json_text)
+
+            # 处理 smart_search 工具输出
+            if tool_name == "mcp__gridcode__smart_search" and isinstance(data, dict):
+                results = data.get("result", [])
+                if not results:
+                    return "未找到相关内容。"
+
+                # 格式化搜索结果
+                lines = ["根据搜索结果，找到以下相关内容：\n"]
+
+                for idx, result in enumerate(results[:5], 1):  # 只显示前5条
+                    snippet = result.get("snippet", "")
+                    source = result.get("source", "")
+                    chapter_path = result.get("chapter_path", [])
+
+                    # 提取章节信息
+                    chapter = " > ".join(chapter_path) if chapter_path else "未知章节"
+
+                    lines.append(f"**{idx}. {chapter}**")
+                    lines.append(f"   {snippet}")
+                    lines.append(f"   来源：{source}\n")
+
+                if len(results) > 5:
+                    lines.append(f"...以及其他 {len(results)-5} 条结果")
+
+                return "\n".join(lines)
+
+            # 处理 search_tables 工具输出
+            elif tool_name == "mcp__gridcode__search_tables" and isinstance(data, dict):
+                results = data.get("result", [])
+                if not results:
+                    return "未找到相关表格。"
+
+                lines = ["找到以下相关表格：\n"]
+
+                for idx, table in enumerate(results[:3], 1):
+                    table_id = table.get("table_id", "")
+                    source = table.get("source", "")
+
+                    lines.append(f"**表格 {idx}**: {table_id}")
+                    lines.append(f"   来源：{source}\n")
+
+                lines.append("\n请使用 get_table_by_id 工具获取表格详细内容。")
+
+                return "\n".join(lines)
+
+            # 其他情况：提供通用格式化
+            else:
+                logger.debug(f"[{self.name}] No specific formatter for tool: {tool_name}")
+                return f"工具 {tool_name} 返回了结果，但格式需要agent处理。原始数据长度：{len(json_text)} 字符。"
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Failed to format JSON fallback: {e}")
+            return ""
 
     async def reset(self) -> None:
         """重置状态"""
@@ -443,22 +703,38 @@ class BaseClaudeSubagent(BaseSubagent):
 
 class SearchSubagent(BaseClaudeSubagent):
     """搜索专家 Subagent"""
-    pass
+
+    @property
+    def name(self) -> str:
+        """Subagent 标识名"""
+        return "search"
 
 
 class TableSubagent(BaseClaudeSubagent):
     """表格专家 Subagent"""
-    pass
+
+    @property
+    def name(self) -> str:
+        """Subagent 标识名"""
+        return "table"
 
 
 class ReferenceSubagent(BaseClaudeSubagent):
     """引用专家 Subagent"""
-    pass
+
+    @property
+    def name(self) -> str:
+        """Subagent 标识名"""
+        return "reference"
 
 
 class DiscoverySubagent(BaseClaudeSubagent):
     """发现专家 Subagent"""
-    pass
+
+    @property
+    def name(self) -> str:
+        """Subagent 标识名"""
+        return "discovery"
 
 
 class ClaudeRegSearchSubagent(BaseClaudeSubagent):
