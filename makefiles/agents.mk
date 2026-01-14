@@ -20,6 +20,34 @@ ask: ## Single query to Agent (usage: make ask ASK_QUERY="母线失压如何处�
 ask-json: ## Single query with JSON output
 	$(GRIDCODE_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) --json
 
+ask-file: ## Query from file (usage: make ask-file QUERY_FILE=queries/query.txt AGENT=claude)
+	@if [ -z "$(QUERY_FILE)" ]; then \
+		echo "$(YELLOW)错误: 必须指定 QUERY_FILE 参数$(NC)"; \
+		echo "用法: make ask-file QUERY_FILE=queries/query.txt AGENT=claude REG_ID=angui_2024"; \
+		echo "示例文件内容:"; \
+		echo "  请详细说明母线失压的处理流程，包括："; \
+		echo "  1. 故障判断标准"; \
+		echo "  2. 应急处理步骤"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(QUERY_FILE)" ]; then \
+		echo "$(YELLOW)错误: 文件不存在: $(QUERY_FILE)$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)从文件读取查询: $(QUERY_FILE)$(NC)"
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) -- "$$(cat $(QUERY_FILE))"
+
+ask-stdin: ## Query from stdin (usage: cat query.txt | make ask-stdin AGENT=claude)
+	@echo "$(BLUE)从 stdin 读取查询...$(NC)"
+	@read -r -d '' QUERY || true; \
+	if [ -z "$$QUERY" ]; then \
+		echo "$(YELLOW)错误: stdin 输入为空$(NC)"; \
+		echo "用法: cat query.txt | make ask-stdin AGENT=claude REG_ID=angui_2024"; \
+		echo "或者: echo '查询内容' | make ask-stdin AGENT=claude"; \
+		exit 1; \
+	fi; \
+	$(GRIDCODE_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) -- "$$QUERY"
+
 chat-orch: ## Start chat with Orchestrator (usage: make chat-orch REG_ID=angui AGENT=claude)
 	$(GRIDCODE_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --orchestrator $(AGENT_FLAGS)
 
@@ -85,3 +113,49 @@ chat-pydantic-sse: ## Chat with Pydantic AI Agent via MCP SSE
 
 chat-langgraph-sse: ## Chat with LangGraph Agent via MCP SSE
 	$(MAKE) chat-langgraph MODE=mcp-sse REG_ID="$(REG_ID)"
+
+#----------------------------------------------------------------------
+# 长文本查询输入方式示例
+#----------------------------------------------------------------------
+
+.PHONY: ask-examples
+ask-examples: ## Show examples for long query input methods
+	@echo "$(GREEN)========================================$(NC)"
+	@echo "$(GREEN)长文本查询输入方式示例$(NC)"
+	@echo "$(GREEN)========================================$(NC)"
+	@echo ""
+	@echo "$(BLUE)方案 1: 从文件读取（推荐）$(NC)"
+	@echo "  1. 创建查询文件:"
+	@echo "     cat > queries/my_query.txt <<'EOF'"
+	@echo "     请详细说明母线失压的处理流程，包括："
+	@echo "     1. 故障判断标准"
+	@echo "     2. 应急处理步骤"
+	@echo "     3. 恢复操作流程"
+	@echo "     EOF"
+	@echo ""
+	@echo "  2. 使用文件查询:"
+	@echo "     make ask-file QUERY_FILE=queries/my_query.txt AGENT=claude REG_ID=angui_2024"
+	@echo ""
+	@echo "$(BLUE)方案 2: 从 stdin 读取$(NC)"
+	@echo "  1. 管道输入:"
+	@echo "     cat queries/my_query.txt | make ask-stdin AGENT=pydantic REG_ID=angui_2024"
+	@echo ""
+	@echo "  2. 重定向输入:"
+	@echo "     make ask-stdin AGENT=claude REG_ID=angui_2024 < queries/my_query.txt"
+	@echo ""
+	@echo "  3. Echo 输入:"
+	@echo "     echo '母线失压如何处理？' | make ask-stdin AGENT=claude"
+	@echo ""
+	@echo "$(BLUE)方案 3: Here-Document（Bash 原生，无需修改代码）$(NC)"
+	@echo "  make ask ASK_QUERY=\"\$$(cat <<'EOF'"
+	@echo "  请详细说明母线失压的处理流程，包括："
+	@echo "  1. 故障判断标准"
+	@echo "  2. 应急处理步骤"
+	@echo "  3. 恢复操作流程"
+	@echo "  EOF"
+	@echo "  )\" AGENT=claude REG_ID=angui_2024"
+	@echo ""
+	@echo "$(BLUE)方案 4: 直接使用 gridcode CLI$(NC)"
+	@echo "  gridcode ask \"\$$(cat queries/my_query.txt)\" -r angui_2024 --agent claude"
+	@echo ""
+	@echo "$(GREEN)========================================$(NC)"

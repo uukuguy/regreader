@@ -481,6 +481,19 @@ gridcode chat -r angui_2024 --agent pydantic   # Interactive mode
 gridcode ask "母线失压如何处理?" -r angui_2024   # Single query
 gridcode ask "..." --json                       # JSON output
 
+# Long query input methods (for complex multi-line queries)
+# Method 1: Read from file (recommended)
+gridcode ask "$(cat queries/query.txt)" -r angui_2024 --agent claude
+
+# Method 2: Here-document (Bash native)
+gridcode ask "$(cat <<'EOF'
+请详细说明母线失压的处理流程，包括：
+1. 故障判断标准
+2. 应急处理步骤
+3. 恢复操作流程
+EOF
+)" -r angui_2024 --agent claude
+
 # Framework-specific commands
 gridcode chat-claude -r angui_2024             # Claude SDK agent
 gridcode chat-pydantic -r angui_2024           # Pydantic AI agent
@@ -546,8 +559,13 @@ make verify-bash-fs               # Verify architecture (no pytest needed)
 
 # Agent commands
 make chat AGENT=pydantic REG=angui_2024
-make ask QUERY="..." AGENT=pydantic REG=angui_2024
+make ask ASK_QUERY="..." AGENT=pydantic REG=angui_2024
 make chat-orch AGENT=pydantic REG=angui_2024  # Orchestrator mode
+
+# Long query input commands
+make ask-file QUERY_FILE=queries/query.txt AGENT=claude REG=angui_2024
+cat queries/query.txt | make ask-stdin AGENT=pydantic REG=angui_2024
+make ask-examples  # Show usage examples for long query input
 
 # Framework-specific shortcuts
 make chat-claude REG=angui_2024
