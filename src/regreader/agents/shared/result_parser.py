@@ -95,6 +95,48 @@ def parse_tool_result(tool_name: str, result: Any) -> ToolResultSummary:
     return _parse_generic(result)
 
 
+def format_result_summary(summary: ToolResultSummary, sources: list[str]) -> str:
+    """格式化工具结果摘要为人类可读的字符串
+
+    Args:
+        summary: 工具结果摘要对象
+        sources: 来源列表
+
+    Returns:
+        格式化的摘要字符串
+    """
+    # 如果有结果数量，优先显示
+    if summary.result_count is not None and summary.result_count > 0:
+        if summary.result_type == "search_results":
+            return f"✓ 找到 {summary.result_count} 个结果"
+        elif summary.result_type == "chapters":
+            return f"✓ 返回 {summary.result_count} 个章节"
+        elif summary.result_type == "pages":
+            return f"✓ 读取 {summary.result_count} 页内容"
+        else:
+            return f"✓ 返回 {summary.result_count} 项结果"
+
+    # 如果有章节信息
+    if summary.chapter_count and summary.chapter_count > 0:
+        return f"✓ 涉及 {summary.chapter_count} 个章节"
+
+    # 如果有来源信息
+    if sources:
+        return f"✓ 来源: {', '.join(sources[:3])}" + (f" 等 {len(sources)} 个" if len(sources) > 3 else "")
+
+    # 如果有内容预览
+    if summary.content_preview:
+        preview = summary.content_preview[:80] + "..." if len(summary.content_preview) > 80 else summary.content_preview
+        return f"✓ {preview}"
+
+    # 如果有表格信息
+    if summary.table_info:
+        return f"✓ {summary.table_info}"
+
+    # 默认返回
+    return "✓ 完成"
+
+
 def _parse_smart_search(result: Any) -> ToolResultSummary:
     """解析 smart_search 结果
 

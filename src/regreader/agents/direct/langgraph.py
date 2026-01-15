@@ -47,7 +47,7 @@ from regreader.agents.prompts import (
     get_optimized_prompt_with_domain,
     get_simple_prompt,
 )
-from regreader.agents.shared.result_parser import parse_tool_result
+from regreader.agents.shared.result_parser import format_result_summary, parse_tool_result
 from regreader.core.config import get_settings
 from regreader.storage import PageStore
 
@@ -207,10 +207,20 @@ class LangGraphAgent(BaseRegReaderAgent):
 
     @property
     def name(self) -> str:
+        """Agent 名称
+
+        Returns:
+            Agent 标识名称
+        """
         return "LangGraphAgent"
 
     @property
     def model(self) -> str:
+        """当前使用的模型名称
+
+        Returns:
+            模型名称（如 'gpt-4' 或 'claude-sonnet-4'）
+        """
         return self._model_name
 
     @property
@@ -387,11 +397,15 @@ class LangGraphAgent(BaseRegReaderAgent):
                 # 使用结果解析器提取详细摘要
                 summary = parse_tool_result(tool_name, result)
 
+                # 生成人类可读的结果摘要字符串
+                result_summary_str = format_result_summary(summary, new_sources)
+
                 # 发送工具调用完成事件（带详细摘要和 API 统计）
                 await self._callback.on_event(
                     tool_end_event(
                         tool_name=tool_name,
                         duration_ms=duration_ms,
+                        result_summary=result_summary_str,  # 添加格式化的摘要字符串
                         result_count=summary.result_count,
                         sources=new_sources,
                         tool_input=kwargs,

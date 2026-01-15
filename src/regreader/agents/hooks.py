@@ -22,7 +22,7 @@ from regreader.agents.shared.events import (
     tool_error_event,
     tool_start_event,
 )
-from regreader.agents.shared.result_parser import parse_tool_result
+from regreader.agents.shared.result_parser import format_result_summary, parse_tool_result
 
 
 # ==================== 全局状态回调 ====================
@@ -39,6 +39,9 @@ def set_status_callback(callback: StatusCallback | None) -> None:
     """
     global _status_callback
     _status_callback = callback or NullCallback()
+
+    # DEBUG: 添加调试日志
+    logger.debug(f"[set_status_callback] 注册回调类型: {type(_status_callback).__name__}, 实例 ID: {id(_status_callback)}")
 
 
 def get_status_callback() -> StatusCallback:
@@ -209,11 +212,15 @@ async def post_tool_audit_hook(
     sources: list[str] = []
     _extract_sources_recursive(tool_response, sources)
 
+    # 生成人类可读的结果摘要字符串（使用共享函数）
+    result_summary_str = format_result_summary(summary, sources)
+
     # 发送完成事件（包含详细的结果摘要）
     event = tool_end_event(
         tool_name=tool_name,
         tool_id=tool_id,
         duration_ms=duration_ms,
+        result_summary=result_summary_str,  # 添加格式化的摘要字符串
         result_count=summary.result_count,
         sources=list(set(sources)),
         tool_input=tool_input,

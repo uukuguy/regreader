@@ -143,7 +143,7 @@ class RegReaderSettings(BaseSettings):
     anthropic_api_key: str = Field(
         default="",
         description="Anthropic API 密钥",
-        validation_alias="ANTHROPIC_API_KEY",
+        validation_alias=AliasChoices("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
     )
     anthropic_base_url: str = Field(
         default="",
@@ -164,6 +164,12 @@ class RegReaderSettings(BaseSettings):
     enable_agent_memory: bool = Field(
         default=False,
         description="是否启用 Agent 记忆系统（目录缓存 + 相关内容记忆）",
+    )
+
+    # CLI 显示配置
+    display_detail: Literal["auto", "summary", "full"] = Field(
+        default="auto",
+        description="返回值显示详细程度：auto（自适应）、summary（摘要）、full（完整）",
     )
 
     # MCP 工具集配置

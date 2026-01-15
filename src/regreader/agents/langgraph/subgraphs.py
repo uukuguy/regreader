@@ -131,10 +131,20 @@ class SubgraphBuilder:
 
     @property
     def name(self) -> str:
+        """Subagent 名称
+
+        Returns:
+            Subagent 标识名称
+        """
         return self._config.name
 
     @property
     def agent_type(self) -> SubagentType:
+        """Subagent 类型
+
+        Returns:
+            Subagent 类型枚举值
+        """
         return self._config.agent_type
 
     def _filter_and_convert_tools(self) -> list[StructuredTool]:
@@ -470,6 +480,13 @@ class BaseSubgraph(BaseSubagent):
         llm: ChatOpenAI,
         mcp_client: "RegReaderMCPClient",
     ):
+        """初始化 BaseSubgraph (Legacy)
+
+        Args:
+            config: Subagent 配置
+            llm: LangChain ChatOpenAI 实例
+            mcp_client: MCP 客户端实例
+        """
         super().__init__(config)
         self._builder = SubgraphBuilder(config, llm, mcp_client)
 

@@ -29,7 +29,7 @@ from regreader.agents.prompts import (
     get_optimized_prompt_with_domain,
     get_simple_prompt,
 )
-from regreader.agents.shared.result_parser import parse_tool_result
+from regreader.agents.shared.result_parser import format_result_summary, parse_tool_result
 from regreader.agents.session import SessionManager, SessionState
 from regreader.core.config import get_settings
 from regreader.mcp.tool_metadata import TOOL_METADATA
@@ -176,10 +176,20 @@ class ClaudeAgent(BaseRegReaderAgent):
 
     @property
     def name(self) -> str:
+        """Agent 名称
+
+        Returns:
+            Agent 标识名称
+        """
         return "ClaudeAgent"
 
     @property
     def model(self) -> str:
+        """当前使用的模型名称
+
+        Returns:
+            Claude 模型名称（如 'claude-sonnet-4'）
+        """
         return self._model
 
     def _get_regulations(self) -> list[dict]:
@@ -341,6 +351,10 @@ class ClaudeAgent(BaseRegReaderAgent):
         Returns:
             AgentResponse
         """
+        # DEBUG: 添加调试日志
+        from loguru import logger
+        logger.debug(f"[ClaudeAgent.chat] 使用回调类型: {type(self._callback).__name__}, 实例 ID: {id(self._callback)}")
+
         # 获取或创建会话
         session = self._session_manager.get_or_create(session_id)
         session.reset_per_query()
@@ -721,6 +735,9 @@ class ClaudeAgent(BaseRegReaderAgent):
         # 使用结果解析器提取详细摘要
         summary = parse_tool_result(tool_name, result)
 
+        # 生成人类可读的结果摘要字符串
+        result_summary_str = format_result_summary(summary, [])
+
         # 获取工具输入（从 session 中查找）
         tool_input = {}
         for tc in reversed(session.tool_calls):
@@ -736,6 +753,7 @@ class ClaudeAgent(BaseRegReaderAgent):
                 tool_name=tool_name,
                 tool_id=tool_id,
                 duration_ms=duration_ms,
+                result_summary=result_summary_str,  # 添加格式化的摘要字符串
                 result_count=summary.result_count,
                 tool_input=tool_input,
                 result_type=summary.result_type,

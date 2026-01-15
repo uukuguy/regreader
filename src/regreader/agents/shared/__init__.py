@@ -18,7 +18,9 @@ from .callbacks import (
     NullCallback,
     StatusCallback,
 )
+from .clean_display import CleanAgentStatusDisplay, DisplayMode
 from .display import AgentStatusDisplay
+from .enhanced_display import EnhancedAgentStatusDisplay
 from .events import (
     AgentEvent,
     AgentEventType,
@@ -51,6 +53,9 @@ __all__ = [
     "response_complete_event",
     # Display
     "AgentStatusDisplay",
+    "EnhancedAgentStatusDisplay",
+    "CleanAgentStatusDisplay",
+    "DisplayMode",
     # Memory
     "AgentMemory",
     "ContentChunk",

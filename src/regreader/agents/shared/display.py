@@ -41,7 +41,7 @@ class StatusIcons:
     STATS = "📊"
     PAGES = "📄"
     PREVIEW = "📝"
-    THINKING = "💭"
+    THINKING = "🤔"  # 改用更清晰的思考图标
     TABLE = "📋"
 
 
@@ -55,23 +55,23 @@ class StatusColors:
     SUCCESS = "green"
     ERROR = "red"
     WARNING = "yellow"
-    DIM = "gray" # "dim"
+    DIM = "dim"  # 恢复使用 dim 而不是 gray
     TOOL_NAME = "bold cyan"
-    PARAM_KEY = "dim cyan"
+    PARAM_KEY = "cyan"
     PARAM_VALUE = "white"
     COUNT = "bold green"
     DURATION = "dim"
     ITERATION = "bold yellow"
-    # 详细模式颜色 - 使用更明亮的颜色
-    THINKING_TIME = "yellow"  # 思考时间 - 黄色（步骤间总时间）
-    API_TIME = "magenta"  # API时间 - 紫红色（httpx测量的HTTP往返）
-    EXEC_TIME = "cyan"  # 执行时间 - 青色
-    RESULT_TYPE = "green"  # 移除 dim
-    PAGE_SOURCE = "blue"  # 移除 dim
-    CONTENT_PREVIEW = "white"  # 移除 dim
-    # 思考内容 - 使用明显但不刺眼的颜色
-    STREAMING_TEXT = "italic cyan"  # 使用 cyan 替代 dim
-    THINKING_TEXT = "bold white" # "italic magenta"  # 思考内容使用 magenta
+    # 详细模式颜色 - 更清晰的层次
+    THINKING_TIME = "yellow"
+    API_TIME = "magenta"
+    EXEC_TIME = "cyan"
+    RESULT_TYPE = "bold green"
+    PAGE_SOURCE = "bold blue"
+    CONTENT_PREVIEW = "white"
+    # 思考内容 - 使用更柔和的颜色
+    STREAMING_TEXT = "cyan"
+    THINKING_TEXT = "white"  # 思考内容使用普通白色，更易读
 
 
 # ==================== 核心显示类 ====================
@@ -124,6 +124,10 @@ class AgentStatusDisplay(StatusCallback):
         self._verbose = verbose
         self._show_duration = show_duration
         self._max_history = max_history
+
+        # DEBUG: 添加调试日志
+        from loguru import logger
+        logger.debug(f"[AgentStatusDisplay] 初始化完成，实例 ID: {id(self)}, verbose={verbose}")
 
         # 状态存储
         self._current_status: Text | None = None
@@ -604,6 +608,10 @@ class AgentStatusDisplay(StatusCallback):
         Args:
             event: Agent 事件
         """
+        # DEBUG: 添加调试日志
+        from loguru import logger
+        logger.debug(f"[AgentStatusDisplay.on_event] 收到事件: {event.event_type}, 实例 ID: {id(self)}")
+
         if event.event_type == AgentEventType.THINKING_START:
             # 记录查询开始时间
             if self._query_start_time is None:

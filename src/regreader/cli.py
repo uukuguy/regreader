@@ -548,11 +548,25 @@ def chat(
     orchestrator: bool = typer.Option(
         False, "--orchestrator", "-o", help="启用 Orchestrator 模式（Subagent 架构）"
     ),
+    display: str = typer.Option(
+        "simple",
+        "--display",
+        "-d",
+        help="显示模式: simple（默认）, clean（简洁）, enhanced（增强）"
+    ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="详细模式：显示完整工具参数和 DEBUG 日志"
     ),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="静默模式：只显示最终结果"
+    ),
+    enhanced: bool = typer.Option(
+        False, "--enhanced", "-e", help="增强显示模式：历史记录 + 树状结构 + 进度条"
+    ),
+    display_detail: str = typer.Option(
+        "auto",
+        "--display-detail",
+        help="返回值显示详细程度: auto（自适应，默认）, summary（摘要）, full（完整）"
     ),
 ):
     """与 Agent 对话（交互模式）
@@ -566,6 +580,8 @@ def chat(
     """
     from regreader.agents.shared.callbacks import NullCallback
     from regreader.agents.shared.display import AgentStatusDisplay
+    from regreader.agents.shared.enhanced_display import EnhancedAgentStatusDisplay
+    from regreader.agents.shared.clean_display import CleanAgentStatusDisplay, DisplayMode
     from regreader.agents.hooks import set_status_callback
     from regreader.agents.shared.mcp_connection import MCPConnectionConfig
 
@@ -581,7 +597,15 @@ def chat(
         # 创建状态显示回调
         if quiet:
             status_callback = NullCallback()
+        elif display == "clean":
+            # 简洁显示模式
+            mode = DisplayMode.VERBOSE if verbose else DisplayMode.COMPACT
+            status_callback = CleanAgentStatusDisplay(console, mode=mode)
+        elif display == "enhanced" or enhanced:
+            # 增强显示模式（兼容旧的 --enhanced 标志）
+            status_callback = EnhancedAgentStatusDisplay(console, verbose=verbose, detail_mode=display_detail)
         else:
+            # 默认简单显示模式
             status_callback = AgentStatusDisplay(console, verbose=verbose)
 
         # 默认模式下抑制 DEBUG 日志（包括初始化阶段）
@@ -625,7 +649,7 @@ def chat(
         try:
             while True:
                 try:
-                    user_input = console.input("[bold green]你: [/bold green]")
+                    user_input = console.input("[bold green]❯ [/bold green]")
                 except (KeyboardInterrupt, EOFError):
                     break
 
@@ -696,11 +720,25 @@ def ask(
         False, "--orchestrator", "-o", help="启用 Orchestrator 模式（Subagent 架构）"
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="JSON 格式输出"),
+    display: str = typer.Option(
+        "simple",
+        "--display",
+        "-d",
+        help="显示模式: simple（默认）, clean（简洁）, enhanced（增强）"
+    ),
+    display_detail: str = typer.Option(
+        "auto",
+        "--display-detail",
+        help="返回值显示详细程度: auto（自适应，默认）, summary（摘要）, full（完整）"
+    ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="详细模式：显示完整工具参数和 DEBUG 日志"
     ),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="静默模式：只显示最终结果"
+    ),
+    enhanced: bool = typer.Option(
+        False, "--enhanced", "-e", help="增强显示模式：历史记录 + 树状结构 + 进度条"
     ),
 ):
     """单次查询 Agent（非交互模式）
@@ -716,6 +754,8 @@ def ask(
     """
     from regreader.agents.shared.callbacks import NullCallback
     from regreader.agents.shared.display import AgentStatusDisplay
+    from regreader.agents.shared.enhanced_display import EnhancedAgentStatusDisplay
+    from regreader.agents.shared.clean_display import CleanAgentStatusDisplay, DisplayMode
     from regreader.agents.hooks import set_status_callback
     from regreader.agents.shared.mcp_connection import MCPConnectionConfig
 
@@ -731,7 +771,11 @@ def ask(
         # 创建状态显示回调（JSON 输出时自动静默）
         if quiet or json_output:
             status_callback = NullCallback()
-        else:
+        elif display == "enhanced" or enhanced:
+            status_callback = EnhancedAgentStatusDisplay(console, verbose=verbose, detail_mode=display_detail)
+        elif display == "clean":
+            status_callback = CleanAgentStatusDisplay(console, mode=DisplayMode.COMPACT, verbose=verbose)
+        else:  # display == "simple" or default
             status_callback = AgentStatusDisplay(console, verbose=verbose)
 
         # 默认模式下抑制 DEBUG 日志（包括初始化阶段）

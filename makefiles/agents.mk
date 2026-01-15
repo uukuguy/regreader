@@ -11,16 +11,16 @@ include makefiles/variables.mk
 # 通用 Agent 命令
 #----------------------------------------------------------------------
 
-chat: ## Start interactive chat (usage: make chat REG_ID=angui AGENT=claude MODE=mcp-sse)
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS)
+chat: ## Start interactive chat (usage: make chat REG_ID=angui AGENT=claude DISPLAY=clean)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS)
 
-ask: ## Single query to Agent (usage: make ask ASK_QUERY="母线失压如何处理?" AGENT=claude)
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS)
+ask: ## Single query to Agent (usage: make ask ASK_QUERY="母线失压如何处理?" AGENT=claude DISPLAY=clean)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-json: ## Single query with JSON output
 	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) --json
 
-ask-file: ## Query from file (usage: make ask-file QUERY_FILE=queries/query.txt AGENT=claude)
+ask-file: ## Query from file (usage: make ask-file QUERY_FILE=queries/query.txt AGENT=claude DISPLAY=clean)
 	@if [ -z "$(QUERY_FILE)" ]; then \
 		echo "$(YELLOW)错误: 必须指定 QUERY_FILE 参数$(NC)"; \
 		echo "用法: make ask-file QUERY_FILE=queries/query.txt AGENT=claude REG_ID=angui_2024"; \
@@ -35,9 +35,9 @@ ask-file: ## Query from file (usage: make ask-file QUERY_FILE=queries/query.txt 
 		exit 1; \
 	fi
 	@echo "$(BLUE)从文件读取查询: $(QUERY_FILE)$(NC)"
-	$(REGREADER_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) -- "$$(cat $(QUERY_FILE))"
+	$(REGREADER_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS) -- "$$(cat $(QUERY_FILE))"
 
-ask-stdin: ## Query from stdin (usage: cat query.txt | make ask-stdin AGENT=claude)
+ask-stdin: ## Query from stdin (usage: cat query.txt | make ask-stdin AGENT=claude DISPLAY=clean)
 	@echo "$(BLUE)从 stdin 读取查询...$(NC)"
 	@read -r -d '' QUERY || true; \
 	if [ -z "$$QUERY" ]; then \
@@ -46,13 +46,13 @@ ask-stdin: ## Query from stdin (usage: cat query.txt | make ask-stdin AGENT=clau
 		echo "或者: echo '查询内容' | make ask-stdin AGENT=claude"; \
 		exit 1; \
 	fi; \
-	$(REGREADER_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) -- "$$QUERY"
+	$(REGREADER_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS) -- "$$QUERY"
 
-chat-orch: ## Start chat with Orchestrator (usage: make chat-orch REG_ID=angui AGENT=claude)
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --orchestrator $(AGENT_FLAGS)
+chat-orch: ## Start chat with Orchestrator (usage: make chat-orch REG_ID=angui AGENT=claude DISPLAY=clean)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
-ask-orch: ## Single query with Orchestrator (usage: make ask-orch ASK_QUERY="表6-2注1的内容")
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) --orchestrator $(AGENT_FLAGS)
+ask-orch: ## Single query with Orchestrator (usage: make ask-orch ASK_QUERY="表6-2注1的内容" DISPLAY=clean)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 #----------------------------------------------------------------------
 # Agent 快捷别名（向后兼容）
@@ -60,59 +60,59 @@ ask-orch: ## Single query with Orchestrator (usage: make ask-orch ASK_QUERY="表
 
 # Chat aliases
 chat-claude: ## Start chat with Claude Agent SDK
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude --display $(DISPLAY) $(AGENT_FLAGS)
 
 chat-pydantic: ## Start chat with Pydantic AI Agent
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic --display $(DISPLAY) $(AGENT_FLAGS)
 
 chat-langgraph: ## Start chat with LangGraph Agent
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph --display $(DISPLAY) $(AGENT_FLAGS)
 
 # Ask aliases
 ask-claude: ## Single query with Claude Agent
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-pydantic: ## Single query with Pydantic AI Agent
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-langgraph: ## Single query with LangGraph Agent
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph --display $(DISPLAY) $(AGENT_FLAGS)
 
 # Orchestrator chat aliases
 chat-orch-claude: ## Start chat with Claude Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 chat-orch-pydantic: ## Start chat with Pydantic Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 chat-orch-langgraph: ## Start chat with LangGraph Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 # Orchestrator ask aliases
 ask-orch-claude: ## Single query with Claude Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-orch-pydantic: ## Single query with Pydantic Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-orch-langgraph: ## Single query with LangGraph Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph --orchestrator $(AGENT_FLAGS)
+	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 #----------------------------------------------------------------------
 # SSE Mode 快捷方式（需要先运行 'make serve'）
 #----------------------------------------------------------------------
 
-chat-mcp-sse: ## Chat via MCP SSE (usage: make chat-mcp-sse AGENT=claude)
-	$(MAKE) chat MODE=mcp-sse AGENT="$(AGENT)" REG_ID="$(REG_ID)"
+chat-mcp-sse: ## Chat via MCP SSE (usage: make chat-mcp-sse AGENT=claude DISPLAY=clean)
+	$(MAKE) chat MODE=mcp-sse AGENT="$(AGENT)" REG_ID="$(REG_ID)" DISPLAY="$(DISPLAY)"
 
 chat-claude-sse: ## Chat with Claude Agent via MCP SSE
-	$(MAKE) chat-claude MODE=mcp-sse REG_ID="$(REG_ID)"
+	$(MAKE) chat-claude MODE=mcp-sse REG_ID="$(REG_ID)" DISPLAY="$(DISPLAY)"
 
 chat-pydantic-sse: ## Chat with Pydantic AI Agent via MCP SSE
-	$(MAKE) chat-pydantic MODE=mcp-sse REG_ID="$(REG_ID)"
+	$(MAKE) chat-pydantic MODE=mcp-sse REG_ID="$(REG_ID)" DISPLAY="$(DISPLAY)"
 
 chat-langgraph-sse: ## Chat with LangGraph Agent via MCP SSE
-	$(MAKE) chat-langgraph MODE=mcp-sse REG_ID="$(REG_ID)"
+	$(MAKE) chat-langgraph MODE=mcp-sse REG_ID="$(REG_ID)" DISPLAY="$(DISPLAY)"
 
 #----------------------------------------------------------------------
 # 长文本查询输入方式示例

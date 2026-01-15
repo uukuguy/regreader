@@ -39,7 +39,7 @@ from regreader.agents.prompts import (
     get_optimized_prompt_with_domain,
     get_simple_prompt,
 )
-from regreader.agents.shared.result_parser import parse_tool_result
+from regreader.agents.shared.result_parser import format_result_summary, parse_tool_result
 from regreader.core.config import get_settings
 from regreader.storage import PageStore
 
@@ -216,6 +216,16 @@ class PydanticAIAgent(BaseRegReaderAgent):
         # dynamic=True 确保每次运行时重新构建（包含记忆上下文）
         @self._agent.system_prompt(dynamic=True)
         def dynamic_system_prompt(ctx: RunContext[AgentDependencies]) -> str:
+            """动态构建系统提示词
+
+            每次运行时重新构建系统提示，包含最新的记忆上下文。
+
+            Args:
+                ctx: Pydantic AI 运行上下文
+
+            Returns:
+                完整的系统提示词字符串
+            """
             return self._build_system_prompt()
 
         # 消息历史（用于多轮对话）
@@ -442,12 +452,16 @@ class PydanticAIAgent(BaseRegReaderAgent):
                     # 使用结果解析器提取详细摘要
                     summary = parse_tool_result(tool_name, result_content)
 
+                    # 生成人类可读的结果摘要字符串
+                    result_summary_str = format_result_summary(summary, [])
+
                     # 发送工具调用完成事件（包含 API 统计）
                     await self._callback.on_event(
                         tool_end_event(
                             tool_name=tool_name,
                             tool_id=tool_call_id,
                             duration_ms=duration_ms,
+                            result_summary=result_summary_str,  # 添加格式化的摘要字符串
                             result_count=summary.result_count,
                             tool_input=tool_input,
                             result_type=summary.result_type,
@@ -475,10 +489,20 @@ class PydanticAIAgent(BaseRegReaderAgent):
 
     @property
     def name(self) -> str:
+        """Agent 名称
+
+        Returns:
+            Agent 标识名称
+        """
         return "PydanticAIAgent"
 
     @property
     def model(self) -> str:
+        """当前使用的模型名称
+
+        Returns:
+            模型名称（如 'openai:gpt-4' 或 'ollama:qwen'）
+        """
         return self._model_name
 
     async def _ensure_connected(self) -> None:
