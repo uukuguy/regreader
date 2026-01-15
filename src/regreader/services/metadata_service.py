@@ -9,7 +9,7 @@ from typing import TypedDict
 
 from loguru import logger
 
-from regreader.config import get_settings
+from regreader.core.config import get_settings
 
 
 class RegulationMetadata(TypedDict):

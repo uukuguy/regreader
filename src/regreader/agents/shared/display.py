@@ -19,9 +19,9 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
-from regreader.agents.callbacks import StatusCallback
-from regreader.agents.events import AgentEvent, AgentEventType
-from regreader.agents.result_parser import ToolResultSummary, format_page_sources
+from regreader.agents.shared.callbacks import StatusCallback
+from regreader.agents.shared.events import AgentEvent, AgentEventType
+from regreader.agents.shared.result_parser import ToolResultSummary, format_page_sources
 from regreader.mcp.tool_metadata import get_tool_metadata
 
 
@@ -309,18 +309,17 @@ class AgentStatusDisplay(StatusCallback):
         text.append(f"执行 {self._format_duration(duration_ms)}", style=StatusColors.EXEC_TIME)
         text.append(")", style=StatusColors.DIM)
 
-        # 详细结果摘要（仅 verbose 模式）
-        if self._verbose:
-            detail_lines = self._format_verbose_result_details(
-                result_count=result_count,
-                result_type=result_type,
-                chapter_count=chapter_count,
-                page_sources=page_sources,
-                content_preview=content_preview,
-            )
-            if detail_lines:
-                text.append("\n")
-                text.append_text(detail_lines)
+        # 详细结果摘要（默认显示）
+        detail_lines = self._format_verbose_result_details(
+            result_count=result_count,
+            result_type=result_type,
+            chapter_count=chapter_count,
+            page_sources=page_sources,
+            content_preview=content_preview,
+        )
+        if detail_lines:
+            text.append("\n")
+            text.append_text(detail_lines)
 
         return text
 

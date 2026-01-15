@@ -2,10 +2,10 @@
 import asyncio
 from rich.console import Console
 
-from regreader.agents.display import AgentStatusDisplay
-from regreader.agents.events import tool_start_event, tool_end_event, AgentEventType
+from regreader.agents.shared.display import AgentStatusDisplay
+from regreader.agents.shared.events import tool_start_event, tool_end_event, AgentEventType
 from regreader.agents.hooks import pre_tool_audit_hook
-from regreader.agents.callbacks import NullCallback
+from regreader.agents.shared.callbacks import NullCallback
 
 
 async def test_decision_hint_flow():

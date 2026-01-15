@@ -22,10 +22,10 @@ Subagent 架构（Orchestrator 模式）：
 """
 
 from .base import AgentResponse, BaseRegReaderAgent
-from .callbacks import CompositeCallback, LoggingCallback, NullCallback, StatusCallback
-from .claude_agent import ClaudeAgent
-from .display import AgentStatusDisplay, SimpleStatusDisplay
-from .events import (
+from .shared.callbacks import CompositeCallback, LoggingCallback, NullCallback, StatusCallback
+from .direct.claude import ClaudeAgent
+from .shared.display import AgentStatusDisplay, SimpleStatusDisplay
+from .shared.events import (
     AgentEvent,
     AgentEventType,
     iteration_event,
@@ -43,12 +43,12 @@ from .hooks import (
     set_status_callback,
     source_extraction_hook,
 )
-from .langgraph_agent import LangGraphAgent
-from .langgraph import LangGraphOrchestrator
-from .pydantic import PydanticOrchestrator
-from .claude import ClaudeOrchestrator
-from .mcp_connection import MCPConnectionConfig, MCPConnectionManager, configure_mcp, get_mcp_manager
-from .pydantic_agent import PydanticAIAgent
+from .direct.langgraph import LangGraphAgent
+from .orchestrated.langgraph import LangGraphOrchestrator
+from .orchestrated.pydantic import PydanticOrchestrator
+from .orchestrated.claude import ClaudeOrchestrator
+from .shared.mcp_connection import MCPConnectionConfig, MCPConnectionManager, configure_mcp, get_mcp_manager
+from .direct.pydantic import PydanticAIAgent
 from .session import SessionManager, SessionState
 
 __all__ = [

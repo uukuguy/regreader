@@ -14,7 +14,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
 
-from regreader.agents.mcp_config import MCP_SERVER_ARGS, get_mcp_command
+from regreader.agents.shared.mcp_config import MCP_SERVER_ARGS, get_mcp_command
 
 
 class RegReaderMCPClient:

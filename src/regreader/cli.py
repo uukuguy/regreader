@@ -484,7 +484,7 @@ def read_chapter(
     """读取指定章节的完整内容"""
     from rich.markdown import Markdown
 
-    from regreader.exceptions import ChapterNotFoundError, RegulationNotFoundError
+    from regreader.core.exceptions import ChapterNotFoundError, RegulationNotFoundError
 
     tools = get_tools()
 
@@ -564,10 +564,10 @@ def chat(
         gridcode chat -r angui_2024             # 限定在安规中查询
         gridcode chat -o                        # 使用 Orchestrator 模式
     """
-    from regreader.agents.callbacks import NullCallback
-    from regreader.agents.display import AgentStatusDisplay
+    from regreader.agents.shared.callbacks import NullCallback
+    from regreader.agents.shared.display import AgentStatusDisplay
     from regreader.agents.hooks import set_status_callback
-    from regreader.agents.mcp_connection import MCPConnectionConfig
+    from regreader.agents.shared.mcp_connection import MCPConnectionConfig
 
     async def run_chat():
         from loguru import logger
@@ -714,10 +714,10 @@ def ask(
         gridcode ask "什么是接地?" -q                # 静默模式
         gridcode ask "表6-2注1的内容" -o             # Orchestrator 模式
     """
-    from regreader.agents.callbacks import NullCallback
-    from regreader.agents.display import AgentStatusDisplay
+    from regreader.agents.shared.callbacks import NullCallback
+    from regreader.agents.shared.display import AgentStatusDisplay
     from regreader.agents.hooks import set_status_callback
-    from regreader.agents.mcp_connection import MCPConnectionConfig
+    from regreader.agents.shared.mcp_connection import MCPConnectionConfig
 
     async def run_ask():
         from loguru import logger
@@ -870,7 +870,7 @@ def inspect(
     show_vectors: bool = typer.Option(False, "--show-vectors", help="显示向量数据（默认隐藏）"),
 ):
     """检查指定页面在不同数据源中的原始数据"""
-    from regreader.exceptions import PageNotFoundError, RegulationNotFoundError
+    from regreader.core.exceptions import PageNotFoundError, RegulationNotFoundError
     from regreader.services.inspect import InspectService
     from regreader.services.inspect_display import InspectDisplay
 
@@ -917,7 +917,7 @@ def toc(
     from rich.text import Text
     from rich.tree import Tree
 
-    from regreader.exceptions import RegulationNotFoundError
+    from regreader.core.exceptions import RegulationNotFoundError
     from regreader.storage import PageStore
 
     page_store = PageStore()
@@ -1126,7 +1126,7 @@ def read_pages(
     """读取指定页面范围的内容"""
     from rich.markdown import Markdown
 
-    from regreader.exceptions import InvalidPageRangeError, RegulationNotFoundError
+    from regreader.core.exceptions import InvalidPageRangeError, RegulationNotFoundError
 
     tools = get_tools()
 
@@ -1161,7 +1161,7 @@ def chapter_structure(
     """获取完整章节结构"""
     import json
 
-    from regreader.exceptions import RegulationNotFoundError
+    from regreader.core.exceptions import RegulationNotFoundError
 
     tools = get_tools()
 
@@ -1208,7 +1208,7 @@ def page_info(
     page_num: int = typer.Option(..., "--page", "-p", help="页码"),
 ):
     """获取页面章节信息"""
-    from regreader.exceptions import PageNotFoundError, RegulationNotFoundError
+    from regreader.core.exceptions import PageNotFoundError, RegulationNotFoundError
 
     tools = get_tools()
 
@@ -1254,7 +1254,7 @@ def lookup_annotation(
     """查找注释内容（支持变体匹配：注1/注①/注一）"""
     from rich.markdown import Markdown
 
-    from regreader.exceptions import AnnotationNotFoundError, RegulationNotFoundError
+    from regreader.core.exceptions import AnnotationNotFoundError, RegulationNotFoundError
 
     tools = get_tools()
 
@@ -1283,7 +1283,7 @@ def search_tables(
     limit: int = typer.Option(10, "--limit", "-l", help="结果数量"),
 ):
     """搜索表格（支持精确关键词和模糊语义搜索）"""
-    from regreader.exceptions import RegulationNotFoundError
+    from regreader.core.exceptions import RegulationNotFoundError
 
     tools = get_tools()
 
@@ -1337,7 +1337,7 @@ def resolve_reference(
     """解析交叉引用"""
     from rich.markdown import Markdown
 
-    from regreader.exceptions import ReferenceResolutionError, RegulationNotFoundError
+    from regreader.core.exceptions import ReferenceResolutionError, RegulationNotFoundError
 
     tools = get_tools()
 
@@ -1381,7 +1381,7 @@ def search_annotations(
     annotation_type: str | None = typer.Option(None, "--type", "-t", help="注释类型: note(注x) / plan(方案x)"),
 ):
     """搜索所有注释"""
-    from regreader.exceptions import RegulationNotFoundError
+    from regreader.core.exceptions import RegulationNotFoundError
 
     tools = get_tools()
 
@@ -1422,7 +1422,7 @@ def get_table(
     """获取完整表格内容（按表格ID）"""
     from rich.markdown import Markdown
 
-    from regreader.exceptions import RegulationNotFoundError, TableNotFoundError
+    from regreader.core.exceptions import RegulationNotFoundError, TableNotFoundError
 
     tools = get_tools()
 
@@ -1470,7 +1470,7 @@ def get_block_context(
     from rich.markdown import Markdown
     from rich.panel import Panel
 
-    from regreader.exceptions import RegulationNotFoundError
+    from regreader.core.exceptions import RegulationNotFoundError
 
     tools = get_tools()
 
@@ -1531,7 +1531,7 @@ def find_similar(
     same_page: bool = typer.Option(False, "--same-page", help="包含同页内容"),
 ):
     """查找语义相似的内容"""
-    from regreader.exceptions import RegulationNotFoundError
+    from regreader.core.exceptions import RegulationNotFoundError
 
     if not query and not block_id:
         console.print("[red]错误: 必须提供 --query 或 --block 参数[/red]")
@@ -1580,7 +1580,7 @@ def compare_sections(
     """比较两个章节的内容"""
     import json
 
-    from regreader.exceptions import ChapterNotFoundError, RegulationNotFoundError
+    from regreader.core.exceptions import ChapterNotFoundError, RegulationNotFoundError
 
     tools = get_tools()
 
@@ -1633,7 +1633,7 @@ def build_table_index(
     """为指定规程构建表格索引（FTS5 + 向量索引）"""
     from rich.progress import Progress, SpinnerColumn, TextColumn
 
-    from regreader.exceptions import RegulationNotFoundError
+    from regreader.core.exceptions import RegulationNotFoundError
     from regreader.index.table_indexer import TableIndexer
 
     indexer = TableIndexer()

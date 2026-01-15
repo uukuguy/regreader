@@ -68,7 +68,7 @@ class MCPConnectionConfig:
         """验证配置"""
         if self.transport == "sse" and not self.server_url:
             # SSE 模式需要 URL，尝试从 settings 获取默认值
-            from regreader.config import get_settings
+            from regreader.core.config import get_settings
 
             settings = get_settings()
             if settings.mcp_server_url:
@@ -86,7 +86,7 @@ class MCPConnectionConfig:
         Returns:
             MCPConnectionConfig 实例
         """
-        from regreader.config import get_settings
+        from regreader.core.config import get_settings
 
         settings = get_settings()
 

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from regreader.infrastructure.file_context import FileContext
 from regreader.subagents.base import BaseSubagent, SubagentContext
 from regreader.subagents.config import REGSEARCH_AGENT_CONFIG, SubagentConfig
-from regreader.orchestrator.result import SubagentResult
+from regreader.orchestration.result import SubagentResult
 
 if TYPE_CHECKING:
     from regreader.mcp.client import MCPClient

@@ -15,8 +15,8 @@ from typing import Any, Callable
 from loguru import logger
 from mcp.server.fastmcp import FastMCP
 
-from regreader.config import get_settings
-from regreader.exceptions import RegReaderError
+from regreader.core.config import get_settings
+from regreader.core.exceptions import RegReaderError
 from regreader.mcp.tool_metadata import TOOL_METADATA, get_enabled_tools
 from regreader.mcp.tools import RegReaderTools
 

@@ -10,7 +10,7 @@ from regreader.infrastructure.file_context import FileContext
 from regreader.subagents.base import SubagentContext
 from regreader.subagents.config import REGSEARCH_AGENT_CONFIG
 from regreader.subagents.regsearch import RegSearchSubagent
-from regreader.subagents.result import SubagentResult
+from regreader.orchestration.result import SubagentResult
 
 
 class TestRegSearchSubagent:

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from regreader.config import get_settings
+from regreader.core.config import get_settings
 from regreader.storage.models import TableEntry, TableRegistry, TableSearchResult
 
 # 当前模式版本号

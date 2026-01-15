@@ -29,9 +29,9 @@ Example:
     >>> await coordinator.write_result(content, sources, tool_calls)
 """
 
-from regreader.orchestrator.aggregator import ResultAggregator
-from regreader.orchestrator.analyzer import QueryAnalyzer
-from regreader.orchestrator.coordinator import Coordinator, SessionState
+from regreader.orchestration.aggregator import ResultAggregator
+from regreader.orchestration.analyzer import QueryAnalyzer
+from regreader.orchestration.coordinator import Coordinator, SessionState
 
 __all__ = [
     "Coordinator",

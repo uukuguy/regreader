@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from regreader.config import get_settings
+from regreader.core.config import get_settings
 from regreader.index.base import BaseVectorIndex
 from regreader.storage.models import PageDocument, SearchResult
 

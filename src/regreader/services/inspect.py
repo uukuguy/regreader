@@ -13,7 +13,7 @@ import lancedb
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from regreader.config import get_settings
+from regreader.core.config import get_settings
 from regreader.storage import PageStore
 from regreader.storage.models import PageDocument
 

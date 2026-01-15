@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from regreader.agents.claude.orchestrator import ClaudeOrchestrator
+from regreader.agents.orchestrated.claude import ClaudeOrchestrator
 
 
 # 测试查询集合（覆盖不同任务类型）

@@ -30,8 +30,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from regreader.agents.base import AgentResponse, BaseRegReaderAgent
-from regreader.agents.callbacks import NullCallback, StatusCallback
-from regreader.agents.events import (
+from regreader.agents.shared.callbacks import NullCallback, StatusCallback
+from regreader.agents.shared.events import (
     answer_generation_end_event,
     response_complete_event,
     text_delta_event,
@@ -39,16 +39,16 @@ from regreader.agents.events import (
     tool_end_event,
     tool_start_event,
 )
-from regreader.agents.llm_timing import LLMTimingCollector
-from regreader.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
-from regreader.agents.memory import AgentMemory
+from regreader.agents.shared.llm_timing import LLMTimingCollector
+from regreader.agents.shared.mcp_connection import MCPConnectionConfig, get_mcp_manager
+from regreader.agents.shared.memory import AgentMemory
 from regreader.agents.prompts import (
     get_full_prompt,
     get_optimized_prompt_with_domain,
     get_simple_prompt,
 )
-from regreader.agents.result_parser import parse_tool_result
-from regreader.config import get_settings
+from regreader.agents.shared.result_parser import parse_tool_result
+from regreader.core.config import get_settings
 from regreader.storage import PageStore
 
 if TYPE_CHECKING:

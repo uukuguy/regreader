@@ -26,17 +26,18 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from regreader.agents.base import AgentResponse, BaseRegReaderAgent
-from regreader.agents.callbacks import NullCallback, StatusCallback
-from regreader.agents.events import (
+from regreader.agents.base import AgentResponse
+from regreader.agents.orchestrated.base import BaseOrchestrator
+from regreader.agents.shared.callbacks import NullCallback, StatusCallback
+from regreader.agents.shared.events import (
     response_complete_event,
     text_delta_event,
     thinking_event,
 )
-from regreader.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
-from regreader.config import get_settings
-from regreader.orchestrator.analyzer import QueryAnalyzer
-from regreader.orchestrator.coordinator import Coordinator
+from regreader.agents.shared.mcp_connection import MCPConnectionConfig, get_mcp_manager
+from regreader.core.config import get_settings
+from regreader.orchestration.analyzer import QueryAnalyzer
+from regreader.orchestration.coordinator import Coordinator
 from regreader.subagents.config import (
     DISCOVERY_AGENT_CONFIG,
     REFERENCE_AGENT_CONFIG,
@@ -114,8 +115,8 @@ class OrchestratorDependencies:
 # ============================================================================
 
 
-class PydanticOrchestrator(BaseRegReaderAgent):
-    """Pydantic AI 协调器
+class PydanticOrchestrator(BaseOrchestrator):
+    """Pydantic AI 协调器（继承 BaseOrchestrator）
 
     使用 Pydantic AI 原生的 @tool 委托模式实现 LLM 自主选择子智能体。
 
@@ -129,6 +130,7 @@ class PydanticOrchestrator(BaseRegReaderAgent):
     - LLM 自主决策：根据 @tool 的 docstring 选择子智能体
     - 上下文隔离：每个 Subagent 持有独立的 Agent 实例
     - 原生委托：使用 Pydantic AI 的 @tool 机制
+    - 继承 BaseOrchestrator：共享上下文构建、来源提取等基础设施
 
     Usage:
         async with PydanticOrchestrator(reg_id="angui_2024") as agent:
@@ -155,7 +157,12 @@ class PydanticOrchestrator(BaseRegReaderAgent):
             enabled_subagents: 启用的 Subagent 列表
             coordinator: 协调器实例（可选，用于文件系统追踪）
         """
-        super().__init__(reg_id)
+        # 调用 BaseOrchestrator 构造函数
+        super().__init__(
+            reg_id=reg_id,
+            use_coordinator=coordinator is not None,
+            callback=status_callback or NullCallback(),
+        )
 
         if not HAS_PYDANTIC_AI:
             raise ImportError(
@@ -170,9 +177,6 @@ class PydanticOrchestrator(BaseRegReaderAgent):
         if enabled_subagents is None:
             enabled_subagents = ["search", "table", "reference"]
         self._enabled_subagents = set(enabled_subagents)
-
-        # 状态回调
-        self._callback = status_callback or NullCallback()
 
         # 设置环境变量
         os.environ["OPENAI_API_KEY"] = settings.llm_api_key
@@ -201,13 +205,6 @@ class PydanticOrchestrator(BaseRegReaderAgent):
         self._mcp_server: MCPServerStdio | None = None
         self._main_agent: Agent | None = None
         self._subagents: dict[SubagentType, Agent] = {}
-
-        # 工具调用追踪
-        self._tool_calls: list[dict] = []
-        self._sources: list[str] = []
-
-        # 连接状态
-        self._initialized = False
 
         logger.info(
             f"PydanticOrchestrator initialized: model={self._model}, "
@@ -306,7 +303,7 @@ class PydanticOrchestrator(BaseRegReaderAgent):
             领域特定提示词
         """
         # 获取允许的工具列表
-        from regreader.agents.mcp_config import get_tool_name
+        from regreader.agents.shared.mcp_config import get_tool_name
         allowed_tools = [get_tool_name(name) for name in config.tools]
         tools_display = ", ".join(allowed_tools) if allowed_tools else "无"
 
@@ -531,11 +528,34 @@ Args:
         Returns:
             Subagent 的回答内容
         """
+        from regreader.agents.shared.events import phase_change_event, tool_end_event, tool_start_event
+
         deps = ctx.deps
         subagent = self._subagents.get(agent_type)
 
         if subagent is None:
             return f"错误: {agent_type.value} 专家代理未启用"
+
+        # 发送阶段变化事件（子智能体切换）
+        await self._callback.on_event(
+            phase_change_event(
+                phase=f"subagent_{agent_type.value}",
+                description=f"切换到 {agent_type.value} 专家代理",
+            )
+        )
+
+        # 发送工具调用开始事件（将子智能体调用视为工具调用）
+        tool_name = f"invoke_{agent_type.value}"
+        tool_id = f"{agent_type.value}_{id(query)}"
+        start_time = datetime.now()
+
+        await self._callback.on_event(
+            tool_start_event(
+                tool_name=tool_name,
+                tool_input={"query": query, "agent_type": agent_type.value},
+                tool_id=tool_id,
+            )
+        )
 
         # 创建 Subagent 依赖
         subagent_deps = SubagentDependencies(
@@ -555,142 +575,86 @@ Args:
             # 提取来源信息
             self._extract_sources_from_result(result)
 
+            # 计算执行耗时
+            duration = datetime.now() - start_time
+            duration_ms = duration.total_seconds() * 1000
+
             # 返回内容
             content = result.output if isinstance(result.output, str) else str(result.output)
+
+            # 发送工具调用完成事件
+            await self._callback.on_event(
+                tool_end_event(
+                    tool_name=tool_name,
+                    tool_id=tool_id,
+                    duration_ms=duration_ms,
+                    result_summary=content[:100] if content else "",
+                    tool_input={"query": query, "agent_type": agent_type.value},
+                )
+            )
+
             return content
 
         except Exception as e:
             logger.exception(f"Subagent {agent_type.value} execution error: {e}")
+
+            # 发送工具调用错误事件
+            from regreader.agents.shared.events import tool_error_event
+
+            await self._callback.on_event(
+                tool_error_event(
+                    tool_name=tool_name,
+                    error=str(e),
+                    tool_id=tool_id,
+                )
+            )
+
             return f"错误: {str(e)}"
 
-    async def chat(self, message: str) -> AgentResponse:
-        """与协调器对话
+    async def _execute_orchestration(
+        self,
+        query: str,
+        context_info: str,
+    ) -> str:
+        """执行 Pydantic AI 编排（Delegation Pattern）
 
         Args:
-            message: 用户消息
+            query: 用户查询
+            context_info: 上下文信息
 
         Returns:
-            AgentResponse
+            最终回答内容
         """
-        # 确保初始化
-        await self._ensure_initialized()
+        # 构建完整提示
+        enhanced_message = f"{query}\n\n{context_info}" if context_info else query
 
-        # 重置追踪
-        self._tool_calls = []
-        self._sources = []
+        # 构建依赖
+        deps = OrchestratorDependencies(
+            reg_id=self.reg_id,
+            mcp_server=self._mcp_server,
+            subagent_agents={},  # 延迟初始化
+            hints={},  # hints 已经在 context_info 中
+        )
 
-        start_time = time.time()
+        # 执行 Main Agent
+        result = await self._main_agent.run(enhanced_message, deps=deps)
 
-        # 发送思考开始事件
-        await self._callback.on_event(thinking_event(start=True))
+        # 提取工具调用和来源
+        self._extract_tool_calls_and_sources(result)
 
-        try:
-            # 1. 提取查询提示
-            hints = await self._analyzer.extract_hints(message)
-            logger.debug(f"Extracted hints: {hints}")
+        # 获取输出内容
+        content = result.output if isinstance(result.output, str) else str(result.output)
 
-            # 2. 如果使用 Coordinator，记录查询
-            if self._coordinator:
-                await self._coordinator.log_query(message, hints, self.reg_id)
+        # 记录使用量
+        usage = result.usage()
+        logger.debug(
+            f"Usage: input_tokens={usage.input_tokens}, "
+            f"output_tokens={usage.output_tokens}, "
+            f"requests={usage.requests}, "
+            f"tool_calls={usage.tool_calls}"
+        )
 
-            # 3. 构建上下文信息（注入到查询中）
-            context_info = self._build_context_info(hints)
-            enhanced_message = f"{message}\n\n{context_info}" if context_info else message
-
-            # 3. 构建依赖
-            deps = OrchestratorDependencies(
-                reg_id=self.reg_id,
-                mcp_server=self._mcp_server,
-                subagent_agents={},  # 延迟初始化
-                hints=hints,
-            )
-
-            # 4. 执行 Main Agent
-            result = await self._main_agent.run(enhanced_message, deps=deps)
-
-            # 提取工具调用和来源
-            self._extract_tool_calls_and_sources(result)
-
-            # 获取输出内容
-            content = result.output if isinstance(result.output, str) else str(result.output)
-
-            # 发送文本事件
-            if content:
-                await self._callback.on_event(text_delta_event(content))
-
-            # 发送思考结束事件
-            await self._callback.on_event(thinking_event(start=False))
-
-            # 计算耗时
-            end_time = time.time()
-            duration_ms = (end_time - start_time) * 1000
-
-            # 发送完成事件
-            await self._callback.on_event(
-                response_complete_event(
-                    total_tool_calls=len(self._tool_calls),
-                    total_sources=len(set(self._sources)),
-                    duration_ms=duration_ms,
-                )
-            )
-
-            # 记录使用量
-            usage = result.usage()
-            logger.debug(
-                f"Usage: input_tokens={usage.input_tokens}, "
-                f"output_tokens={usage.output_tokens}, "
-                f"requests={usage.requests}, "
-                f"tool_calls={usage.tool_calls}"
-            )
-
-            # 如果使用 Coordinator，写入结果
-            if self._coordinator:
-                await self._coordinator.write_result(
-                    content,
-                    list(set(self._sources)),
-                    self._tool_calls,
-                )
-
-            return AgentResponse(
-                content=content,
-                sources=list(set(self._sources)),
-                tool_calls=self._tool_calls,
-            )
-
-        except Exception as e:
-            logger.exception(f"Orchestrator execution error: {e}")
-
-            await self._callback.on_event(thinking_event(start=False))
-
-            return AgentResponse(
-                content=f"查询失败: {str(e)}",
-                sources=list(set(self._sources)),
-                tool_calls=self._tool_calls,
-            )
-
-    def _build_context_info(self, hints: dict) -> str:
-        """构建上下文信息字符串
-
-        将提取的 hints 和默认 reg_id 格式化为上下文信息。
-
-        Args:
-            hints: 提取的提示信息
-
-        Returns:
-            上下文信息字符串
-        """
-        context_parts = []
-
-        # 添加默认规程
-        if self.reg_id:
-            context_parts.append(f"默认规程: {self.reg_id}")
-
-        # 添加提示信息
-        if hints:
-            hints_lines = [f"- {k}: {v}" for k, v in hints.items()]
-            context_parts.append("查询提示:\n" + "\n".join(hints_lines))
-
-        return "\n\n".join(context_parts) if context_parts else ""
+        return content
 
     def _extract_tool_calls_and_sources(self, result: Any) -> None:
         """从结果中提取工具调用和来源"""

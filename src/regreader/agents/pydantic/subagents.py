@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from regreader.subagents.config import SubagentConfig, SubagentType
-from regreader.orchestrator.result import SubagentResult
+from regreader.orchestration.result import SubagentResult
 
 # Pydantic AI imports
 try:

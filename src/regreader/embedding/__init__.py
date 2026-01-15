@@ -89,7 +89,7 @@ def create_embedder(
             dimension=1024,
         )
     """
-    from regreader.config import get_settings
+    from regreader.core.config import get_settings
 
     settings = get_settings()
 

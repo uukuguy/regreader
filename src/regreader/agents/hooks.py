@@ -16,13 +16,13 @@ from typing import Any
 
 from loguru import logger
 
-from regreader.agents.callbacks import NullCallback, StatusCallback
-from regreader.agents.events import (
+from regreader.agents.shared.callbacks import NullCallback, StatusCallback
+from regreader.agents.shared.events import (
     tool_end_event,
     tool_error_event,
     tool_start_event,
 )
-from regreader.agents.result_parser import parse_tool_result
+from regreader.agents.shared.result_parser import parse_tool_result
 
 
 # ==================== 全局状态回调 ====================

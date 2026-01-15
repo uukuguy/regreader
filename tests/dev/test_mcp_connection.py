@@ -5,7 +5,7 @@
 
 import pytest
 
-from regreader.agents.mcp_connection import (
+from regreader.agents.shared.mcp_connection import (
     MCPConnectionConfig,
     MCPConnectionManager,
     configure_mcp,

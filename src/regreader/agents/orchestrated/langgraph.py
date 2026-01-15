@@ -34,9 +34,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from loguru import logger
 
-from regreader.agents.base import AgentResponse, BaseRegReaderAgent
-from regreader.agents.callbacks import NullCallback, StatusCallback
-from regreader.agents.events import (
+from regreader.agents.base import AgentResponse
+from regreader.agents.orchestrated.base import BaseOrchestrator
+from regreader.agents.shared.callbacks import NullCallback, StatusCallback
+from regreader.agents.shared.events import (
     response_complete_event,
     text_delta_event,
     thinking_event,
@@ -46,13 +47,13 @@ from regreader.agents.langgraph.subgraphs import (
     SubgraphOutput,
     create_subgraph_builder,
 )
-from regreader.agents.llm_timing import LLMTimingCollector
-from regreader.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
-from regreader.config import get_settings
-from regreader.orchestrator.aggregator import ResultAggregator
-from regreader.orchestrator.analyzer import QueryAnalyzer
-from regreader.orchestrator.coordinator import Coordinator
-from regreader.orchestrator.result import SubagentResult
+from regreader.agents.shared.llm_timing import LLMTimingCollector
+from regreader.agents.shared.mcp_connection import MCPConnectionConfig, get_mcp_manager
+from regreader.core.config import get_settings
+from regreader.orchestration.aggregator import ResultAggregator
+from regreader.orchestration.analyzer import QueryAnalyzer
+from regreader.orchestration.coordinator import Coordinator
+from regreader.orchestration.result import SubagentResult
 from regreader.subagents.config import (
     DISCOVERY_AGENT_CONFIG,
     REFERENCE_AGENT_CONFIG,
@@ -114,8 +115,8 @@ class OrchestratorState(TypedDict):
 # ============================================================================
 
 
-class LangGraphOrchestrator(BaseRegReaderAgent):
-    """LangGraph 协调器
+class LangGraphOrchestrator(BaseOrchestrator):
+    """LangGraph 协调器（继承 BaseOrchestrator）
 
     使用 LangGraph 原生父图-子图模式实现 LLM 自主选择子智能体。
 
@@ -130,6 +131,7 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
     - 原生子图组合：子图作为父图节点，通过 invoke() 调用
     - 状态隔离：父图状态和子图状态分离
     - 结果聚合：合并多个子图的结果
+    - 继承 BaseOrchestrator：共享上下文构建、来源提取等基础设施
 
     Usage:
         async with LangGraphOrchestrator(reg_id="angui_2024") as agent:
@@ -158,7 +160,12 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
             enabled_subagents: 启用的 Subagent 列表
             coordinator: 协调器实例（可选，用于文件系统追踪）
         """
-        super().__init__(reg_id)
+        # 调用 BaseOrchestrator 构造函数
+        super().__init__(
+            reg_id=reg_id,
+            use_coordinator=coordinator is not None,
+            callback=status_callback or NullCallback(),
+        )
 
         settings = get_settings()
         self._model_name = model or settings.llm_model_name
@@ -169,9 +176,6 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
         if enabled_subagents is None:
             enabled_subagents = ["search", "table", "reference"]
         self._enabled_subagents = set(enabled_subagents)
-
-        # 状态回调（需要在 LLM 创建前设置）
-        self._callback = status_callback or NullCallback()
 
         # 初始化 LLM
         self._llm = self._create_llm()
@@ -193,14 +197,10 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
         self._coordinator = coordinator
 
         # 父图（延迟初始化）
-        self._orchestrator_graph: Any = None
+        self._graph: Any = None
 
         # 会话 ID
         self._thread_id: str = self._generate_thread_id()
-
-        # 工具调用追踪
-        self._tool_calls: list[dict] = []
-        self._sources: list[str] = []
 
         logger.info(
             f"LangGraphOrchestrator initialized: model={self._model_name}, "
@@ -259,6 +259,46 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
     def thread_id(self) -> str:
         return self._thread_id
 
+    async def _execute_orchestration(
+        self,
+        query: str,
+        context_info: str,
+    ) -> str:
+        """执行 LangGraph 编排（Subgraph Pattern）
+
+        Args:
+            query: 用户查询
+            context_info: 上下文信息
+
+        Returns:
+            最终回答内容
+        """
+        # 构建完整提示
+        enhanced_message = f"{query}\n\n{context_info}" if context_info else query
+
+        # 构建初始状态
+        initial_state = OrchestratorState(
+            messages=[],
+            query=enhanced_message,
+            reg_id=self.reg_id,
+            hints={},  # hints 已经在 context_info 中
+            selected_subgraphs=[],
+            subgraph_results={},
+            final_content="",
+            all_sources=[],
+            all_tool_calls=[],
+        )
+
+        # 执行 Orchestrator Graph
+        result = await self._graph.ainvoke(initial_state)
+
+        # 提取结果
+        content = result.get("final_content", "")
+        self._tool_calls = result.get("all_tool_calls", [])
+        self._sources = result.get("all_sources", [])
+
+        return content
+
     async def _ensure_initialized(self) -> None:
         """确保组件已初始化"""
         if self._mcp_client is None:
@@ -270,7 +310,7 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
             self._subgraph_builders = self._create_subgraph_builders()
 
             # 构建父图
-            self._orchestrator_graph = self._build_orchestrator_graph()
+            self._graph = self._build_orchestrator_graph()
 
             logger.debug(
                 f"Orchestrator initialized with subgraphs: "
@@ -311,7 +351,7 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
         """
         # 收集所有启用的子图描述
         subgraph_descriptions = []
-        for agent_type in self._subagraph_builders.keys():
+        for agent_type in self._subgraph_builders.keys():
             config = SUBAGENT_CONFIGS.get(agent_type)
             if config and config.enabled:
                 subgraph_descriptions.append(f"""
@@ -355,7 +395,17 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
 
         async def router_node(state: OrchestratorState) -> dict:
             """路由节点：LLM 分析查询并选择子图"""
+            from regreader.agents.shared.events import phase_change_event
+
             query = state["query"]
+
+            # 发送阶段变化事件
+            await self._callback.on_event(
+                phase_change_event(
+                    phase="routing",
+                    description="分析查询并选择子图",
+                )
+            )
 
             # 构建路由提示词
             router_prompt = self._build_router_prompt()
@@ -374,6 +424,14 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
 
             logger.debug(f"Router selected subgraphs: {selected}")
 
+            # 发送路由结果事件
+            await self._callback.on_event(
+                phase_change_event(
+                    phase="routing_complete",
+                    description=f"已选择子图: {', '.join(selected)}",
+                )
+            )
+
             return {
                 "selected_subgraphs": selected,
             }
@@ -383,6 +441,8 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
 
             根据 mode 配置决定顺序或并行执行。
             """
+            from regreader.agents.shared.events import phase_change_event, tool_end_event, tool_start_event
+
             selected = state["selected_subgraphs"]
             query = state["query"]
             reg_id = state["reg_id"]
@@ -393,17 +453,39 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
             all_tool_calls: list[dict] = []
 
             if self._mode == "parallel":
+                # 发送并行执行开始事件
+                await self._callback.on_event(
+                    phase_change_event(
+                        phase="parallel_execution",
+                        description=f"并行执行 {len(selected)} 个子图",
+                    )
+                )
+
                 # 并行执行
                 tasks = []
                 for type_value in selected:
                     agent_type = SubagentType(type_value)
                     builder = self._subgraph_builders[agent_type]
+
+                    # 发送子图启动事件
+                    await self._callback.on_event(
+                        tool_start_event(
+                            tool_name=f"subgraph_{type_value}",
+                            tool_input={"query": query, "reg_id": reg_id},
+                            tool_id=f"{type_value}_{id(query)}",
+                        )
+                    )
+
                     tasks.append(builder.invoke(query, reg_id, hints))
 
+                start_time = datetime.now()
                 outputs = await asyncio.gather(*tasks, return_exceptions=True)
+                duration = datetime.now() - start_time
 
                 for i, output in enumerate(outputs):
                     type_value = selected[i]
+                    tool_id = f"{type_value}_{id(query)}"
+
                     if isinstance(output, Exception):
                         results[type_value] = SubgraphOutput(
                             content="",
@@ -412,20 +494,85 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
                             success=False,
                             error=str(output),
                         )
+
+                        # 发送子图错误事件
+                        from regreader.agents.shared.events import tool_error_event
+
+                        await self._callback.on_event(
+                            tool_error_event(
+                                tool_name=f"subgraph_{type_value}",
+                                error=str(output),
+                                tool_id=tool_id,
+                            )
+                        )
                     else:
                         results[type_value] = output
                         all_sources.extend(output["sources"])
                         all_tool_calls.extend(output["tool_calls"])
+
+                        # 发送子图完成事件
+                        await self._callback.on_event(
+                            tool_end_event(
+                                tool_name=f"subgraph_{type_value}",
+                                tool_id=tool_id,
+                                duration_ms=duration.total_seconds() * 1000 / len(selected),
+                                result_summary=output["content"][:100],
+                                result_count=len(output["sources"]),
+                                sources=output["sources"],
+                                tool_input={"query": query, "reg_id": reg_id},
+                            )
+                        )
             else:
                 # 顺序执行
+                await self._callback.on_event(
+                    phase_change_event(
+                        phase="sequential_execution",
+                        description=f"顺序执行 {len(selected)} 个子图",
+                    )
+                )
+
                 for type_value in selected:
                     agent_type = SubagentType(type_value)
                     builder = self._subgraph_builders[agent_type]
 
+                    # 发送子图切换事件
+                    await self._callback.on_event(
+                        phase_change_event(
+                            phase=f"subgraph_{type_value}",
+                            description=f"执行 {type_value} 子图",
+                        )
+                    )
+
+                    # 发送子图启动事件
+                    tool_id = f"{type_value}_{id(query)}"
+                    await self._callback.on_event(
+                        tool_start_event(
+                            tool_name=f"subgraph_{type_value}",
+                            tool_input={"query": query, "reg_id": reg_id},
+                            tool_id=tool_id,
+                        )
+                    )
+
+                    start_time = datetime.now()
                     output = await builder.invoke(query, reg_id, hints)
+                    duration = datetime.now() - start_time
+
                     results[type_value] = output
                     all_sources.extend(output["sources"])
                     all_tool_calls.extend(output["tool_calls"])
+
+                    # 发送子图完成事件
+                    await self._callback.on_event(
+                        tool_end_event(
+                            tool_name=f"subgraph_{type_value}",
+                            tool_id=tool_id,
+                            duration_ms=duration.total_seconds() * 1000,
+                            result_summary=output["content"][:100],
+                            result_count=len(output["sources"]),
+                            sources=output["sources"],
+                            tool_input={"query": query, "reg_id": reg_id},
+                        )
+                    )
 
             return {
                 "subgraph_results": results,
@@ -444,6 +591,7 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
                     subagent_results.append(
                         SubagentResult(
                             agent_type=SubagentType(type_value),
+                            success=True,
                             content=output["content"],
                             sources=output["sources"],
                             tool_calls=output["tool_calls"],
@@ -516,129 +664,6 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
         
         return []
 
-    async def chat(self, message: str) -> AgentResponse:
-        """与协调器对话
-
-        Args:
-            message: 用户消息
-
-        Returns:
-            AgentResponse
-        """
-        # 确保初始化
-        await self._ensure_initialized()
-
-        # 重置追踪
-        self._tool_calls = []
-        self._sources = []
-
-        start_time = time.time()
-
-        # 发送思考开始事件
-        await self._callback.on_event(thinking_event(start=True))
-
-        try:
-            # 1. 提取查询提示
-            hints = await self._analyzer.extract_hints(message)
-            logger.debug(f"Extracted hints: {hints}")
-
-            # 2. 如果使用 Coordinator，记录查询
-            if self._coordinator:
-                await self._coordinator.log_query(message, hints, self.reg_id)
-
-            # 3. 构建上下文信息（注入到查询中）
-            context_info = self._build_context_info(hints)
-            enhanced_message = f"{message}\n\n{context_info}" if context_info else message
-
-            # 3. 构建初始状态
-            initial_state = OrchestratorState(
-                query=enhanced_message,
-                reg_id=self.reg_id,
-                hints=hints,
-                selected_subgraphs=[],
-                subgraph_results={},
-                final_answer="",
-                tool_calls=[],
-                sources=[],
-            )
-
-            # 4. 执行 Orchestrator Graph
-            result = await self._graph.ainvoke(initial_state)
-
-            # 提取结果
-            content = result.get("final_answer", "")
-            self._tool_calls = result.get("tool_calls", [])
-            self._sources = result.get("sources", [])
-
-            # 发送文本事件
-            if content:
-                await self._callback.on_event(text_delta_event(content))
-
-            # 发送思考结束事件
-            await self._callback.on_event(thinking_event(start=False))
-
-            # 计算耗时
-            end_time = time.time()
-            duration_ms = (end_time - start_time) * 1000
-
-            # 发送完成事件
-            await self._callback.on_event(
-                response_complete_event(
-                    total_tool_calls=len(self._tool_calls),
-                    total_sources=len(set(self._sources)),
-                    duration_ms=duration_ms,
-                )
-            )
-
-            # 如果使用 Coordinator，写入结果
-            if self._coordinator:
-                await self._coordinator.write_result(
-                    content,
-                    list(set(self._sources)),
-                    self._tool_calls,
-                )
-
-            return AgentResponse(
-                content=content,
-                sources=list(set(self._sources)),
-                tool_calls=self._tool_calls,
-            )
-
-        except Exception as e:
-            logger.exception(f"Orchestrator execution error: {e}")
-
-            await self._callback.on_event(thinking_event(start=False))
-
-            return AgentResponse(
-                content=f"查询失败: {str(e)}",
-                sources=list(set(self._sources)),
-                tool_calls=self._tool_calls,
-            )
-
-    def _build_context_info(self, hints: dict) -> str:
-        """构建上下文信息字符串
-
-        将提取的 hints 和默认 reg_id 格式化为上下文信息。
-
-        Args:
-            hints: 提取的提示信息
-
-        Returns:
-            上下文信息字符串
-        """
-        context_parts = []
-
-        # 添加默认规程
-        if self.reg_id:
-            context_parts.append(f"默认规程: {self.reg_id}")
-
-        # 添加提示信息
-        if hints:
-            hints_lines = [f"- {k}: {v}" for k, v in hints.items()]
-            context_parts.append("查询提示:\n" + "\n".join(hints_lines))
-
-        return "\n\n".join(context_parts) if context_parts else ""
-
     async def reset(self) -> None:
         """重置会话状态"""
         self._tool_calls = []
@@ -648,6 +673,16 @@ class LangGraphOrchestrator(BaseRegReaderAgent):
 
     async def close(self) -> None:
         """关闭连接"""
+        # 断开 MCP 客户端连接
+        if self._mcp_client is not None:
+            try:
+                await self._mcp_client.disconnect()
+                logger.debug("MCP client disconnected")
+            except Exception as e:
+                logger.warning(f"Error disconnecting MCP client: {e}")
+            finally:
+                self._mcp_client = None
+
         self._graph = None
         self._subgraph_builders = {}
         self._initialized = False

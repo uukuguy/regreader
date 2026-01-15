@@ -32,7 +32,7 @@ except ImportError:
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from loguru import logger
 
-from regreader.exceptions import ParserError
+from regreader.core.exceptions import ParserError
 
 
 class DoclingParserConfig:

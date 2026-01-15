@@ -5,7 +5,7 @@
 
 from loguru import logger
 
-from regreader.config import get_settings
+from regreader.core.config import get_settings
 from regreader.index.base import BaseKeywordIndex, BaseVectorIndex
 from regreader.storage.models import SearchResult
 

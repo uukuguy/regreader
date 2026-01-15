@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
-from regreader.config import get_settings
+from regreader.core.config import get_settings
 
 if TYPE_CHECKING:
     from regreader.mcp.protocol import RegReaderToolsProtocol

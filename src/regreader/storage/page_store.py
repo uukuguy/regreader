@@ -9,8 +9,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from regreader.config import get_settings
-from regreader.exceptions import PageNotFoundError, RegulationNotFoundError, StorageError
+from regreader.core.config import get_settings
+from regreader.core.exceptions import PageNotFoundError, RegulationNotFoundError, StorageError
 from regreader.storage.models import (
     DocumentStructure,
     PageContent,

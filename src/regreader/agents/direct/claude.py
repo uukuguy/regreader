@@ -10,8 +10,8 @@ from typing import Any
 from loguru import logger
 
 from regreader.agents.base import AgentResponse, BaseRegReaderAgent
-from regreader.agents.callbacks import NullCallback, StatusCallback
-from regreader.agents.events import (
+from regreader.agents.shared.callbacks import NullCallback, StatusCallback
+from regreader.agents.shared.events import (
     AgentEvent,
     AgentEventType,
     response_complete_event,
@@ -21,17 +21,17 @@ from regreader.agents.events import (
     tool_end_event,
     tool_start_event,
 )
-from regreader.agents.mcp_config import get_tool_name
-from regreader.agents.mcp_connection import MCPConnectionConfig, get_mcp_manager
-from regreader.agents.memory import AgentMemory
+from regreader.agents.shared.mcp_config import get_tool_name
+from regreader.agents.shared.mcp_connection import MCPConnectionConfig, get_mcp_manager
+from regreader.agents.shared.memory import AgentMemory
 from regreader.agents.prompts import (
     get_full_prompt,
     get_optimized_prompt_with_domain,
     get_simple_prompt,
 )
-from regreader.agents.result_parser import parse_tool_result
+from regreader.agents.shared.result_parser import parse_tool_result
 from regreader.agents.session import SessionManager, SessionState
-from regreader.config import get_settings
+from regreader.core.config import get_settings
 from regreader.mcp.tool_metadata import TOOL_METADATA
 from regreader.storage import PageStore
 

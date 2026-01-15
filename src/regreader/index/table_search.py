@@ -7,7 +7,7 @@ from typing import Literal
 
 from loguru import logger
 
-from regreader.config import get_settings
+from regreader.core.config import get_settings
 from regreader.index.table_fts5 import TableFTS5Index
 from regreader.index.table_lancedb import TableLanceDBIndex
 from regreader.storage.models import TableSearchResult

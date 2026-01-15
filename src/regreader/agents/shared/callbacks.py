@@ -7,7 +7,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
 
-from regreader.agents.events import AgentEvent, AgentEventType
+from regreader.agents.shared.events import AgentEvent, AgentEventType
 
 
 @runtime_checkable

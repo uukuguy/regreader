@@ -25,7 +25,7 @@ Example:
     ['list_regulations', 'get_toc', 'smart_search', ...]
 """
 
-from regreader.orchestrator.result import SubagentResult
+from regreader.orchestration.result import SubagentResult
 from regreader.subagents.config import (
     SUBAGENT_CONFIGS,
     SubagentConfig,

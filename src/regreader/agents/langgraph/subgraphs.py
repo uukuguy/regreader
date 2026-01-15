@@ -454,7 +454,7 @@ def create_subgraph_builder(
 # 请使用 SubgraphBuilder 代替
 
 from regreader.subagents.base import BaseSubagent, SubagentContext
-from regreader.orchestrator.result import SubagentResult
+from regreader.orchestration.result import SubagentResult
 
 
 class BaseSubgraph(BaseSubagent):

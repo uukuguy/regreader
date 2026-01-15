@@ -11,7 +11,7 @@ from typing import Literal
 
 from loguru import logger
 
-from regreader.exceptions import (
+from regreader.core.exceptions import (
     AnnotationNotFoundError,
     ChapterNotFoundError,
     InvalidPageRangeError,

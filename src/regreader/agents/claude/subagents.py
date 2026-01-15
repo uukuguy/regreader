@@ -14,11 +14,11 @@ from typing import Any
 
 from loguru import logger
 
-from regreader.agents.mcp_config import get_tool_name
-from regreader.agents.mcp_connection import MCPConnectionManager
+from regreader.agents.shared.mcp_config import get_tool_name
+from regreader.agents.shared.mcp_connection import MCPConnectionManager
 from regreader.subagents.base import BaseSubagent, SubagentContext
 from regreader.subagents.config import SubagentConfig, SubagentType
-from regreader.orchestrator.result import SubagentResult
+from regreader.orchestration.result import SubagentResult
 
 # Claude Agent SDK imports
 try:

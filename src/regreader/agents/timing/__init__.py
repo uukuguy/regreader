@@ -11,7 +11,7 @@
     backend = create_timing_backend("httpx")
 
     # 或直接使用配置
-    from regreader.config import settings
+    from regreader.core.config import settings
     backend = create_timing_backend_from_config()
 
     # 配置 httpx client
@@ -32,7 +32,7 @@ from regreader.agents.timing.base import (
 from regreader.agents.timing.httpx_timing import HttpxTimingBackend, LLMTimingCollector
 
 if TYPE_CHECKING:
-    from regreader.agents.callbacks import StatusCallback
+    from regreader.agents.shared.callbacks import StatusCallback
 
 
 def create_timing_backend(
@@ -118,7 +118,7 @@ def create_timing_backend_from_config(
     Returns:
         TimingBackend 实例
     """
-    from regreader.config import settings
+    from regreader.core.config import settings
 
     return create_timing_backend(
         backend_type=settings.timing_backend,

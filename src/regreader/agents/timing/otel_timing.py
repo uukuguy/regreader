@@ -32,7 +32,7 @@ from regreader.agents.timing.base import (
 if TYPE_CHECKING:
     import httpx
 
-    from regreader.agents.callbacks import StatusCallback
+    from regreader.agents.shared.callbacks import StatusCallback
 
 # 尝试导入 OpenTelemetry（可选依赖）
 try:
