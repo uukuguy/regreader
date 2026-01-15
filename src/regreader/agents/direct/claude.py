@@ -276,7 +276,7 @@ class ClaudeAgent(BaseRegReaderAgent):
         enable_otel = settings.timing_backend == "otel"
 
         # 使用组合 hooks 工厂函数
-        from regreader.agents.otel_hooks import get_combined_hooks
+        from regreader.agents.shared.otel_hooks import get_combined_hooks
 
         combined = get_combined_hooks(
             enable_audit=True,  # 始终启用审计 hooks
