@@ -170,6 +170,35 @@ class ClaudeOrchestrator(BaseOrchestrator):
     def model(self) -> str:
         return self._model
 
+    def _get_regulations(self) -> list[dict]:
+        """获取规程列表（复用单智能体的逻辑）
+
+        Returns:
+            规程信息列表
+        """
+        from regreader.storage import PageStore
+        from regreader.core.config import get_settings
+
+        settings = get_settings()
+        page_store = PageStore(settings.pages_dir)
+
+        # 使用缓存（如果已存在）
+        if not hasattr(self, '_regulations_cache'):
+            regulations = page_store.list_regulations()
+            self._regulations_cache = [
+                {
+                    "reg_id": r.reg_id,
+                    "title": r.title,
+                    "keywords": r.keywords,
+                    "scope": r.scope,
+                    "description": r.description,
+                }
+                for r in regulations
+            ]
+            logger.debug(f"加载规程列表: {len(self._regulations_cache)} 个")
+
+        return self._regulations_cache
+
     async def _ensure_initialized(self) -> None:
         """确保组件已初始化"""
         if not self._initialized:
@@ -248,7 +277,7 @@ class ClaudeOrchestrator(BaseOrchestrator):
         return agent_def
 
     def _build_subagent_domain_prompt(self, config) -> str:
-        """构建子智能体的领域特定提示词（preset 模式）
+        """构建子智能体的领域特定提示词（动态生成版本）
 
         Args:
             config: SubagentConfig
@@ -256,35 +285,44 @@ class ClaudeOrchestrator(BaseOrchestrator):
         Returns:
             领域特定提示词
         """
-        # 获取允许的工具列表
-        from regreader.agents.shared.mcp_config import get_tool_name
+        # 使用统一的动态生成函数
+        from regreader.agents.prompts import (
+            generate_role_for_subagent,
+            generate_tool_section_for_tools,
+            generate_workflow_for_tools,
+        )
 
-        allowed_tools = [get_tool_name(name) for name in config.tools]
-        tools_display = ", ".join(allowed_tools) if allowed_tools else "无"
+        # 1. 生成角色定义
+        role = generate_role_for_subagent(config.agent_type)
 
-        prompt = f"""# 角色定位
-你是 {config.name}，专门负责{config.description}。
+        # 2. 动态生成工具描述（从 config.tools）
+        tool_section = generate_tool_section_for_tools(config.tools)
 
-# 电力规程领域知识
+        # 3. 生成针对性工作流程
+        workflow = generate_workflow_for_tools(config.tools)
 
-## 文档结构规范
+        # 4. 组装提示词
+        prompt = f"{role}\n\n# 可用工具\n{tool_section}\n\n{workflow}"
+
+        # 5. 电力规程领域知识（保持原有）
+        domain_knowledge = """
+## 电力规程领域知识
+
+### 文档结构规范
 - **章节编号格式**：X.X.X.X（如 2.1.4.1.6）
 - **表格命名规则**：表X-X（如 表6-2）
 - **注释引用**：注1、注2、注①、注一、选项A、选项B、方案甲等变体
 - **引用语法**："见第X章"、"参见X.X节"、"详见附录X"、"见注X"
 
-## 工具使用约束
-你**只能使用**以下MCP工具：
-{tools_display}
-
-**严格限制**：不得使用其他未列出的工具，不得尝试绕过工具限制。
-
-## 检索策略
+### 检索策略
 1. **精确匹配优先**：优先使用章节号、表格号、注释ID等精确标识符
 2. **语义搜索作为补充**：找不到精确匹配时使用语义搜索
 3. **表格查询完整性**：表格查询必须返回完整结构，注意跨页表格
 4. **注释引用追踪**：发现注释引用时必须回溯到原文获取完整内容
+"""
 
+        # 6. 输出要求（保持原有）
+        output_requirements = """
 ## 输出要求（关键）
 **关键规则：在调用工具后，必须用自然语言总结工具返回的结果，而不是返回原始工具输出。**
 
@@ -304,7 +342,17 @@ class ClaudeOrchestrator(BaseOrchestrator):
 **来源**：angui_2024 P123（第X章 > X.X节）
 ```
 """
-        return prompt
+
+        # 7. 追加专项任务描述
+        if config.description and config.description != config.name:
+            task_desc = f"\n\n# 专项任务\n{config.description}"
+        else:
+            task_desc = ""
+
+        # 8. 组装完整提示词
+        full_prompt = f"{prompt}\n\n{domain_knowledge}\n{output_requirements}{task_desc}"
+
+        return full_prompt
 
     async def _execute_orchestration(
         self,
@@ -353,53 +401,65 @@ class ClaudeOrchestrator(BaseOrchestrator):
         return final_content
 
     def _build_main_prompt(self) -> str:
-        """构建主智能体的系统提示词
+        """构建主智能体的系统提示词（与单智能体模式一致）
 
-        主智能体负责：
-        1. 理解用户查询
-        2. 根据子智能体描述选择合适的子智能体
-        3. 使用 Task 工具调用选定的子智能体
+        主智能体应该和单智能体使用相同的提示词，子智能体用于：
+        1. 上下文隔离（不同任务不污染主线上下文）
+        2. 并行执行（同时执行多个独立子任务）
 
         Returns:
             主智能体的系统提示词
         """
-        # 收集所有启用的子智能体描述（从 description 字段获取）
-        subagent_descriptions = []
-        for agent_name, agent_def in self._subagents.items():
-            subagent_descriptions.append(f"""
-### {agent_name}
-{agent_def.description}
-""")
+        from regreader.agents.prompts import get_optimized_prompt_with_domain
 
-        descriptions_text = "".join(subagent_descriptions)
+        # 获取规程列表（复用单智能体的逻辑）
+        regulations = self._get_regulations()
 
-        prompt = f"""你是 RegReader 协调器，负责将用户查询分派给合适的专家子智能体。
+        # 使用和单智能体完全相同的提示词
+        settings = get_settings()
+        include_advanced = getattr(settings, "enable_advanced_tools", False)
 
-# 可用的专家子智能体
+        base_prompt = get_optimized_prompt_with_domain(include_advanced, regulations)
 
-{descriptions_text}
+        # 追加当前规程信息
+        if self.reg_id:
+            base_prompt += f"\n\n# 当前规程\n默认规程: {self.reg_id}"
 
-# 你的职责
+        # 追加 Orchestrator 特有的说明
+        orchestrator_note = """
 
-1. **理解用户查询**：分析用户的问题，识别查询意图
-2. **选择合适的子智能体**：根据上述描述，选择最适合处理该查询的子智能体
-3. **使用 Task 工具调用**：使用 Task 工具并指定子智能体名称（例如：Task(subagent_type="search", ...)）
+# Orchestrator 模式说明
 
-# 决策指南
+你现在运行在 Orchestrator 模式下，可以使用子智能体来：
+1. **上下文隔离**：将复杂任务分解为独立的子任务，每个子任务在隔离的上下文中执行
+2. **并行执行**：多个独立的子任务可以同时执行，提高效率
 
-- 如果查询涉及**搜索关键词、浏览目录、读取章节**，选择 search 子智能体
-- 如果查询涉及**表格查询、表格提取、注释查找**，选择 table 子智能体
-- 如果查询涉及**交叉引用、"见第X章"、"参见表X"**，选择 reference 子智能体
-- 如果查询涉及**语义分析、相似内容、章节对比**，选择 discovery 子智能体（如果启用）
+## 可用的子智能体
+{subagent_descriptions}
 
-# 重要提示
+## 如何使用子智能体
 
-- **不要自己执行查询**：你的职责是选择和调用子智能体，不是直接回答
-- **立即调用**：分析完查询后，立即使用 Task 工具调用选定的子智能体
-- **信任子智能体**：子智能体会处理所有细节，你只需选择正确的专家并传递用户查询
+当你需要执行子任务时，可以使用 **Task 工具**调用子智能体：
+```
+Task(subagent_type="search", query="获取目录结构")
+Task(subagent_type="search", query="在第六章搜索母线失压")
+Task(subagent_type="table", query="查找锦苏安控的配置表格")
+```
+
+**重要**：
+- 子智能体会返回**处理后的内容摘要**，而非原始工具输出
+- 你需要整合多个子智能体的结果，生成最终答案
+- 简单查询可以直接使用 MCP 工具，无需调用子智能体
 """
 
-        return prompt
+        # 收集子智能体描述（简要版本）
+        subagent_descriptions = []
+        for agent_name, agent_def in self._subagents.items():
+            subagent_descriptions.append(f"- **{agent_name}**: {agent_def.description}")
+
+        descriptions_text = "\n".join(subagent_descriptions)
+
+        return base_prompt + orchestrator_note.format(subagent_descriptions=descriptions_text)
 
     def _build_main_agent_options(self) -> ClaudeAgentOptions:
         """构建 Main Agent 选项
@@ -517,7 +577,7 @@ class ClaudeOrchestrator(BaseOrchestrator):
                     logger.debug(f"Tool call: {tool_name}")
 
                     # 发送工具调用开始事件
-                    await self._callback.on_event(
+                    await self.callback.on_event(
                         tool_start_event(
                             tool_name=tool_name,
                             tool_input=tool_input,
@@ -545,7 +605,7 @@ class ClaudeOrchestrator(BaseOrchestrator):
                             summary = parse_tool_result(tc["name"], content)
 
                             # 发送工具调用完成事件
-                            await self._callback.on_event(
+                            await self.callback.on_event(
                                 tool_end_event(
                                     tool_name=tc["name"],
                                     tool_id=tool_use_id,
@@ -587,7 +647,7 @@ class ClaudeOrchestrator(BaseOrchestrator):
                             summary = parse_tool_result(tc["name"], content)
 
                             # 发送工具调用完成事件
-                            await self._callback.on_event(
+                            await self.callback.on_event(
                                 tool_end_event(
                                     tool_name=tc["name"],
                                     tool_id=tool_use_id,
@@ -626,7 +686,7 @@ class ClaudeOrchestrator(BaseOrchestrator):
                     summary = parse_tool_result(tc["name"], content)
 
                     # 发送工具调用完成事件
-                    await self._callback.on_event(
+                    await self.callback.on_event(
                         tool_end_event(
                             tool_name=tc["name"],
                             tool_id=tool_use_id,

@@ -1,11 +1,8 @@
 """ReferenceAgent 模块
 
-引用追踪专家。
+引用子智能体，支持交叉引用解析的原子级任务执行。
 """
 
-from regreader.subagents.config import REFERENCE_AGENT_CONFIG, SubagentType
+from regreader.subagents.reference.agent import ReferenceAgent
 
-__all__ = [
-    "REFERENCE_AGENT_CONFIG",
-    "SubagentType",
-]
+__all__ = ["ReferenceAgent"]

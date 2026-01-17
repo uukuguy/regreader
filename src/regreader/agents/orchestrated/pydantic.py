@@ -537,7 +537,7 @@ Args:
             return f"错误: {agent_type.value} 专家代理未启用"
 
         # 发送阶段变化事件（子智能体切换）
-        await self._callback.on_event(
+        await self.callback.on_event(
             phase_change_event(
                 phase=f"subagent_{agent_type.value}",
                 description=f"切换到 {agent_type.value} 专家代理",
@@ -549,7 +549,7 @@ Args:
         tool_id = f"{agent_type.value}_{id(query)}"
         start_time = datetime.now()
 
-        await self._callback.on_event(
+        await self.callback.on_event(
             tool_start_event(
                 tool_name=tool_name,
                 tool_input={"query": query, "agent_type": agent_type.value},
@@ -583,7 +583,7 @@ Args:
             content = result.output if isinstance(result.output, str) else str(result.output)
 
             # 发送工具调用完成事件
-            await self._callback.on_event(
+            await self.callback.on_event(
                 tool_end_event(
                     tool_name=tool_name,
                     tool_id=tool_id,
@@ -601,7 +601,7 @@ Args:
             # 发送工具调用错误事件
             from regreader.agents.shared.events import tool_error_event
 
-            await self._callback.on_event(
+            await self.callback.on_event(
                 tool_error_event(
                     tool_name=tool_name,
                     error=str(e),

@@ -705,11 +705,60 @@ class EnhancedAgentStatusDisplay:
             格式化后的摘要字符串
         """
         if result is None:
-            return "✓ 完成"  # 改进：显示"完成"而不是"返回: None"
+            return "✓ 完成"
+
+        # 调试：记录结果类型和键（仅在 verbose 模式下）
+        if self._verbose:
+            if isinstance(result, dict):
+                logger.debug(f"Result keys: {list(result.keys())[:5]}")
+            elif isinstance(result, list) and result:
+                logger.debug(f"Result list length: {len(result)}, first item type: {type(result[0])}")
+                if isinstance(result[0], dict):
+                    logger.debug(f"First item keys: {list(result[0].keys())[:5]}")
 
         # 如果是字典，提取关键信息
         if isinstance(result, dict):
-            # 优先显示有意义的字段
+            # 检查错误
+            if "error" in result:
+                return f"✗ 错误: {result['error']}"
+
+            # get_toc 返回结果：显示章节数量和标题
+            if "items" in result and isinstance(result.get("items"), list):
+                items = result["items"]
+                if items:
+                    # 提取顶层章节标题
+                    titles = [item.get("title", "").split(" ")[0] for item in items[:3]]
+                    title_preview = ", ".join(t for t in titles if t)
+                    return f"✓ 返回 {len(items)} 个章节 ({title_preview}...)"
+                return f"✓ 返回 {len(items)} 个章节"
+
+            # list_regulations 返回结果：显示规程列表
+            if "regulations" in result and isinstance(result.get("regulations"), list):
+                regs = result["regulations"]
+                if regs:
+                    reg_ids = [r.get("reg_id", "") for r in regs[:3]]
+                    reg_preview = ", ".join(r for r in reg_ids if r)
+                    return f"✓ 找到 {len(regs)} 个规程 ({reg_preview}...)"
+                return f"✓ 找到 {len(regs)} 个规程"
+
+            # read_page_range 返回结果：显示页码范围
+            if "start_page" in result and "end_page" in result:
+                start = result["start_page"]
+                end = result["end_page"]
+                page_count = result.get("page_count", end - start + 1)
+
+                # 提取内容预览
+                content = result.get("content_markdown", "")
+                if content:
+                    # 提取前几行作为预览
+                    lines = content.split("\n")
+                    preview_lines = [line.strip() for line in lines if line.strip()][:2]
+                    preview = " | ".join(preview_lines)[:60]
+                    return f"✓ 读取 {page_count} 页内容 (P{start}-P{end}): {preview}..."
+
+                return f"✓ 读取 {page_count} 页内容 (P{start}-P{end})"
+
+            # 通用字段处理
             if "sources" in result:
                 sources = result["sources"]
                 if isinstance(sources, list) and sources:
@@ -718,12 +767,10 @@ class EnhancedAgentStatusDisplay:
                 content = str(result["content"])
                 preview = content[:80] + "..." if len(content) > 80 else content
                 return f"✓ {preview}"
-            if "error" in result:
-                return f"✗ 错误: {result['error']}"
 
             # 空字典
             if not result:
-                return "✓ 完成（无返回数据）"  # 改进：更友好的消息
+                return "✓ 完成（无返回数据）"
 
             # 显示字典的前几个键值对
             items = list(result.items())[:2]
@@ -735,14 +782,45 @@ class EnhancedAgentStatusDisplay:
         # 如果是列表
         if isinstance(result, list):
             if not result:
-                return "✓ 完成（空列表）"  # 改进：更友好的消息
-            first_item = str(result[0])[:50]
-            return f"✓ {len(result)} 项 (首项: {first_item}...)"
+                return "✓ 完成（空列表）"
+
+            # smart_search 返回结果：显示搜索结果摘要
+            first_item = result[0]
+            if isinstance(first_item, dict):
+                # 检查是否是搜索结果
+                if "page_num" in first_item or "snippet" in first_item or "source" in first_item:
+                    # 提取前几个结果的关键信息
+                    summaries = []
+                    for item in result[:3]:
+                        page = item.get("page_num", "")
+                        snippet = item.get("snippet", "")
+                        chapter = ""
+
+                        # 提取章节信息
+                        if "chapter_path" in item and item["chapter_path"]:
+                            # 取第一级章节标题
+                            chapter = item["chapter_path"][0].split(" ")[0] if item["chapter_path"] else ""
+
+                        # 构建摘要
+                        if page and chapter and snippet:
+                            summaries.append(f"{chapter}(P{page}): {snippet[:15]}...")
+                        elif page and snippet:
+                            summaries.append(f"P{page}: {snippet[:15]}...")
+                        elif page:
+                            summaries.append(f"P{page}")
+
+                    if summaries:
+                        summary_preview = "; ".join(summaries)
+                        return f"✓ 找到 {len(result)} 个结果 ({summary_preview})"
+
+            # 通用列表处理
+            first_str = str(first_item)[:50]
+            return f"✓ {len(result)} 项 (首项: {first_str}...)"
 
         # 如果是字符串
         if isinstance(result, str):
             if not result:
-                return "✓ 完成（空字符串）"  # 改进：更友好的消息
+                return "✓ 完成（空字符串）"
             preview = result[:100] + "..." if len(result) > 100 else result
             return f"✓ {preview}"
 

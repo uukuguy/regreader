@@ -105,16 +105,57 @@ def format_result_summary(summary: ToolResultSummary, sources: list[str]) -> str
     Returns:
         格式化的摘要字符串
     """
-    # 如果有结果数量，优先显示
+    # 优先使用详细信息，而不是仅显示数量
+
+    # get_toc: 显示章节数量和章节名称预览
+    if summary.result_type == "chapters" and summary.result_count is not None:
+        if summary.chapter_names:
+            # 提取章节编号（取第一个词）
+            chapter_nums = [name.split()[0] for name in summary.chapter_names[:3]]
+            preview = ", ".join(chapter_nums)
+            if summary.result_count > 3:
+                preview += "..."
+            return f"✓ 返回 {summary.result_count} 个章节 ({preview})"
+        return f"✓ 返回 {summary.result_count} 个章节"
+
+    # smart_search: 显示搜索结果数量、页码和内容预览
+    if summary.result_type == "search_results" and summary.result_count is not None:
+        parts = [f"✓ 找到 {summary.result_count} 个结果"]
+
+        # 添加页码信息
+        if summary.page_sources:
+            page_str = format_page_sources(summary.page_sources, max_display=3)
+            parts.append(f"({page_str})")
+
+        # 添加内容预览
+        if summary.content_preview:
+            preview = summary.content_preview[:60] + "..." if len(summary.content_preview) > 60 else summary.content_preview
+            parts.append(f": {preview}")
+
+        return " ".join(parts)
+
+    # read_page_range: 显示页码范围和内容统计
+    if summary.result_type == "pages" and summary.result_count is not None:
+        parts = [f"✓ 读取 {summary.result_count} 页内容"]
+
+        # 添加页码范围
+        if summary.page_sources:
+            if len(summary.page_sources) == 1:
+                parts.append(f"(P{summary.page_sources[0]})")
+            else:
+                start = summary.page_sources[0]
+                end = summary.page_sources[-1]
+                parts.append(f"(P{start}-P{end})")
+
+        # 添加内容统计
+        if summary.content_preview:
+            parts.append(f": {summary.content_preview}")
+
+        return " ".join(parts)
+
+    # 其他结果类型：使用通用格式
     if summary.result_count is not None and summary.result_count > 0:
-        if summary.result_type == "search_results":
-            return f"✓ 找到 {summary.result_count} 个结果"
-        elif summary.result_type == "chapters":
-            return f"✓ 返回 {summary.result_count} 个章节"
-        elif summary.result_type == "pages":
-            return f"✓ 读取 {summary.result_count} 页内容"
-        else:
-            return f"✓ 返回 {summary.result_count} 项结果"
+        return f"✓ 返回 {summary.result_count} 项结果"
 
     # 如果有章节信息
     if summary.chapter_count and summary.chapter_count > 0:

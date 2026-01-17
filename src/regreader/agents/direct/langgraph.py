@@ -404,6 +404,7 @@ class LangGraphAgent(BaseRegReaderAgent):
                 await self._callback.on_event(
                     tool_end_event(
                         tool_name=tool_name,
+                        tool_id="",  # 添加缺失的 tool_id 参数
                         duration_ms=duration_ms,
                         result_summary=result_summary_str,  # 添加格式化的摘要字符串
                         result_count=summary.result_count,
@@ -630,35 +631,47 @@ class LangGraphAgent(BaseRegReaderAgent):
         # 配置（包含 thread_id）
         config = {"configurable": {"thread_id": self._thread_id}}
 
-        # 执行图（使用流式处理）
+        # 执行图（使用流式处理，失败时降级到非流式）
         try:
             final_content = ""
             final_messages = []
 
-            # 使用 astream_events 获取流式事件
-            async for event in self._graph.astream_events(
-                {"messages": [HumanMessage(content=message)]},
-                config=config,
-                version="v2",
-            ):
-                event_type = event.get("event", "")
+            try:
+                # 尝试使用 astream_events 获取流式事件
+                async for event in self._graph.astream_events(
+                    {"messages": [HumanMessage(content=message)]},
+                    config=config,
+                    version="v2",
+                ):
+                    event_type = event.get("event", "")
 
-                # 处理 LLM 流式输出
-                if event_type == "on_chat_model_stream":
-                    chunk = event.get("data", {}).get("chunk")
-                    if chunk and hasattr(chunk, "content") and chunk.content:
-                        # 发送文本增量事件
-                        if isinstance(chunk.content, str):
-                            await self._callback.on_event(
-                                text_delta_event(chunk.content)
-                            )
+                    # 处理 LLM 流式输出
+                    if event_type == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and hasattr(chunk, "content") and chunk.content:
+                            # 发送文本增量事件
+                            if isinstance(chunk.content, str):
+                                await self._callback.on_event(
+                                    text_delta_event(chunk.content)
+                                )
 
-                # 处理图执行结束
-                elif event_type == "on_chain_end":
-                    # 检查是否为最终输出
-                    output = event.get("data", {}).get("output", {})
-                    if isinstance(output, dict) and "messages" in output:
-                        final_messages = output.get("messages", [])
+                    # 处理图执行结束
+                    elif event_type == "on_chain_end":
+                        # 检查是否为最终输出
+                        output = event.get("data", {}).get("output", {})
+                        if isinstance(output, dict) and "messages" in output:
+                            final_messages = output.get("messages", [])
+
+            except Exception as streaming_error:
+                # 流式处理失败，降级到非流式模式
+                logger.warning(f"Streaming failed, falling back to non-streaming: {streaming_error}")
+
+                # 使用非流式模式重新执行
+                result = await self._graph.ainvoke(
+                    {"messages": [HumanMessage(content=message)]},
+                    config=config,
+                )
+                final_messages = result.get("messages", [])
 
             # 从最终消息中提取回答
             for msg in reversed(final_messages):

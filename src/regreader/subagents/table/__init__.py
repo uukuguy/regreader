@@ -1,11 +1,8 @@
 """TableAgent 模块
 
-表格处理专家。
+表格子智能体，支持表格数据的原子级任务执行。
 """
 
-from regreader.subagents.config import TABLE_AGENT_CONFIG, SubagentType
+from regreader.subagents.table.agent import TableAgent
 
-__all__ = [
-    "TABLE_AGENT_CONFIG",
-    "SubagentType",
-]
+__all__ = ["TableAgent"]

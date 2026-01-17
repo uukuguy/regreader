@@ -55,6 +55,9 @@ class BaseOrchestrator(BaseRegReaderAgent, ABC):
         self._sources: list[str] = []
         self._tool_calls: list[dict] = []
 
+        # QueryAnalyzer（用于提取查询提示）
+        self._analyzer = QueryAnalyzer()
+
         # Coordinator（如果启用）
         self.coordinator: Coordinator | None = None
         if use_coordinator:
@@ -203,7 +206,7 @@ class BaseOrchestrator(BaseRegReaderAgent, ABC):
         self._reset_tracking()
 
         # 3. 提取提示
-        hints = QueryAnalyzer.extract_hints(message)
+        hints = self._analyzer.extract_hints_sync(message)
         logger.debug(f"Extracted hints: {hints}")
 
         # 4. 记录查询（如果使用 Coordinator）

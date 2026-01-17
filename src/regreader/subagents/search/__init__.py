@@ -1,11 +1,8 @@
 """SearchAgent 模块
 
-文档搜索与导航专家。
+文档搜索子智能体，支持原子级任务执行。
 """
 
-from regreader.subagents.config import SEARCH_AGENT_CONFIG, SubagentType
+from regreader.subagents.search.agent import SearchAgent
 
-__all__ = [
-    "SEARCH_AGENT_CONFIG",
-    "SubagentType",
-]
+__all__ = ["SearchAgent"]

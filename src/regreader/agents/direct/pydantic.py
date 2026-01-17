@@ -49,10 +49,12 @@ try:
     from pydantic_ai.mcp import MCPServerStdio
     from pydantic_ai.messages import (
         AgentStreamEvent,
+        FinalResultEvent,
         FunctionToolCallEvent,
         FunctionToolResultEvent,
         ModelMessage,
         PartDeltaEvent,
+        PartStartEvent,
         TextPartDelta,
         ThinkingPartDelta,
     )
@@ -70,8 +72,10 @@ except ImportError:
     MCPServerStdio = None  # type: ignore
     ModelMessage = None  # type: ignore
     AgentStreamEvent = None  # type: ignore
+    FinalResultEvent = None  # type: ignore
     FunctionToolCallEvent = None  # type: ignore
     FunctionToolResultEvent = None  # type: ignore
+    PartStartEvent = None  # type: ignore
     OpenAIChatModel = None  # type: ignore
     OpenAIProvider = None  # type: ignore
     OpenAIModelProfile = None  # type: ignore
@@ -144,6 +148,32 @@ class PydanticAIAgent(BaseRegReaderAgent):
         # 检测是否为 Ollama 后端
         self._is_ollama = settings.is_ollama_backend()
         self._ollama_disable_streaming = settings.ollama_disable_streaming
+
+        # 检测是否为不兼容的后端
+        # 智谱 AI 的 OpenAI 兼容 API 与 Pydantic AI 存在响应格式不兼容问题
+        # 建议使用 Claude Agent 代替
+        is_incompatible_backend = (
+            "bigmodel" in settings.llm_base_url.lower()  # 智谱 AI
+            or "zhipu" in settings.llm_base_url.lower()  # 智谱 AI 别名
+        )
+
+        if is_incompatible_backend:
+            logger.warning(
+                f"⚠️  Pydantic AI Agent 与当前 LLM 后端不完全兼容\n"
+                f"   后端: {settings.llm_base_url}\n"
+                f"   模型: {settings.llm_model_name}\n"
+                f"   建议: 使用 Claude Agent 代替 (regreader chat-claude)\n"
+                f"   详情: 智谱 AI 的 API 响应格式与 Pydantic AI 的 OpenAI 客户端不完全匹配"
+            )
+
+        # 检测是否为需要流式降级的后端
+        # 这些后端的 OpenAI 兼容 API 在流式响应时可能返回空的第一个 chunk
+        # 导致 Pydantic AI 抛出 "Streamed response ended without content or tool calls"
+        self._is_streaming_unstable = (
+            "siliconflow" in settings.llm_base_url.lower()
+            or "glm" in settings.llm_model_name.lower()
+            or is_incompatible_backend
+        )
 
         # 设置环境变量（Pydantic AI 从环境变量读取）
         import os
@@ -478,12 +508,26 @@ class PydanticAIAgent(BaseRegReaderAgent):
                     self._extract_sources_from_content(result_content)
                     self._update_memory(tool_name, result_content)
 
+                elif isinstance(event, PartStartEvent):
+                    # Part 开始事件 - 标记新的内容部分开始
+                    # 这个事件必须被"消费"，否则 Pydantic AI 会认为流式响应失败
+                    logger.debug(f"[EventStream] Part {event.index} started: {type(event.part).__name__}")
+
+                elif isinstance(event, FinalResultEvent):
+                    # 最终结果事件 - 模型开始生成最终答案
+                    # 这个事件必须被"消费"，否则 Pydantic AI 会认为流式响应失败
+                    logger.debug(f"[EventStream] Final result started (tool_name={event.tool_name})")
+
                 elif event_type == "ModelResponseEvent":
                     # 检查是否有工具调用但在 FunctionToolCallEvent 中没捕捉到
                     if hasattr(event, "model_response") and hasattr(event.model_response, "parts"):
                         for part in event.model_response.parts:
                             if hasattr(part, "tool_name"):
                                 logger.debug(f"[EventStream] Found ToolCall in ModelResponse: {part.tool_name}")
+
+                # 重要：必须"消费"所有事件，否则 Pydantic AI 会认为流式响应失败
+                # 对于不需要处理的事件，只需继续迭代即可
+                # 不添加 else 分支，让未处理的事件自然通过
 
         return event_stream_handler
 
@@ -545,10 +589,14 @@ class PydanticAIAgent(BaseRegReaderAgent):
         await self._callback.on_event(thinking_event(start=True))
 
         try:
-            # Ollama 流式策略：
-            # 1. 如果配置了禁用流式，直接使用非流式模式
-            # 2. 否则尝试流式，失败时降级到非流式
-            use_streaming = not (self._is_ollama and self._ollama_disable_streaming)
+            # 流式策略：
+            # 1. Ollama: 根据配置禁用流式，或在失败时降级
+            # 2. GLM/SiliconFlow: 直接禁用流式（API 兼容性问题）
+            # 3. 其他: 使用流式
+            use_streaming = not (
+                (self._is_ollama and self._ollama_disable_streaming)
+                or self._is_streaming_unstable
+            )
 
             if use_streaming:
                 try:
@@ -560,6 +608,16 @@ class PydanticAIAgent(BaseRegReaderAgent):
                         event_stream_handler=event_handler,
                     )
                 except Exception as streaming_error:
+                    # 检查是否为智谱 AI 兼容性错误
+                    error_msg = str(streaming_error)
+                    if "bigmodel" in error_msg or "zhipu" in error_msg or "Streamed response ended" in error_msg:
+                        raise RuntimeError(
+                            f"❌ Pydantic AI Agent 与当前 LLM 后端不兼容\n"
+                            f"   错误: {streaming_error}\n"
+                            f"   建议: 使用 Claude Agent 代替\n"
+                            f"   命令: regreader chat-claude -r {self.reg_id or 'angui_2024'}"
+                        ) from streaming_error
+
                     # Ollama 流式失败时降级到非流式
                     if self._is_ollama:
                         logger.warning(
@@ -574,13 +632,28 @@ class PydanticAIAgent(BaseRegReaderAgent):
                     else:
                         raise
             else:
-                # Ollama 禁用流式时，直接使用非流式模式
-                logger.debug("Ollama streaming disabled, using non-streaming mode")
-                result = await self._agent.run(
-                    message,
-                    deps=deps,
-                    message_history=self._message_history if self._message_history else None,
-                )
+                # 禁用流式时，直接使用非流式模式
+                reason = "Ollama" if self._is_ollama else "GLM/SiliconFlow/智谱AI" if self._is_streaming_unstable else "Unknown"
+                logger.debug(f"{reason} streaming disabled, using non-streaming mode")
+                try:
+                    result = await self._agent.run(
+                        message,
+                        deps=deps,
+                        message_history=self._message_history if self._message_history else None,
+                    )
+                except Exception as non_streaming_error:
+                    # 检查是否为智谱 AI 兼容性错误
+                    error_msg = str(non_streaming_error)
+                    if "validation errors for ChatCompletion" in error_msg or "bigmodel" in error_msg or "zhipu" in error_msg:
+                        raise RuntimeError(
+                            f"❌ Pydantic AI Agent 与当前 LLM 后端不兼容\n"
+                            f"   错误: API 响应格式验证失败\n"
+                            f"   详情: {non_streaming_error}\n"
+                            f"   建议: 使用 Claude Agent 代替（完全兼容智谱 AI）\n"
+                            f"   命令: regreader chat-claude -r {self.reg_id or 'angui_2024'}"
+                        ) from non_streaming_error
+                    else:
+                        raise
 
             # 更新消息历史
             self._message_history = result.all_messages()

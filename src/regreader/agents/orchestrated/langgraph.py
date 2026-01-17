@@ -216,7 +216,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
             if not llm_base_url.endswith("/v1"):
                 llm_base_url = llm_base_url.rstrip("/") + "/v1"
 
-            self._timing_collector = LLMTimingCollector(callback=self._callback)
+            self._timing_collector = LLMTimingCollector(callback=self.callback)
             self._ollama_http_client = httpx.AsyncClient(
                 transport=httpx.AsyncHTTPTransport(),
                 event_hooks={
@@ -400,7 +400,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
             query = state["query"]
 
             # 发送阶段变化事件
-            await self._callback.on_event(
+            await self.callback.on_event(
                 phase_change_event(
                     phase="routing",
                     description="分析查询并选择子图",
@@ -425,7 +425,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
             logger.debug(f"Router selected subgraphs: {selected}")
 
             # 发送路由结果事件
-            await self._callback.on_event(
+            await self.callback.on_event(
                 phase_change_event(
                     phase="routing_complete",
                     description=f"已选择子图: {', '.join(selected)}",
@@ -454,7 +454,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
 
             if self._mode == "parallel":
                 # 发送并行执行开始事件
-                await self._callback.on_event(
+                await self.callback.on_event(
                     phase_change_event(
                         phase="parallel_execution",
                         description=f"并行执行 {len(selected)} 个子图",
@@ -468,7 +468,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
                     builder = self._subgraph_builders[agent_type]
 
                     # 发送子图启动事件
-                    await self._callback.on_event(
+                    await self.callback.on_event(
                         tool_start_event(
                             tool_name=f"subgraph_{type_value}",
                             tool_input={"query": query, "reg_id": reg_id},
@@ -498,7 +498,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
                         # 发送子图错误事件
                         from regreader.agents.shared.events import tool_error_event
 
-                        await self._callback.on_event(
+                        await self.callback.on_event(
                             tool_error_event(
                                 tool_name=f"subgraph_{type_value}",
                                 error=str(output),
@@ -511,7 +511,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
                         all_tool_calls.extend(output["tool_calls"])
 
                         # 发送子图完成事件
-                        await self._callback.on_event(
+                        await self.callback.on_event(
                             tool_end_event(
                                 tool_name=f"subgraph_{type_value}",
                                 tool_id=tool_id,
@@ -524,7 +524,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
                         )
             else:
                 # 顺序执行
-                await self._callback.on_event(
+                await self.callback.on_event(
                     phase_change_event(
                         phase="sequential_execution",
                         description=f"顺序执行 {len(selected)} 个子图",
@@ -536,7 +536,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
                     builder = self._subgraph_builders[agent_type]
 
                     # 发送子图切换事件
-                    await self._callback.on_event(
+                    await self.callback.on_event(
                         phase_change_event(
                             phase=f"subgraph_{type_value}",
                             description=f"执行 {type_value} 子图",
@@ -545,7 +545,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
 
                     # 发送子图启动事件
                     tool_id = f"{type_value}_{id(query)}"
-                    await self._callback.on_event(
+                    await self.callback.on_event(
                         tool_start_event(
                             tool_name=f"subgraph_{type_value}",
                             tool_input={"query": query, "reg_id": reg_id},
@@ -562,7 +562,7 @@ class LangGraphOrchestrator(BaseOrchestrator):
                     all_tool_calls.extend(output["tool_calls"])
 
                     # 发送子图完成事件
-                    await self._callback.on_event(
+                    await self.callback.on_event(
                         tool_end_event(
                             tool_name=f"subgraph_{type_value}",
                             tool_id=tool_id,

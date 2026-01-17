@@ -341,3 +341,95 @@ def __getattr__(name: str) -> str:
     if name in _COMPAT_NAMES:
         return _COMPAT_NAMES[name]()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# ==================== 新增：统一动态提示词生成函数 ====================
+# 用于多智能体模式，支持从工具列表动态生成提示词
+
+def generate_tool_section_for_tools(tool_names: list[str]) -> str:
+    """从工具名称列表动态生成工具描述
+
+    Args:
+        tool_names: 工具名称列表（如 ['list_regulations', 'get_toc', ...]）
+
+    Returns:
+        工具描述字符串（Markdown 格式）
+    """
+    from regreader.mcp.tool_metadata import TOOL_METADATA
+
+    sections = []
+    for tool_name in tool_names:
+        if tool_name in TOOL_METADATA:
+            meta = TOOL_METADATA[tool_name]
+            sections.append(f"**{meta.name}** ({tool_name})\n{meta.description}")
+
+    return "\n\n".join(sections)
+
+
+def generate_role_for_subagent(subagent_type: "SubagentType") -> str:
+    """为子智能体类型生成专业化角色定义
+
+    Args:
+        subagent_type: 子智能体类型（SubagentType 枚举）
+
+    Returns:
+        角色定义字符串
+    """
+    from regreader.subagents.config import SubagentType
+
+    roles = {
+        SubagentType.REGSEARCH: (
+            "# 角色\n"
+            "你是电力系统规程专家助理 RegReader，具备在多部规程文档中动态'翻书'的能力。"
+        ),
+        SubagentType.SEARCH: (
+            "# 角色\n"
+            "你是文档搜索专家，负责在规程文档中定位和提取相关内容。"
+        ),
+        SubagentType.TABLE: (
+            "# 角色\n"
+            "你是表格数据专家，负责搜索和提取规程中的表格信息。"
+        ),
+        SubagentType.REFERENCE: (
+            "# 角色\n"
+            "你是引用解析专家，负责处理规程中的交叉引用和注释。"
+        ),
+        SubagentType.DISCOVERY: (
+            "# 角色\n"
+            "你是语义分析专家，负责发现相关内容和深度分析。"
+        ),
+    }
+
+    return roles.get(subagent_type, roles[SubagentType.REGSEARCH])
+
+
+def generate_workflow_for_tools(tool_names: list[str]) -> str:
+    """根据可用工具生成针对性的工作流程
+
+    Args:
+        tool_names: 可用工具名称列表
+
+    Returns:
+        工作流程字符串
+    """
+    # 分析工具组合，生成最优工作流程
+    has_search = 'smart_search' in tool_names
+    has_toc = 'get_toc' in tool_names
+    has_table = 'search_tables' in tool_names
+    has_reference = 'resolve_reference' in tool_names
+
+    workflow = ["# 工作流程"]
+
+    if has_toc:
+        workflow.append("1. **目录导航**：使用 get_toc() 了解章节结构")
+
+    if has_search:
+        workflow.append("2. **智能搜索**：使用 smart_search() 定位相关内容")
+
+    if has_table:
+        workflow.append("3. **表格查询**：使用 search_tables() 查找表格数据")
+
+    if has_reference:
+        workflow.append("4. **引用解析**：使用 resolve_reference() 解析交叉引用")
+
+    return "\n".join(workflow)
