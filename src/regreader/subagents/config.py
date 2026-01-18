@@ -343,62 +343,6 @@ DISCOVERY_AGENT_CONFIG = SubagentConfig(
 )
 
 
-# 配置注册表
-SUBAGENT_CONFIGS: dict[SubagentType, SubagentConfig] = {
-    # 领域子代理
-    SubagentType.REGSEARCH: REGSEARCH_AGENT_CONFIG,
-    # 内部组件子代理
-    SubagentType.SEARCH: SEARCH_AGENT_CONFIG,
-    SubagentType.TABLE: TABLE_AGENT_CONFIG,
-    SubagentType.REFERENCE: REFERENCE_AGENT_CONFIG,
-    SubagentType.DISCOVERY: DISCOVERY_AGENT_CONFIG,
-    # L1 原子化子任务（新架构）- 配置待实现
-    # SubagentType.LOCATE_CHAPTERS: LOCATE_CHAPTERS_CONFIG,
-    # SubagentType.FETCH_CONTENT: FETCH_CONTENT_CONFIG,
-    # SubagentType.FIND_TABLES: FIND_TABLES_CONFIG,
-    # SubagentType.RESOLVE_REFERENCES: RESOLVE_REFERENCES_CONFIG,
-    # SubagentType.SEMANTIC_SEARCH: SEMANTIC_SEARCH_CONFIG,
-}
-
-
-def get_enabled_configs() -> list[SubagentConfig]:
-    """获取所有启用的 Subagent 配置
-
-    Returns:
-        启用的配置列表，按优先级排序
-    """
-    configs = [c for c in SUBAGENT_CONFIGS.values() if c.enabled]
-    return sorted(configs, key=lambda c: c.priority)
-
-
-def get_config(agent_type: SubagentType) -> SubagentConfig:
-    """获取指定类型的配置
-
-    Args:
-        agent_type: Subagent 类型
-
-    Returns:
-        对应的配置
-
-    Raises:
-        KeyError: 类型不存在
-    """
-    return SUBAGENT_CONFIGS[agent_type]
-
-
-def get_all_tools() -> list[str]:
-    """获取所有 Subagent 使用的工具（去重）
-
-    Returns:
-        工具名列表
-    """
-    tools = set()
-    for config in SUBAGENT_CONFIGS.values():
-        if config.enabled:
-            tools.update(config.tools)
-    return list(tools)
-
-
 # ==================== L1 原子化子任务配置（新架构）====================
 
 LOCATE_CHAPTERS_CONFIG = SubagentConfig(
@@ -600,3 +544,59 @@ SEMANTIC_SEARCH_CONFIG = SubagentConfig(
     enabled=True,
     max_iterations=5,
 )
+
+
+# 配置注册表
+SUBAGENT_CONFIGS: dict[SubagentType, SubagentConfig] = {
+    # 领域子代理
+    SubagentType.REGSEARCH: REGSEARCH_AGENT_CONFIG,
+    # 内部组件子代理
+    SubagentType.SEARCH: SEARCH_AGENT_CONFIG,
+    SubagentType.TABLE: TABLE_AGENT_CONFIG,
+    SubagentType.REFERENCE: REFERENCE_AGENT_CONFIG,
+    SubagentType.DISCOVERY: DISCOVERY_AGENT_CONFIG,
+    # L1 原子化子任务（新架构）
+    SubagentType.LOCATE_CHAPTERS: LOCATE_CHAPTERS_CONFIG,
+    SubagentType.FETCH_CONTENT: FETCH_CONTENT_CONFIG,
+    SubagentType.FIND_TABLES: FIND_TABLES_CONFIG,
+    SubagentType.RESOLVE_REFERENCES: RESOLVE_REFERENCES_CONFIG,
+    SubagentType.SEMANTIC_SEARCH: SEMANTIC_SEARCH_CONFIG,
+}
+
+
+def get_enabled_configs() -> list[SubagentConfig]:
+    """获取所有启用的 Subagent 配置
+
+    Returns:
+        启用的配置列表，按优先级排序
+    """
+    configs = [c for c in SUBAGENT_CONFIGS.values() if c.enabled]
+    return sorted(configs, key=lambda c: c.priority)
+
+
+def get_config(agent_type: SubagentType) -> SubagentConfig:
+    """获取指定类型的配置
+
+    Args:
+        agent_type: Subagent 类型
+
+    Returns:
+        对应的配置
+
+    Raises:
+        KeyError: 类型不存在
+    """
+    return SUBAGENT_CONFIGS[agent_type]
+
+
+def get_all_tools() -> list[str]:
+    """获取所有 Subagent 使用的工具（去重）
+
+    Returns:
+        工具名列表
+    """
+    tools = set()
+    for config in SUBAGENT_CONFIGS.values():
+        if config.enabled:
+            tools.update(config.tools)
+    return list(tools)
