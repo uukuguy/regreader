@@ -125,6 +125,12 @@ class AgentType(str, Enum):
     langgraph = "langgraph"
 
 
+class AgentMode(str, Enum):
+    """Agent 运行模式"""
+    standard = "standard"
+    orchestrated = "orchestrated"
+
+
 @app.command()
 def ingest(
     file: Path = typer.Option(None, "--file", "-f", help="单个文档文件路径"),
@@ -545,8 +551,11 @@ def chat(
     agent_type: AgentType = typer.Option(
         AgentType.claude, "--agent", "-a", help="Agent 类型"
     ),
+    mode: AgentMode = typer.Option(
+        AgentMode.standard, "--mode", help="Agent 运行模式: standard（标准）, orchestrated（编排）"
+    ),
     orchestrator: bool = typer.Option(
-        False, "--orchestrator", "-o", help="启用 Orchestrator 模式（Subagent 架构）"
+        False, "--orchestrator", "-o", help="启用 Orchestrator 模式（等同于 --mode orchestrated，保留用于向后兼容）"
     ),
     display: str = typer.Option(
         "simple",
@@ -571,12 +580,13 @@ def chat(
 ):
     """与 Agent 对话（交互模式）
 
-    使用 --orchestrator 启用 Subagent 架构模式，通过专家代理协调实现更好的任务分解。
+    使用 --mode orchestrated 或 -o 启用编排模式，通过层级化智能体架构实现更好的任务分解。
 
     示例：
         gridcode chat                           # 自动识别规程
         gridcode chat -r angui_2024             # 限定在安规中查询
-        gridcode chat -o                        # 使用 Orchestrator 模式
+        gridcode chat --mode orchestrated       # 使用编排模式
+        gridcode chat -o                        # 使用编排模式（简写，向后兼容）
     """
     from regreader.agents.shared.callbacks import NullCallback
     from regreader.agents.shared.display import AgentStatusDisplay
@@ -599,8 +609,8 @@ def chat(
             status_callback = NullCallback()
         elif display == "clean":
             # 简洁显示模式
-            mode = DisplayMode.VERBOSE if verbose else DisplayMode.COMPACT
-            status_callback = CleanAgentStatusDisplay(console, mode=mode)
+            display_mode = DisplayMode.VERBOSE if verbose else DisplayMode.COMPACT
+            status_callback = CleanAgentStatusDisplay(console, mode=display_mode)
         elif display == "enhanced" or enhanced:
             # 增强显示模式（兼容旧的 --enhanced 标志）
             status_callback = EnhancedAgentStatusDisplay(console, verbose=verbose, detail_mode=display_detail)
@@ -619,8 +629,14 @@ def chat(
                 format="{message}",
             )
 
-        # 创建 Agent
+        # 向后兼容：-o 标志映射到 orchestrated 模式
+        # 使用 nonlocal 声明以修改外部函数的 mode 变量
+        nonlocal mode
         if orchestrator:
+            mode = AgentMode.orchestrated
+
+        # 创建 Agent
+        if mode == AgentMode.orchestrated:
             # Orchestrator 模式（Subagent 架构）
             if agent_type == AgentType.claude:
                 from regreader.agents import ClaudeOrchestrator
@@ -716,11 +732,11 @@ def ask(
     agent_type: AgentType = typer.Option(
         AgentType.claude, "--agent", "-a", help="Agent 类型"
     ),
-    orchestrator: bool = typer.Option(
-        False, "--orchestrator", "-o", help="启用 Orchestrator 模式（Subagent 架构）"
+    mode: AgentMode = typer.Option(
+        AgentMode.standard, "--mode", help="Agent 运行模式: standard（标准）, orchestrated（编排）"
     ),
-    main_agent: bool = typer.Option(
-        False, "--main-agent", "-m", help="启用主智能体模式（任务级拆解 + Bash+FS 范式）"
+    orchestrator: bool = typer.Option(
+        False, "--orchestrator", "-o", help="启用 Orchestrator 模式（等同于 --mode orchestrated，保留用于向后兼容）"
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="JSON 格式输出"),
     display: str = typer.Option(
@@ -746,16 +762,15 @@ def ask(
 ):
     """单次查询 Agent（非交互模式）
 
-    使用 --orchestrator 启用 Subagent 架构模式，通过专家代理协调实现更好的任务分解。
-    使用 --main-agent 启用主智能体模式（Bash+FS 范式），主智能体负责任务级拆解，子智能体负责原子级执行。
+    使用 --mode orchestrated 或 -o 启用编排模式，通过层级化智能体架构实现更好的任务分解。
 
     示例:
-        gridcode ask "母线失压如何处理?"              # 自动识别规程
-        gridcode ask "什么是安规?" -r angui_2024     # 限定在安规中查询
-        gridcode ask "安全距离是多少?" -v            # 详细模式
-        gridcode ask "什么是接地?" -q                # 静默模式
-        gridcode ask "表6-2注1的内容" -o             # Orchestrator 模式
-        gridcode ask "锦苏直流安控装置在母线失压时的动作逻辑" -m -r angui_2024  # 主智能体模式
+        gridcode ask "母线失压如何处理?"                          # 自动识别规程
+        gridcode ask "什么是安规?" -r angui_2024                 # 限定在安规中查询
+        gridcode ask "安全距离是多少?" -v                        # 详细模式
+        gridcode ask "什么是接地?" -q                            # 静默模式
+        gridcode ask "表6-2注1的内容" --mode orchestrated       # 编排模式（推荐）
+        gridcode ask "表6-2注1的内容" -o                        # 编排模式（简写，向后兼容）
     """
     from regreader.agents.shared.callbacks import NullCallback
     from regreader.agents.shared.display import AgentStatusDisplay
@@ -794,31 +809,14 @@ def ask(
                 format="{message}",
             )
 
+        # 向后兼容：-o 标志映射到 orchestrated 模式
+        # 使用 nonlocal 声明以修改外部函数的 mode 变量
+        nonlocal mode
+        if orchestrator:
+            mode = AgentMode.orchestrated
+
         # 创建 Agent
-        if main_agent:
-            # 主智能体模式（Bash+FS 范式）
-            from regreader.agents.main import MainAgent
-
-            # 从 state 解析 MCP 配置
-            if state.use_mcp and state.mcp_transport == "sse" and state.mcp_url:
-                from urllib.parse import urlparse
-                parsed = urlparse(state.mcp_url)
-                mcp_transport_for_main = state.mcp_transport
-                mcp_host_for_main = parsed.hostname or "127.0.0.1"
-                mcp_port_for_main = parsed.port or 8080
-            else:
-                mcp_transport_for_main = None
-                mcp_host_for_main = None
-                mcp_port_for_main = None
-
-            # 传递 MCP 配置
-            agent = MainAgent(
-                reg_id=reg_id or "angui_2024",
-                mcp_transport=mcp_transport_for_main,
-                mcp_host=mcp_host_for_main,
-                mcp_port=mcp_port_for_main,
-            )
-        elif orchestrator:
+        if mode == AgentMode.orchestrated:
             # Orchestrator 模式（Subagent 架构）
             if agent_type == AgentType.claude:
                 from regreader.agents import ClaudeOrchestrator
@@ -842,39 +840,7 @@ def ask(
                 agent = LangGraphAgent(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
 
         try:
-            if main_agent:
-                # 主智能体模式：直接调用 query() 方法
-                response_content = await agent.query(query)
-
-                if not json_output:
-                    # 非 JSON 模式
-                    from rich.markdown import Markdown
-                    from rich.panel import Panel
-
-                    console.print()  # 空行分隔
-                    console.print(Panel(
-                        Markdown(response_content),
-                        title="[bold green]主智能体回答[/bold green]",
-                        border_style="green",
-                        padding=(1, 2),
-                    ))
-
-                    # 显示工作区位置
-                    session_info = agent.get_session_info()
-                    console.print(f"\n[dim]会话记录: {session_info['session_dir']}[/dim]")
-                else:
-                    # JSON 模式
-                    import json
-
-                    session_info = agent.get_session_info()
-                    result = {
-                        "query": query,
-                        "agent": "MainAgent",
-                        "content": response_content,
-                        "session_info": session_info,
-                    }
-                    console.print(json.dumps(result, ensure_ascii=False, indent=2))
-            elif not json_output:
+            if not json_output:
                 # 非 JSON 模式：使用状态显示
                 from rich.markdown import Markdown
                 from rich.panel import Panel

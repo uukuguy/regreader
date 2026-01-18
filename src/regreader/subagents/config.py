@@ -15,7 +15,23 @@ class SubagentType(str, Enum):
     REGSEARCH = "regsearch"
     """规程检索代理：整合搜索、表格、引用、发现功能的领域子代理"""
 
-    # 内部组件子代理（作为 REGSEARCH 的内部组件）
+    # L1 原子化子任务（Atomic Subagents - 新架构）
+    LOCATE_CHAPTERS = "locate_chapters"
+    """定位章节：从规程目录中定位主任务可能的章节"""
+
+    FETCH_CONTENT = "fetch_content"
+    """获取内容：获取指定章节的完整内容"""
+
+    FIND_TABLES = "find_tables"
+    """查找表格：查找并提取相关表格数据"""
+
+    RESOLVE_REFERENCES = "resolve_references"
+    """解析引用：解析交叉引用和注释"""
+
+    SEMANTIC_SEARCH = "semantic_search"
+    """语义搜索：基于语义相似度查找相关内容"""
+
+    # 内部组件子代理（作为 REGSEARCH 的内部组件 - 旧架构，保留兼容）
     SEARCH = "search"
     """搜索代理：文档搜索与导航"""
 
@@ -336,6 +352,12 @@ SUBAGENT_CONFIGS: dict[SubagentType, SubagentConfig] = {
     SubagentType.TABLE: TABLE_AGENT_CONFIG,
     SubagentType.REFERENCE: REFERENCE_AGENT_CONFIG,
     SubagentType.DISCOVERY: DISCOVERY_AGENT_CONFIG,
+    # L1 原子化子任务（新架构）- 配置待实现
+    # SubagentType.LOCATE_CHAPTERS: LOCATE_CHAPTERS_CONFIG,
+    # SubagentType.FETCH_CONTENT: FETCH_CONTENT_CONFIG,
+    # SubagentType.FIND_TABLES: FIND_TABLES_CONFIG,
+    # SubagentType.RESOLVE_REFERENCES: RESOLVE_REFERENCES_CONFIG,
+    # SubagentType.SEMANTIC_SEARCH: SEMANTIC_SEARCH_CONFIG,
 }
 
 
@@ -375,3 +397,206 @@ def get_all_tools() -> list[str]:
         if config.enabled:
             tools.update(config.tools)
     return list(tools)
+
+
+# ==================== L1 原子化子任务配置（新架构）====================
+
+LOCATE_CHAPTERS_CONFIG = SubagentConfig(
+    agent_type=SubagentType.LOCATE_CHAPTERS,
+    name="LocateChaptersSubagent",
+    description="""定位章节原子化子任务：从规程目录中定位主任务可能的章节。
+
+**功能**：
+- 接收用户任务关键词和规程ID
+- 分析目录结构，匹配相关章节
+- 返回章节编号列表和章节标题
+
+**内部规划**：
+1. 使用 get_toc 获取规程目录结构
+2. 分析目录层级和章节标题
+3. 根据关键词匹配相关章节
+4. 返回结构化的章节列表
+
+**输入示例**：
+- 任务关键词: "母线失压"
+- 规程ID: "angui_2024"
+
+**输出示例**：
+- 章节列表: ["2.1.4.1.6", "6.2.3"]
+- 章节标题: ["母线失压处理", "母线故障应急措施"]
+
+**可用工具**（2个）：
+- get_toc: 获取目录结构
+- get_chapter_structure: 获取章节详细结构""",
+    tools=[
+        "get_toc",
+        "get_chapter_structure",
+    ],
+    priority=1,
+    enabled=True,
+    max_iterations=3,
+)
+
+FETCH_CONTENT_CONFIG = SubagentConfig(
+    agent_type=SubagentType.FETCH_CONTENT,
+    name="FetchContentSubagent",
+    description="""获取内容原子化子任务：获取指定章节的完整内容。
+
+**功能**：
+- 接收章节编号和规程ID
+- 获取章节的完整文本内容
+- 支持多种获取方式（章节读取、页面范围读取）
+
+**内部规划**：
+1. 优先使用 read_chapter_content 获取章节内容
+2. 如果章节跨页，使用 read_page_range 补充
+3. 使用 get_block_with_context 获取上下文（如需要）
+4. 返回完整的章节文本内容
+
+**输入示例**：
+- 章节编号: "2.1.4.1.6"
+- 规程ID: "angui_2024"
+
+**输出示例**：
+- 章节内容: "母线失压处理：当发现母线失压时，应立即..."
+- 页码范围: [45, 47]
+- 内容长度: 1500 字符
+
+**可用工具**（3个）：
+- read_chapter_content: 读取章节内容
+- read_page_range: 读取页面范围
+- get_block_with_context: 获取块内容及上下文""",
+    tools=[
+        "read_chapter_content",
+        "read_page_range",
+        "get_block_with_context",
+    ],
+    priority=1,
+    enabled=True,
+    max_iterations=3,
+)
+
+FIND_TABLES_CONFIG = SubagentConfig(
+    agent_type=SubagentType.FIND_TABLES,
+    name="FindTablesSubagent",
+    description="""查找表格原子化子任务：查找并提取相关表格数据。
+
+**功能**：
+- 接收查询关键词和规程ID
+- 查找相关表格
+- 提取完整表格内容（包括跨页表格）
+
+**内部规划**：
+1. 使用 search_tables 搜索相关表格
+2. 使用 get_table_by_id 获取完整表格内容
+3. 如果表格包含注释，使用 lookup_annotation 获取注释内容
+4. 返回表格数据和位置信息
+
+**输入示例**：
+- 查询关键词: "母线失压"
+- 规程ID: "angui_2024"
+- 可选章节范围: "第六章"
+
+**输出示例**：
+- 表格ID: "table_6_2"
+- 表格标题: "母线失压处理流程"
+- 表格内容: [表格数据]
+- 页码: 45
+- 注释: ["注1: ...", "注2: ..."]
+
+**可用工具**（3个）：
+- search_tables: 表格搜索（关键词和语义）
+- get_table_by_id: 获取完整表格（自动处理跨页）
+- lookup_annotation: 查找表格注释""",
+    tools=[
+        "search_tables",
+        "get_table_by_id",
+        "lookup_annotation",
+    ],
+    priority=1,
+    enabled=True,
+    max_iterations=5,
+)
+
+RESOLVE_REFERENCES_CONFIG = SubagentConfig(
+    agent_type=SubagentType.RESOLVE_REFERENCES,
+    name="ResolveReferencesSubagent",
+    description="""解析引用原子化子任务：解析交叉引用和注释。
+
+**功能**：
+- 接收引用文本和规程ID
+- 解析章节引用、表格引用、附录引用、条款引用
+- 解析注释引用
+- 返回引用目标内容和位置信息
+
+**内部规划**：
+1. 使用 resolve_reference 解析交叉引用
+2. 使用 lookup_annotation 查找注释内容
+3. 使用 read_page_range 获取引用目标的完整内容
+4. 返回引用目标内容和位置信息
+
+**输入示例**：
+- 引用文本: "见第六章" / "注1" / "见表6-2"
+- 规程ID: "angui_2024"
+- 页码提示: 45 (可选)
+
+**输出示例**：
+- 引用类型: "章节引用" / "注释引用" / "表格引用"
+- 目标位置: "第六章" / "页45注1" / "表6-2"
+- 目标内容: "第六章内容..." / "注1: ..." / "表6-2内容..."
+- 页码: 45
+
+**可用工具**（3个）：
+- resolve_reference: 解析交叉引用
+- lookup_annotation: 查找注释
+- read_page_range: 读取引用目标内容""",
+    tools=[
+        "resolve_reference",
+        "lookup_annotation",
+        "read_page_range",
+    ],
+    priority=1,
+    enabled=True,
+    max_iterations=5,
+)
+
+SEMANTIC_SEARCH_CONFIG = SubagentConfig(
+    agent_type=SubagentType.SEMANTIC_SEARCH,
+    name="SemanticSearchSubagent",
+    description="""语义搜索原子化子任务：基于语义相似度查找相关内容。
+
+**功能**：
+- 接收查询描述和规程ID
+- 基于语义相似度查找相关内容
+- 支持章节范围限定
+- 返回最相关的内容片段
+
+**内部规划**：
+1. 使用 smart_search 进行语义搜索
+2. 使用 find_similar_content 发现相似内容
+3. 使用 compare_sections 进行章节对比（如需要）
+4. 返回相关内容片段和相似度分数
+
+**输入示例**：
+- 查询描述: "查找类似的故障处理方法"
+- 规程ID: "angui_2024"
+- 可选章节范围: "第六章"
+
+**输出示例**：
+- 相关内容: ["母线失压处理...", "线路故障处理...", ...]
+- 相似度分数: [0.92, 0.87, ...]
+- 页码: [45, 67, ...]
+
+**可用工具**（3个）：
+- smart_search: 智能搜索（支持语义模式）
+- find_similar_content: 相似内容发现
+- compare_sections: 章节对比分析""",
+    tools=[
+        "smart_search",
+        "find_similar_content",
+        "compare_sections",
+    ],
+    priority=2,
+    enabled=True,
+    max_iterations=5,
+)

@@ -54,6 +54,7 @@ class MCPConnectionConfig:
         stdio_args: stdio 模式的命令参数
         auto_reconnect: 连接断开时是否自动重连
         connect_timeout: 连接超时时间（秒）
+        allowed_tools: 允许的工具白名单（None 表示允许所有工具）
     """
 
     transport: Literal["stdio", "sse"] = "stdio"
@@ -63,6 +64,7 @@ class MCPConnectionConfig:
     stdio_args: list[str] = field(default_factory=lambda: MCP_SERVER_ARGS.copy())
     auto_reconnect: bool = True
     connect_timeout: float = 30.0
+    allowed_tools: list[str] | None = None
 
     def __post_init__(self):
         """验证配置"""
@@ -337,11 +339,49 @@ class MCPConnectionManager:
             self._client = RegReaderMCPClient(
                 transport=self.config.transport,
                 server_url=self.config.server_url,
+                allowed_tools=self.config.allowed_tools,
             )
             await self._client.connect()
             self._connected = True
 
         return self._client
+
+    def is_tool_allowed(self, tool_name: str) -> bool:
+        """检查工具是否在白名单中
+
+        Args:
+            tool_name: 工具名称
+
+        Returns:
+            True 如果工具被允许，False 否则
+        """
+        if self.config.allowed_tools is None:
+            return True  # 没有白名单限制，允许所有工具
+        return tool_name in self.config.allowed_tools
+
+    def get_allowed_tools(self) -> list[str] | None:
+        """获取允许的工具列表
+
+        Returns:
+            工具白名单，None 表示允许所有工具
+        """
+        return self.config.allowed_tools
+
+    def is_connected(self) -> bool:
+        """检查是否已连接
+
+        Returns:
+            True 如果已连接，False 否则
+        """
+        return self._connected
+
+    async def connect(self) -> None:
+        """建立连接
+
+        如果尚未连接，创建并连接 MCP 客户端。
+        """
+        if not self._connected:
+            await self.get_client()
 
     async def close(self) -> None:
         """关闭连接"""
