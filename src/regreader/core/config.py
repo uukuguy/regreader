@@ -19,6 +19,7 @@ class RegReaderSettings(BaseSettings):
         env_prefix="REGREADER_",
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="allow",  # 允许读取非 REGREADER_ 前缀的环境变量（用于 validation_alias）
     )
 
     # 存储路径配置
@@ -125,7 +126,7 @@ class RegReaderSettings(BaseSettings):
     llm_api_key: str = Field(
         default="",
         description="LLM API 密钥",
-        validation_alias=AliasChoices("OPENAI_API_KEY", "LLM_API_KEY"),
+        validation_alias=AliasChoices("OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "LLM_API_KEY"),
     )
     llm_model_name: str = Field(
         default="claude-sonnet-4-20250514",

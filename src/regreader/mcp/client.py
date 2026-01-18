@@ -42,6 +42,7 @@ class RegReaderMCPClient:
         self,
         transport: Literal["stdio", "sse"] = "stdio",
         server_url: str | None = None,
+        allowed_tools: list[str] | None = None,
     ):
         """初始化 MCP 客户端
 
@@ -50,6 +51,7 @@ class RegReaderMCPClient:
                 - "stdio": 自动启动 MCP Server 子进程
                 - "sse": 连接外部 MCP Server（需提供 server_url）
             server_url: SSE 模式时的服务器 URL，如 "http://localhost:8080/sse"
+            allowed_tools: 允许的工具白名单（None 表示允许所有工具）
 
         Raises:
             ValueError: SSE 模式未提供 server_url
@@ -59,6 +61,7 @@ class RegReaderMCPClient:
 
         self.transport = transport
         self.server_url = server_url
+        self.allowed_tools = allowed_tools
         self.session: ClientSession | None = None
         self.exit_stack = AsyncExitStack()
         self._tools_cache: list[dict] | None = None
@@ -77,7 +80,7 @@ class RegReaderMCPClient:
 
         # 获取可用工具
         response = await self.session.list_tools()
-        self._tools_cache = [
+        all_tools = [
             {
                 "name": tool.name,
                 "description": tool.description,
@@ -86,10 +89,22 @@ class RegReaderMCPClient:
             for tool in response.tools
         ]
 
-        logger.debug(
-            f"Connected to MCP server ({self.transport}) with tools: "
-            f"{[t['name'] for t in self._tools_cache]}"
-        )
+        # 应用工具白名单过滤
+        if self.allowed_tools is not None:
+            self._tools_cache = [
+                tool for tool in all_tools if tool["name"] in self.allowed_tools
+            ]
+            logger.debug(
+                f"Connected to MCP server ({self.transport}), "
+                f"filtered {len(all_tools)} tools to {len(self._tools_cache)} allowed tools: "
+                f"{[t['name'] for t in self._tools_cache]}"
+            )
+        else:
+            self._tools_cache = all_tools
+            logger.debug(
+                f"Connected to MCP server ({self.transport}) with {len(self._tools_cache)} tools: "
+                f"{[t['name'] for t in self._tools_cache]}"
+            )
 
     async def _connect_stdio(self) -> None:
         """通过 stdio 传输连接（启动子进程）"""
@@ -185,9 +200,20 @@ class RegReaderMCPClient:
 
         Returns:
             工具执行结果
+
+        Raises:
+            RuntimeError: 客户端未连接
+            PermissionError: 工具不在白名单中
         """
         if self.session is None:
             raise RuntimeError("MCP client not connected")
+
+        # 检查工具访问权限
+        if not self.is_tool_allowed(name):
+            raise PermissionError(
+                f"Tool '{name}' is not in the allowed tools list. "
+                f"Allowed tools: {self.allowed_tools}"
+            )
 
         logger.debug(f"Calling MCP tool: {name} with args: {arguments}")
 
@@ -242,3 +268,16 @@ class RegReaderMCPClient:
             LangChain tool 格式的工具列表
         """
         return self.get_tools_for_anthropic()
+
+    def is_tool_allowed(self, tool_name: str) -> bool:
+        """检查工具是否在白名单中
+
+        Args:
+            tool_name: 工具名称
+
+        Returns:
+            True 如果工具被允许，False 否则
+        """
+        if self.allowed_tools is None:
+            return True  # 没有白名单限制，允许所有工具
+        return tool_name in self.allowed_tools

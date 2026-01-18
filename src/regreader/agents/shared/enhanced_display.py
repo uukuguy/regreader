@@ -695,6 +695,44 @@ class EnhancedAgentStatusDisplay:
         self._current_step = None
         self._refresh()
 
+    def on_step_start(self, step_num: int, description: str) -> None:
+        """处理步骤开始事件（MainAgent 使用）
+
+        Args:
+            step_num: 步骤编号
+            description: 步骤描述
+        """
+        # 如果有当前步骤正在进行，先结束它
+        if self._current_step:
+            self._history.update_step(
+                self._current_step,
+                state=DisplayState.COMPLETED,
+            )
+
+        # 创建新步骤
+        step = self._history.add_step(
+            description=description,
+            state=DisplayState.ANALYZING,
+        )
+        self._current_step = step
+        self._refresh()
+
+    def on_step_end(self, step_num: int, result_summary: str = "") -> None:
+        """处理步骤结束事件（MainAgent 使用）
+
+        Args:
+            step_num: 步骤编号
+            result_summary: 结果摘要
+        """
+        if self._current_step:
+            self._history.update_step(
+                self._current_step,
+                state=DisplayState.COMPLETED,
+                result_summary=result_summary or "✓ 完成",
+            )
+            self._current_step = None
+            self._refresh()
+
     def _format_result_summary(self, result: Any) -> str:
         """格式化结果摘要
 

@@ -211,7 +211,7 @@ class BaseOrchestrator(BaseRegReaderAgent, ABC):
 
         # 4. 记录查询（如果使用 Coordinator）
         if self.use_coordinator and self.coordinator:
-            self.coordinator.log_query(message)
+            await self.coordinator.log_query(message, hints, self.reg_id)
 
         # 5. 构建上下文
         context_info = self._build_context_info(hints)
@@ -233,7 +233,7 @@ class BaseOrchestrator(BaseRegReaderAgent, ABC):
 
         # 9. 写入结果（如果使用 Coordinator）
         if self.use_coordinator and self.coordinator:
-            self.coordinator.write_result(content, self._sources)
+            await self.coordinator.write_result(content, self._sources, self._tool_calls)
 
         # 10. 返回响应
         return AgentResponse(

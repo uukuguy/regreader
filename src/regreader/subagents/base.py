@@ -3,13 +3,17 @@
 定义所有 Subagent 的抽象基类和通用数据结构。
 """
 
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from regreader.orchestration.result import SubagentResult
 
 if TYPE_CHECKING:
+    from regreader.orchestration.hierarchy_manager import HierarchyManager
     from regreader.subagents.config import SubagentConfig, SubagentType
 
 
@@ -86,15 +90,27 @@ class BaseSubagent(ABC):
     - 定义统一的执行接口 `execute()`
     - 提供配置和上下文管理
     - 支持异步执行
+    - 集成 HierarchyManager 进行父子追踪
     """
 
-    def __init__(self, config: "SubagentConfig"):
+    def __init__(
+        self,
+        config: "SubagentConfig",
+        hierarchy_manager: "HierarchyManager | None" = None,
+        parent_id: str | None = None,
+    ):
         """初始化 Subagent
 
         Args:
             config: Subagent 配置
+            hierarchy_manager: 层级管理器（用于父子追踪）
+            parent_id: 父 agent ID（用于追踪调用栈）
         """
         self.config = config
+        self.hierarchy_manager = hierarchy_manager
+        self.parent_id = parent_id
+        self.agent_id = f"{config.agent_type.value}_{uuid.uuid4().hex[:8]}"
+        self._registered = False
 
     @property
     def agent_type(self) -> "SubagentType":
@@ -110,6 +126,51 @@ class BaseSubagent(ABC):
     def tools(self) -> list[str]:
         """可用工具列表"""
         return self.config.tools
+
+    def register_to_hierarchy(self, user_input: str) -> None:
+        """注册到 HierarchyManager
+
+        Args:
+            user_input: 用户输入（子任务描述）
+        """
+        if self.hierarchy_manager is not None and not self._registered:
+            self.hierarchy_manager.push_agent(
+                agent_id=self.agent_id,
+                agent_name=self.name,
+                parent_id=self.parent_id,
+                level=1,  # L1 子智能体
+                user_input=user_input,
+            )
+            self._registered = True
+            logger.debug(
+                f"Registered {self.name} (id={self.agent_id}) to HierarchyManager, "
+                f"parent_id={self.parent_id}"
+            )
+
+    def unregister_from_hierarchy(self) -> None:
+        """从 HierarchyManager 注销"""
+        if self.hierarchy_manager is not None and self._registered:
+            self.hierarchy_manager.pop_agent(self.agent_id)
+            self._registered = False
+            logger.debug(f"Unregistered {self.name} (id={self.agent_id}) from HierarchyManager")
+
+    def update_status(
+        self, status: str, thinking: str | None = None, output: str | None = None
+    ) -> None:
+        """更新 agent 状态到 HierarchyManager
+
+        Args:
+            status: 状态（如 "running", "completed", "failed"）
+            thinking: 思考过程
+            output: 输出结果
+        """
+        if self.hierarchy_manager is not None and self._registered:
+            self.hierarchy_manager.update_agent_status(
+                agent_id=self.agent_id,
+                status=status,
+                thinking=thinking,
+                output=output,
+            )
 
     @abstractmethod
     async def execute(self, context: SubagentContext) -> SubagentResult:

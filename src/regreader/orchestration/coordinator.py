@@ -217,9 +217,10 @@ class Coordinator:
         """
         logger.info("记录结果")
 
-        # 更新累积来源
-        self.session_state.accumulated_sources.extend(sources)
-        self.session_state.accumulated_sources = list(set(self.session_state.accumulated_sources))
+        # 更新累积来源（保持顺序的去重）
+        for source in sources:
+            if source not in self.session_state.accumulated_sources:
+                self.session_state.accumulated_sources.append(source)
 
         # 写入结果
         if self.uses_file_system:

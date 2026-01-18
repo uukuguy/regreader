@@ -1,7 +1,20 @@
 """主智能体：任务级拆解和调度
 
+⚠️ DEPRECATED: 此实现已废弃，请使用新的 OrchestratorAgent 架构。
+
 使用 Claude Agent SDK + preset: "claude_code" 实现主智能体。
 主智能体负责将用户查询拆解为任务级子任务，然后通过文件系统分发给子智能体。
+
+迁移指南:
+- 旧方式: regreader ask "..." --main-agent -r angui_2024
+- 新方式: regreader ask "..." --mode orchestrated -r angui_2024
+- 或使用: regreader ask "..." -o -r angui_2024
+
+新架构优势:
+- 基于 infiAgent 的层级化智能体架构
+- HierarchyManager 进行父子追踪和状态持久化
+- 工具白名单强制执行
+- 支持三个框架 (Claude SDK / Pydantic AI / LangGraph)
 """
 
 import asyncio
@@ -30,6 +43,8 @@ from regreader.core.config import get_settings
 class MainAgent:
     """主智能体：任务级拆解和调度
 
+    ⚠️ DEPRECATED: 此类已废弃，请使用 OrchestratorAgent。
+
     使用 Claude Agent SDK + preset: "claude_code"
 
     职责：
@@ -49,6 +64,7 @@ class MainAgent:
         mcp_transport: str | None = None,
         mcp_host: str | None = None,
         mcp_port: int | None = None,
+        status_callback: Any | None = None,
     ):
         """初始化主智能体
 
@@ -61,17 +77,35 @@ class MainAgent:
             mcp_transport: MCP 传输方式（可选，从 CLI 传递）
             mcp_host: MCP 主机地址（可选，从 CLI 传递）
             mcp_port: MCP 端口（可选，从 CLI 传递）
+            status_callback: 状态回调（可选，用于显示工作步骤）
         """
         if not HAS_CLAUDE_SDK:
             raise ImportError(
                 "claude-agent-sdk 未安装。请运行: pip install claude-agent-sdk"
             )
 
+        # 废弃警告
+        import warnings
+        warnings.warn(
+            "MainAgent 已废弃，请使用 OrchestratorAgent。"
+            "使用 --mode orchestrated 或 -o 标志启用新架构。",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        logger.warning(
+            "⚠️  MainAgent 已废弃，请迁移到 OrchestratorAgent。"
+            "新架构提供更好的层级化智能体管理和工具访问控制。"
+        )
+
         self.reg_id = reg_id
         self.session_id = session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
         self.workspace_root = workspace_root
         self.session_dir = workspace_root / f"session_{self.session_id}"
         self.session_dir.mkdir(parents=True, exist_ok=True)
+
+        # 状态回调（用于显示工作步骤）
+        self.status_callback = status_callback
+        self._step_counter = 0  # 步骤计数器
 
         # 获取配置
         settings = get_settings()
@@ -83,12 +117,43 @@ class MainAgent:
         self.mcp_host = mcp_host or settings.mcp_host
         self.mcp_port = mcp_port or settings.mcp_port
 
+        # 配置 Claude Agent SDK 以支持 Skills
+        self.agent_options = ClaudeAgentOptions(
+            cwd=Path.cwd(),  # 当前工作目录（包含 .claude/skills/）
+            setting_sources=["user", "project"],  # 加载用户和项目级 Skills
+            allowed_tools=["Skill"],  # 启用 Skills 机制
+            model=self.model,
+        )
+
         # 初始化 Claude SDK Client（稍后在 query 时创建）
         self.client: ClaudeSDKClient | None = None
 
-        logger.info(
-            f"MainAgent 初始化: reg_id={reg_id}, session_id={self.session_id}, mcp_transport={self.mcp_transport}"
-        )
+    def _emit_step_start(self, description: str) -> int:
+        """发出步骤开始事件
+
+        Args:
+            description: 步骤描述
+
+        Returns:
+            步骤编号
+        """
+        self._step_counter += 1
+        step_num = self._step_counter
+
+        if self.status_callback and hasattr(self.status_callback, 'on_step_start'):
+            self.status_callback.on_step_start(step_num, description)
+
+        return step_num
+
+    def _emit_step_end(self, step_num: int, result_summary: str = ""):
+        """发出步骤结束事件
+
+        Args:
+            step_num: 步骤编号
+            result_summary: 结果摘要
+        """
+        if self.status_callback and hasattr(self.status_callback, 'on_step_end'):
+            self.status_callback.on_step_end(step_num, result_summary)
 
     def _build_main_prompt(self) -> str:
         """构建主智能体提示词"""
@@ -123,7 +188,7 @@ class MainAgent:
 5. 聚合结果，生成最终答案
 """
 
-    def _dispatch_search_task(self, task_description: str) -> str:
+    async def _dispatch_search_task(self, task_description: str) -> str:
         """分发搜索任务到 SearchAgent
 
         Args:
@@ -165,28 +230,23 @@ class MainAgent:
             details={"task_description": task_description}
         )
 
-        # 3. 调用 SearchAgent（在线程池中运行，避免事件循环冲突）
+        # 3. 调用 SearchAgent（在线程中运行同步代码）
         from regreader.subagents.search.agent import SearchAgent
-        import concurrent.futures
 
-        def run_search_agent():
-            search_agent = SearchAgent(
-                workspace=self.workspace_root.parent / "subagents" / "search",
-                reg_id=self.reg_id,
-                mcp_transport=self.mcp_transport,
-                mcp_host=self.mcp_host,
-                mcp_port=self.mcp_port,
-            )
-            return search_agent.run()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_search_agent)
-            result = future.result(timeout=300)  # 5分钟超时
+        search_agent = SearchAgent(
+            workspace=self.workspace_root.parent / "subagents" / "search",
+            reg_id=self.reg_id,
+            mcp_transport=self.mcp_transport,
+            mcp_host=self.mcp_host,
+            mcp_port=self.mcp_port,
+        )
+        result = await asyncio.to_thread(search_agent.run)
 
         # 4. 返回结果摘要
-        return result.summary()
+        summary = result.summary()
+        return summary
 
-    def _dispatch_table_task(self, task_description: str) -> str:
+    async def _dispatch_table_task(self, task_description: str) -> str:
         """分发表格任务到 TableAgent
 
         Args:
@@ -228,28 +288,22 @@ class MainAgent:
             details={"task_description": task_description}
         )
 
-        # 3. 调用 TableAgent（在线程池中运行，避免事件循环冲突）
+        # 3. 调用 TableAgent（在线程中运行同步代码）
         from regreader.subagents.table.agent import TableAgent
-        import concurrent.futures
 
-        def run_table_agent():
-            table_agent = TableAgent(
-                workspace=self.workspace_root.parent / "subagents" / "table",
-                reg_id=self.reg_id,
-                mcp_transport=self.mcp_transport,
-                mcp_host=self.mcp_host,
-                mcp_port=self.mcp_port,
-            )
-            return table_agent.run()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_table_agent)
-            result = future.result(timeout=300)  # 5分钟超时
+        table_agent = TableAgent(
+            workspace=self.workspace_root.parent / "subagents" / "table",
+            reg_id=self.reg_id,
+            mcp_transport=self.mcp_transport,
+            mcp_host=self.mcp_host,
+            mcp_port=self.mcp_port,
+        )
+        result = await asyncio.to_thread(table_agent.run)
 
         # 4. 返回结果摘要
         return result.summary()
 
-    def _dispatch_reference_task(self, task_description: str) -> str:
+    async def _dispatch_reference_task(self, task_description: str) -> str:
         """分发引用任务到 ReferenceAgent
 
         Args:
@@ -293,23 +347,17 @@ class MainAgent:
             details={"task_description": task_description}
         )
 
-        # 3. 调用 ReferenceAgent（在线程池中运行，避免事件循环冲突）
+        # 3. 调用 ReferenceAgent（在线程中运行同步代码）
         from regreader.subagents.reference.agent import ReferenceAgent
-        import concurrent.futures
 
-        def run_reference_agent():
-            reference_agent = ReferenceAgent(
-                workspace=self.workspace_root.parent / "subagents" / "reference",
-                reg_id=self.reg_id,
-                mcp_transport=self.mcp_transport,
-                mcp_host=self.mcp_host,
-                mcp_port=self.mcp_port,
-            )
-            return reference_agent.run()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_reference_agent)
-            result = future.result(timeout=300)  # 5分钟超时
+        reference_agent = ReferenceAgent(
+            workspace=self.workspace_root.parent / "subagents" / "reference",
+            reg_id=self.reg_id,
+            mcp_transport=self.mcp_transport,
+            mcp_host=self.mcp_host,
+            mcp_port=self.mcp_port,
+        )
+        result = await asyncio.to_thread(reference_agent.run)
 
         # 4. 返回结果摘要
         return result.summary()
@@ -338,7 +386,7 @@ class MainAgent:
 
         logger.debug(f"记录执行日志: {action} -> {target}")
 
-    def _decompose_task_with_llm(self, user_query: str) -> list[dict[str, Any]]:
+    async def _decompose_task_with_llm(self, user_query: str) -> list[dict[str, Any]]:
         """使用 LLM 拆解用户查询为任务级子任务
 
         Args:
@@ -347,10 +395,10 @@ class MainAgent:
         Returns:
             任务级子任务列表
         """
-        logger.info(f"使用 LLM 拆解任务: {user_query[:100]}...")
-
         # 构建任务拆解提示词
-        decomposition_prompt = f"""你是任务拆解专家。请将以下用户查询拆解为任务级子任务。
+        system_prompt = "你是任务拆解专家，只返回 JSON 格式的任务列表。"
+
+        user_prompt = f"""请将以下用户查询拆解为任务级子任务。
 
 # 用户查询
 {user_query}
@@ -386,54 +434,50 @@ class MainAgent:
 """
 
         try:
-            # 创建 Claude SDK Client（用于任务拆解）
-            options = ClaudeAgentOptions(
-                system_prompt="你是任务拆解专家，只返回 JSON 格式的任务列表。",
-                model=self.model,  # model 通过 options 传递
+            # 使用 AsyncOpenAI 而不是同步的 OpenAI
+            import os
+            from openai import AsyncOpenAI
+
+            settings = get_settings()
+
+            # 处理 Ollama 后端 URL（需要添加 /v1 后缀）
+            base_url = settings.llm_base_url
+            if settings.is_ollama_backend() and not base_url.endswith("/v1"):
+                base_url = base_url.rstrip("/") + "/v1"
+
+            # API key 回退逻辑：优先使用配置，然后尝试环境变量
+            api_key = settings.llm_api_key or os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("OPENAI_API_KEY") or "dummy"
+
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
             )
 
-            async def get_decomposition():
-                result = ""
-                async with ClaudeSDKClient(options=options) as client:
-                    # 发送查询
-                    await client.query(decomposition_prompt, session_id="decomposition")
+            response = await client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.3,
+            )
 
-                    # 接收响应
-                    async for event in client.receive_response():
-                        if hasattr(event, "content"):
-                            for block in event.content:
-                                if hasattr(block, "text"):
-                                    result += block.text
-                return result
-
-            # 检查是否已有运行中的事件循环
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 已有运行中的事件循环，使用 create_task
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as pool:
-                        future = pool.submit(asyncio.run, get_decomposition())
-                        response = future.result()
-                else:
-                    response = asyncio.run(get_decomposition())
-            except RuntimeError:
-                # 没有事件循环，创建新的
-                response = asyncio.run(get_decomposition())
+            result_text = response.choices[0].message.content
+            if not result_text:
+                raise ValueError("LLM 返回空响应")
 
             # 解析 JSON
             # 提取 JSON（可能被包裹在 ```json 中）
-            if "```json" in response:
-                response = response.split("```json")[1].split("```")[0].strip()
-            elif "```" in response:
-                response = response.split("```")[1].split("```")[0].strip()
+            if "```json" in result_text:
+                result_text = result_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in result_text:
+                result_text = result_text.split("```")[1].split("```")[0].strip()
 
-            tasks = json.loads(response)
-            logger.info(f"LLM 拆解完成，共 {len(tasks)} 个子任务")
+            tasks = json.loads(result_text)
             return tasks
 
         except Exception as e:
-            logger.warning(f"LLM 拆解失败，回退到规则拆解: {e}")
+            logger.error(f"LLM 拆解失败: {e}")
             return self._rule_based_decomposition(user_query)
 
     def _rule_based_decomposition(self, user_query: str) -> list[dict[str, Any]]:
@@ -489,7 +533,11 @@ class MainAgent:
         Returns:
             最终答案
         """
+        # 发出查询开始事件
+        query_step = self._emit_step_start(f"处理查询: {user_query[:50]}...")
+
         # 1. 写入初始任务计划
+        plan_step = self._emit_step_start("创建执行计划")
         plan_file = self.session_dir / "plan.md"
         plan_content = f"""# 执行计划
 
@@ -506,44 +554,73 @@ class MainAgent:
 （待主智能体生成）
 """
         plan_file.write_text(plan_content, encoding="utf-8")
+        self._emit_step_end(plan_step, f"计划文件: {plan_file}")
 
-        logger.info(f"开始处理查询: {user_query}")
-
-        # 2. 使用 LLM 拆解任务
-        tasks = self._decompose_task_with_llm(user_query)
-
-        # 更新计划文件
-        plan_content += "\n\n## 子任务列表\n\n"
-        for i, task in enumerate(tasks, 1):
-            plan_content += f"{i}. **{task['task_type']}**: {task['description']}\n"
-        plan_file.write_text(plan_content, encoding="utf-8")
-
-        # 3. 执行子任务
+        # 2. 循环迭代执行（最多 3 次）
         all_results = []
-        for task in tasks:
-            task_type = task["task_type"]
-            description = task["description"]
+        max_iterations = 3
+        missing_info = ""
 
-            logger.info(f"执行子任务: {task_type} - {description[:50]}...")
-
-            # 根据任务类型分发到相应的子智能体
-            if task_type == "search":
-                result_summary = self._dispatch_search_task(description)
-            elif task_type == "table":
-                result_summary = self._dispatch_table_task(description)
-            elif task_type == "reference":
-                result_summary = self._dispatch_reference_task(description)
+        for iteration in range(max_iterations):
+            # 2.1 拆解任务（首次或精炼）
+            if iteration == 0:
+                decompose_step = self._emit_step_start("分析查询并拆解任务")
+                tasks = await self._decompose_task_with_llm(user_query)
+                self._emit_step_end(decompose_step, f"拆解为 {len(tasks)} 个子任务")
             else:
-                logger.warning(f"未知任务类型: {task_type}")
-                continue
+                tasks = await self._generate_refinement_tasks(
+                    user_query, missing_info, all_results
+                )
+                if not tasks:
+                    break
 
-            all_results.append({
-                "task_type": task_type,
-                "description": description,
-                "result": result_summary
-            })
+            # 更新计划文件
+            plan_content += f"\n\n## 迭代 {iteration + 1} 子任务列表\n\n"
+            for i, task in enumerate(tasks, 1):
+                plan_content += f"{i}. **{task['task_type']}**: {task['description']}\n"
+            plan_file.write_text(plan_content, encoding="utf-8")
 
-        # 4. 使用 LLM 聚合结果
+            # 2.2 执行子任务
+            iteration_results = []
+            for idx, task in enumerate(tasks, 1):
+                task_type = task["task_type"]
+                description = task["description"]
+
+                # 发出子任务开始事件
+                subtask_step = self._emit_step_start(f"子任务 {idx}/{len(tasks)}: {task_type} - {description[:30]}...")
+
+                # 根据任务类型分发到相应的子智能体
+                if task_type == "search":
+                    result_summary = await self._dispatch_search_task(description)
+                    self._emit_step_end(subtask_step, f"搜索完成")
+                elif task_type == "table":
+                    result_summary = await self._dispatch_table_task(description)
+                    self._emit_step_end(subtask_step, f"表格查询完成")
+                elif task_type == "reference":
+                    result_summary = await self._dispatch_reference_task(description)
+                    self._emit_step_end(subtask_step, f"引用解析完成")
+                else:
+                    continue
+
+                iteration_results.append({
+                    "task_type": task_type,
+                    "description": description,
+                    "result": result_summary
+                })
+
+            # 2.3 累积结果
+            all_results.extend(iteration_results)
+
+            # 2.4 检查完成度
+            is_completed, missing_info = await self._check_completion(
+                user_query, all_results
+            )
+
+            if is_completed:
+                break
+
+        # 3. 使用 LLM 聚合结果
+        aggregation_step = self._emit_step_start("聚合所有子任务结果")
         aggregation_prompt = f"""你是结果聚合专家。请整合以下子任务结果，生成最终答案。
 
 # 用户查询
@@ -564,39 +641,36 @@ class MainAgent:
 """
 
         try:
-            async def get_aggregated_answer():
-                result = ""
-                async with ClaudeSDKClient(
-                    options=ClaudeAgentOptions(
-                        system_prompt="你是结果聚合专家，负责整合多个子任务的执行结果。",
-                        model=self.model,  # model 通过 options 传递
-                    )
-                ) as client:
-                    # 发送查询
-                    await client.query(aggregation_prompt, session_id="aggregation")
+            import os
+            from openai import AsyncOpenAI
 
-                    # 接收响应
-                    async for event in client.receive_response():
-                        if hasattr(event, "content"):
-                            for block in event.content:
-                                if hasattr(block, "text"):
-                                    result += block.text
-                return result
+            settings = get_settings()
+            base_url = settings.llm_base_url
+            if settings.is_ollama_backend() and not base_url.endswith("/v1"):
+                base_url = base_url.rstrip("/") + "/v1"
 
-            # 检查是否已有运行中的事件循环
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 已有运行中的事件循环，使用线程池
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as pool:
-                        future = pool.submit(asyncio.run, get_aggregated_answer())
-                        final_answer = future.result()
-                else:
-                    final_answer = asyncio.run(get_aggregated_answer())
-            except RuntimeError:
-                # 没有事件循环，创建新的
-                final_answer = asyncio.run(get_aggregated_answer())
+            # API key 回退逻辑：优先使用配置，然后尝试环境变量
+            api_key = settings.llm_api_key or os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("OPENAI_API_KEY") or "dummy"
+
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+            )
+
+            response = await client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "你是结果聚合专家，负责整合多个子任务的执行结果。"},
+                    {"role": "user", "content": aggregation_prompt},
+                ],
+                temperature=0.3,
+            )
+
+            final_answer = response.choices[0].message.content
+            if not final_answer:
+                raise ValueError("LLM 返回空响应")
+
+            self._emit_step_end(aggregation_step, f"生成最终答案 ({len(final_answer)} 字符)")
 
         except Exception as e:
             logger.error(f"结果聚合失败: {e}")
@@ -631,7 +705,8 @@ class MainAgent:
 
         report_file.write_text(report_content, encoding="utf-8")
 
-        logger.info(f"查询完成，结果已保存到: {report_file}")
+        # 发出查询完成事件
+        self._emit_step_end(query_step, f"查询完成，生成答案 ({len(final_answer)} 字符)")
 
         return final_answer
 
@@ -647,3 +722,168 @@ class MainAgent:
             "session_dir": str(self.session_dir),
             "workspace_root": str(self.workspace_root),
         }
+
+    async def _check_completion(
+        self,
+        user_query: str,
+        completed_tasks: list[dict[str, Any]]
+    ) -> tuple[bool, str]:
+        """检查任务完成度
+
+        使用 LLM 判断当前结果是否充分回答了用户查询。
+
+        Args:
+            user_query: 用户查询
+            completed_tasks: 已完成的任务列表
+
+        Returns:
+            (是否完成, 缺失信息描述)
+        """
+        # 聚合所有任务结果
+        aggregated_result = "\n\n".join([
+            f"### 任务 {i}: {t.get('task_type', 'unknown')}\n{t.get('result', '')}"
+            for i, t in enumerate(completed_tasks, 1)
+        ])
+
+        # 构建检查提示词
+        check_prompt = f"""你是任务完成度评估专家。请判断以下结果是否充分回答了用户查询。
+
+用户查询：{user_query}
+
+当前结果：
+{aggregated_result}
+
+请回答：
+1. 是否完成（是/否）
+2. 如果未完成，缺少哪些信息？
+
+返回 JSON 格式：
+{{
+  "completed": true/false,
+  "missing_info": "缺失信息描述（如果已完成则为空）"
+}}
+"""
+
+        try:
+            import os
+            from openai import AsyncOpenAI
+
+            settings = get_settings()
+            base_url = settings.llm_base_url
+            if settings.is_ollama_backend() and not base_url.endswith("/v1"):
+                base_url = base_url.rstrip("/") + "/v1"
+
+            # API key 回退逻辑：优先使用配置，然后尝试环境变量
+            api_key = settings.llm_api_key or os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("OPENAI_API_KEY") or "dummy"
+
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+            )
+
+            response = await client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "你是任务完成度评估专家，只返回 JSON 格式。"},
+                    {"role": "user", "content": check_prompt},
+                ],
+                temperature=0.3,
+            )
+
+            result_text = response.choices[0].message.content
+            if not result_text:
+                raise ValueError("LLM 返回空响应")
+
+            # 解析 JSON
+            if "```json" in result_text:
+                result_text = result_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in result_text:
+                result_text = result_text.split("```")[1].split("```")[0].strip()
+
+            data = json.loads(result_text)
+            return data.get("completed", False), data.get("missing_info", "")
+
+        except Exception as e:
+            logger.error(f"完成度检查失败: {e}")
+            # 默认认为已完成
+            return True, ""
+
+    async def _generate_refinement_tasks(
+        self,
+        user_query: str,
+        missing_info: str,
+        completed_tasks: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """生成精炼任务
+
+        基于缺失信息，生成新的子任务以补充。
+
+        Args:
+            user_query: 用户查询
+            missing_info: 缺失信息描述
+            completed_tasks: 已完成的任务列表
+
+        Returns:
+            精炼任务列表
+        """
+        # 构建精炼提示词
+        refinement_prompt = f"""你是任务精炼专家。基于当前结果和缺失信息，生成新的子任务。
+
+用户查询：{user_query}
+
+缺失信息：{missing_info}
+
+已完成任务：
+{json.dumps([t.get('description', '') for t in completed_tasks], ensure_ascii=False)}
+
+请生成新的子任务来补充缺失信息。返回 JSON 格式：
+[
+  {{
+    "task_type": "search",
+    "description": "任务描述"
+  }}
+]
+"""
+
+        try:
+            import os
+            from openai import AsyncOpenAI
+
+            settings = get_settings()
+            base_url = settings.llm_base_url
+            if settings.is_ollama_backend() and not base_url.endswith("/v1"):
+                base_url = base_url.rstrip("/") + "/v1"
+
+            # API key 回退逻辑：优先使用配置，然后尝试环境变量
+            api_key = settings.llm_api_key or os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("OPENAI_API_KEY") or "dummy"
+
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+            )
+
+            response = await client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "你是任务精炼专家，只返回 JSON 格式的任务列表。"},
+                    {"role": "user", "content": refinement_prompt},
+                ],
+                temperature=0.3,
+            )
+
+            result_text = response.choices[0].message.content
+            if not result_text:
+                raise ValueError("LLM 返回空响应")
+
+            # 解析 JSON
+            if "```json" in result_text:
+                result_text = result_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in result_text:
+                result_text = result_text.split("```")[1].split("```")[0].strip()
+
+            tasks = json.loads(result_text)
+            return tasks
+
+        except Exception as e:
+            logger.error(f"精炼任务生成失败: {e}")
+            return []

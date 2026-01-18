@@ -1,5 +1,186 @@
 # RegReader 开发工作日志 (dev 分支)
 
+## 2026-01-17 修复 Coordinator 集成问题并验证多轮对话功能（已完成 ✅）
+
+### 问题背景
+
+在审查未完成任务时，发现 ClaudeOrchestrator 与 Coordinator 的集成存在问题。虽然 Coordinator 类已经实现了完整的 Bash+FS 支持（plan.md, session_state.json, EventBus），但 BaseOrchestrator 中的调用存在参数不匹配和缺少 await 的问题。
+
+### 架构发现
+
+在实施过程中发现架构已经演进：
+
+1. **SubagentRouter 已移除**: 子智能体选择现在由 LLM 自主完成，不再需要显式路由器
+2. **模块路径变更**: 从 `orchestrator/` 改为 `orchestration/`
+3. **Coordinator 已集成**: BaseOrchestrator 已经内置了 Coordinator 支持
+
+**关键文档**:
+- `src/regreader/orchestration/__init__.py` 明确说明："SubagentRouter has been removed. Subagent selection is now handled by the frameworks' native LLM-based routing mechanisms."
+
+### 发现的 Bug
+
+#### Bug 1: log_query() 参数不匹配
+
+**位置**: `src/regreader/agents/orchestrated/base.py:214`
+
+**问题**:
+```python
+# 错误调用（1个参数）
+self.coordinator.log_query(message)
+
+# 期望签名
+async def log_query(
+    self,
+    query: str,
+    hints: dict[str, Any],
+    reg_id: str | None = None,
+) -> None
+```
+
+**影响**: 缺少 `hints` 和 `reg_id` 参数，导致 TypeError
+
+#### Bug 2: write_result() 参数不匹配
+
+**位置**: `src/regreader/agents/orchestrated/base.py:236`
+
+**问题**:
+```python
+# 错误调用（2个参数）
+self.coordinator.write_result(content, self._sources)
+
+# 期望签名
+async def write_result(
+    self,
+    content: str,
+    sources: list[str],
+    tool_calls: list[dict],
+) -> None
+```
+
+**影响**: 缺少 `tool_calls` 参数，导致 TypeError
+
+#### Bug 3: 缺少 await 关键字
+
+**位置**: `src/regreader/agents/orchestrated/base.py:214, 236`
+
+**问题**: Coordinator 的方法是 async 但调用时未使用 await
+
+**影响**: 返回 coroutine 对象而不是实际执行，导致功能失效
+
+#### Bug 4: accumulated_sources 顺序丢失
+
+**位置**: `src/regreader/orchestration/coordinator.py:220-223`
+
+**问题**:
+```python
+# 错误实现（使用 set() 丢失顺序）
+self.session_state.accumulated_sources = list(
+    set(self.session_state.accumulated_sources)
+)
+```
+
+**影响**: 多轮对话中来源顺序被打乱，不符合预期的插入顺序
+
+### 解决方案
+
+#### 修复 1: 修正 log_query() 调用
+
+**文件**: `src/regreader/agents/orchestrated/base.py`
+
+**修改**:
+```python
+# 修复后
+await self.coordinator.log_query(message, hints, self.reg_id)
+```
+
+**说明**: 传递完整的 3 个参数，并添加 await
+
+#### 修复 2: 修正 write_result() 调用
+
+**文件**: `src/regreader/agents/orchestrated/base.py`
+
+**修改**:
+```python
+# 修复后
+await self.coordinator.write_result(content, self._sources, self._tool_calls)
+```
+
+**说明**: 传递完整的 3 个参数，并添加 await
+
+#### 修复 3: 保持 accumulated_sources 插入顺序
+
+**文件**: `src/regreader/orchestration/coordinator.py`
+
+**修改**:
+```python
+# 修复后（保持顺序的去重）
+for source in sources:
+    if source not in self.session_state.accumulated_sources:
+        self.session_state.accumulated_sources.append(source)
+```
+
+**说明**: 使用循环检查成员关系，避免使用 set() 导致顺序丢失
+
+### 验证测试
+
+#### 测试 1: 基础功能测试
+
+**文件**: `tests/test_coordinator_integration.py`（新建）
+
+**测试内容**:
+- Coordinator 初始化
+- log_query() 执行
+- write_result() 执行
+- plan.md 文件生成
+- session_state.json 文件生成
+
+**结果**: ✅ 全部通过
+
+#### 测试 2: 多轮对话测试
+
+**文件**: `tests/test_coordinator_multi_turn.py`（新建）
+
+**测试场景**:
+1. 第一轮查询：3个来源 (p14, p15, p16)
+2. 第二轮查询：3个来源，其中2个重复 (p15, p16, p17)
+3. 第三轮查询：2个全新来源 (p123, p124)
+
+**验证点**:
+- query_count 正确累加（期望: 3）
+- accumulated_sources 去重正确（期望: 6个唯一来源）
+- accumulated_sources 保持插入顺序
+- session_state.json 正确持久化
+- plan.md 包含所有查询记录
+
+**结果**: ✅ 全部通过
+
+**输出示例**:
+```
+✓ query_count 正确: 3
+✓ accumulated_sources 去重正确
+  - 总来源数: 6
+✓ session_state.json 已持久化
+✓ plan.md 包含 3 轮查询记录
+```
+
+### 技术要点总结
+
+1. **Async 方法调用**: 所有 async 方法必须使用 await，否则返回 coroutine 对象而不执行
+2. **参数完整性**: 调用方法时必须传递所有必需参数，检查方法签名
+3. **顺序保持去重**: 使用循环 + 成员检查而非 set()，保持插入顺序
+4. **架构演进**: 定期检查架构变更，避免基于过时文档进行开发
+
+### 文件修改清单
+
+| 文件 | 修改类型 | 说明 |
+|------|----------|------|
+| `src/regreader/agents/orchestrated/base.py` | 修复 | 修正 log_query() 和 write_result() 调用 |
+| `src/regreader/orchestration/coordinator.py` | 修复 | 修正 accumulated_sources 去重逻辑 |
+| `tests/test_coordinator_integration.py` | 新建 | 基础功能测试 |
+| `tests/test_coordinator_multi_turn.py` | 新建 | 多轮对话测试 |
+
+---
+
 ## 2026-01-17 修复多智能体模式 MCP SSE 通信问题（已完成 ✅）
 
 ### 问题背景
