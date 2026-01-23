@@ -45,25 +45,36 @@ RegReader implements a 7-layer architecture:
 
 ```
 regreader/
-├── coordinator/                      # Coordinator workspace (Bash+FS)
-│   ├── CLAUDE.md                     # Project entry point
-│   ├── plan.md                       # Task planning (runtime)
-│   ├── session_state.json            # Session state (runtime)
-│   └── logs/
+├── .regreader_workspace/             # Unified workspace root (NEW)
+│   ├── sessions/                     # All session data
+│   │   ├── session_20260122_103045/  # Individual session workspace
+│   │   │   ├── coordinator/          # Coordinator workspace
+│   │   │   │   ├── plan.md           # Task planning
+│   │   │   │   ├── session_state.json # Session state
+│   │   │   │   ├── call_stack.json   # Call stack
+│   │   │   │   └── logs/             # Event logs
+│   │   │   ├── subagents/            # Subagent workspaces
+│   │   │   │   ├── regsearch/        # RegSearch-Subagent
+│   │   │   │   │   ├── scratch/      # Temporary results
+│   │   │   │   │   └── logs/
+│   │   │   │   ├── search/           # Search component
+│   │   │   │   ├── table/            # Table component
+│   │   │   │   └── reference/        # Reference component
+│   │   │   └── shared/               # Session-specific shared
+│   │   └── active -> session_20260122_103045/ # Active session symlink
+│   ├── shared/                       # Global shared resources (read-only)
+│   │   ├── data -> ../../data/storage/ # Symlink to storage
+│   │   ├── docs/                     # Tool usage guides
+│   │   ├── templates/                # Output templates
+│   │   └── skills/                   # Skill definitions
+│   ├── archive/                      # Archived sessions
+│   │   └── 2026-01/
+│   │       └── session_20260118_043822.tar.gz
+│   └── workspace.json                # Workspace metadata
 │
-├── subagents/                        # Subagent workspaces (Bash+FS)
-│   ├── regsearch/                    # RegSearch-Subagent
-│   │   ├── SKILL.md                  # Skill documentation
-│   │   ├── scratch/                  # Temporary results
-│   │   └── logs/
-│   ├── exec/                         # Exec-Subagent (reserved)
-│   └── validator/                    # Validator-Subagent (reserved)
-│
-├── shared/                           # Shared read-only resources
-│   ├── data/ → data/storage/         # Symlink to storage
-│   ├── docs/                         # Tool usage guides
-│   └── templates/                    # Output templates
-│
+├── coordinator/                      # Legacy coordinator (deprecated)
+├── subagents/                        # Legacy subagents (deprecated)
+├── shared/                           # Legacy shared (deprecated)
 ├── skills/                           # Skill registry (Bash+FS)
 │   ├── registry.yaml                 # Skill registry
 │   ├── simple_search/
@@ -71,6 +82,13 @@ regreader/
 │   └── cross_ref/
 │
 ├── src/regreader/                    # Source code
+│   ├── workspace/                    # Workspace management (NEW)
+│   │   ├── __init__.py               # Package exports
+│   │   ├── session.py                # SessionWorkspace dataclass
+│   │   ├── manager.py                # WorkspaceManager
+│   │   ├── migrator.py               # WorkspaceMigrator
+│   │   └── compat.py                 # LegacyWorkspaceAdapter
+│   │
 │   ├── infrastructure/               # Infrastructure layer (NEW)
 │   │   ├── file_context.py           # File context manager
 │   │   ├── skill_loader.py           # Skill loader
@@ -151,6 +169,12 @@ regreader/
 │   └── mcp-tools.mk                  # MCP tool commands
 │
 ├── tests/                            # Test suites
+│   ├── workspace/                    # Workspace architecture tests (NEW)
+│   │   ├── test_session.py
+│   │   ├── test_manager.py
+│   │   ├── test_migrator.py
+│   │   ├── test_compat.py
+│   │   └── test_integration.py
 │   ├── bash-fs-paradiam/             # Bash+FS architecture tests
 │   │   ├── test_event_bus.py
 │   │   ├── test_file_context.py
@@ -173,6 +197,8 @@ regreader/
         ├── DESIGN_DOCUMENT.md
         ├── WORK_LOG.md
         ├── MCP_TOOLS_DESIGN.md
+        ├── WORKSPACE_ARCHITECTURE.md  # Workspace architecture (NEW)
+        ├── MIGRATION_GUIDE.md         # Migration guide (NEW)
         └── ...
 ```
 
@@ -539,6 +565,29 @@ regreader find-similar -r angui_2024 --query "故障处理"
 regreader compare-sections "2.1.4" "2.1.5" -r angui_2024
 ```
 
+### Workspace Management (NEW)
+```bash
+# Workspace information
+regreader workspace-info           # Show workspace statistics
+
+# Migration
+regreader workspace-migrate --dry-run              # Preview migration
+regreader workspace-migrate --all --no-dry-run     # Migrate all sessions
+regreader workspace-migrate --session <id> --no-dry-run  # Migrate specific session
+
+# Cleanup
+regreader workspace-cleanup                        # Clean up old sessions
+regreader workspace-cleanup --retention-days 14    # Custom retention
+regreader workspace-cleanup --force                # Skip confirmation
+
+# List sessions
+regreader workspace-list                           # List active sessions
+regreader workspace-list --include-archived        # Include archived
+
+# Archive
+regreader workspace-archive <session_id>           # Archive specific session
+```
+
 ### Utility Commands
 ```bash
 regreader list                     # List all regulations
@@ -630,6 +679,12 @@ REGREADER_TIMING_BACKEND=httpx        # httpx (CLI display) or otel (production 
 REGREADER_OTEL_EXPORTER_TYPE=console  # console, otlp, jaeger, zipkin
 REGREADER_OTEL_SERVICE_NAME=regreader-agent
 REGREADER_OTEL_ENDPOINT=http://localhost:4317  # For OTLP/Jaeger/Zipkin exporters
+
+# Workspace configuration (NEW)
+REGREADER_WORKSPACE_ROOT=.regreader_workspace  # Workspace root directory
+REGREADER_WORKSPACE_SESSION_RETENTION_DAYS=7   # Session retention days
+REGREADER_WORKSPACE_ARCHIVE_ENABLED=true       # Enable session archiving
+REGREADER_WORKSPACE_MAX_SESSIONS=100           # Maximum active sessions
 ```
 
 ## Testing Standards
@@ -673,6 +728,8 @@ RegReaderError (base)
 | MCP Tools Design | `docs/dev/MCP_TOOLS_DESIGN.md` |
 | Embedding Architecture | `docs/dev/EMBEDDING_ARCHITECTURE.md` |
 | Multi-Regulation Search Design | `docs/dev/MULTI_REGULATION_SEARCH_DESIGN.md` |
+| Workspace Architecture | `docs/dev/WORKSPACE_ARCHITECTURE.md` |
+| Migration Guide | `docs/dev/MIGRATION_GUIDE.md` |
 | **Preliminary Design** | `docs/PreliminaryDesign/` |
 
 ## Architecture Evolution
@@ -705,18 +762,29 @@ RegReader has evolved through multiple architectural iterations:
 - Orchestrator layer: QueryAnalyzer → SubagentRouter → ResultAggregator
 - Unified abstraction across three frameworks
 
-### Phase 6: Bash+FS Paradigm (Current)
+### Phase 6: Bash+FS Paradigm (Completed)
 - Infrastructure layer: FileContext, SkillLoader, EventBus, SecurityGuard
 - RegSearch-Subagent as domain expert
 - File-based communication for agent coordination
 - Skills system with registry and SKILL.md
 - Coordinator for centralized query dispatch
 
+### Phase 7: Unified Workspace Architecture (Current)
+- Single configurable workspace root directory (`.regreader_workspace/`)
+- Session-level directory isolation with dynamic creation
+- WorkspaceManager for lifecycle management (create, archive, cleanup)
+- WorkspaceMigrator for safe migration from legacy structure
+- LegacyWorkspaceAdapter for backward compatibility
+- Comprehensive workspace CLI commands
+- Session portability and easy cleanup
+
 ### Future Phases (Planned)
 - Exec-Subagent: Script execution with sandboxing
 - Validator-Subagent: Result validation and quality assurance
 - Multi-regulation reasoning: Cross-regulation query support
 - Streaming aggregation: Real-time result streaming
+- Session snapshots and templates
+- Cloud workspace synchronization
 
 ## Git Branch Strategy
 

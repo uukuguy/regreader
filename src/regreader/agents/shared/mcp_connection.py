@@ -390,6 +390,10 @@ class MCPConnectionManager:
             self._client = None
             self._connected = False
 
+    async def disconnect(self) -> None:
+        """断开连接（close 的别名）"""
+        await self.close()
+
     async def __aenter__(self) -> MCPConnectionManager:
         """异步上下文管理器入口"""
         await self.get_client()

@@ -68,6 +68,7 @@ class ClaudeOrchestrator(OrchestratorAgent):
         use_coordinator: bool = False,
         session_id: str | None = None,
         use_preset: bool = True,
+        parallel_mode: bool = False,
     ):
         """初始化 Claude Orchestrator
 
@@ -79,6 +80,7 @@ class ClaudeOrchestrator(OrchestratorAgent):
             use_coordinator: 是否使用 Coordinator（Bash+FS 模式）
             session_id: 会话ID
             use_preset: 是否使用 preset: "claude_code"
+            parallel_mode: 是否启用并行执行模式
         """
         # 调用父类构造函数
         super().__init__(
@@ -86,6 +88,7 @@ class ClaudeOrchestrator(OrchestratorAgent):
             use_coordinator=use_coordinator,
             callback=status_callback or NullCallback(),
             session_id=session_id,
+            parallel_mode=parallel_mode,
         )
 
         if not HAS_CLAUDE_SDK:
@@ -95,8 +98,8 @@ class ClaudeOrchestrator(OrchestratorAgent):
 
         settings = get_settings()
 
-        # Claude 使用 Anthropic 专用配置
-        self._model = model or settings.anthropic_model_name or ""
+        # Claude 使用 Anthropic 专用配置，如果未设置则回退到通用 LLM 配置
+        self._model = model or settings.anthropic_model_name or settings.llm_model_name
         self._use_preset = use_preset
 
         # MCP 连接管理器
@@ -141,10 +144,20 @@ class ClaudeOrchestrator(OrchestratorAgent):
                 import os
                 settings = get_settings()
 
-                if settings.anthropic_api_key:
-                    os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
-                if settings.anthropic_base_url:
-                    os.environ["ANTHROPIC_BASE_URL"] = settings.anthropic_base_url
+                # 优先使用 Anthropic 专用配置，如果未设置则回退到通用 LLM 配置
+                api_key = settings.anthropic_api_key or settings.llm_api_key
+                base_url = settings.anthropic_base_url or settings.llm_base_url
+
+                if api_key:
+                    os.environ["ANTHROPIC_API_KEY"] = api_key
+                if base_url:
+                    os.environ["ANTHROPIC_BASE_URL"] = base_url
+
+                logger.debug(
+                    f"Claude SDK configuration: "
+                    f"api_key={'***' if api_key else 'NOT SET'}, "
+                    f"base_url={base_url}"
+                )
 
                 # 创建 ClaudeAgentOptions（不需要 api_key 和 base_url 参数）
                 options = ClaudeAgentOptions(

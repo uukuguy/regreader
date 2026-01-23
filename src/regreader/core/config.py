@@ -8,7 +8,7 @@ from pathlib import Path
 
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +34,28 @@ class RegReaderSettings(BaseSettings):
     index_dir: Path = Field(
         default=Path("./data/storage/index"),
         description="索引文件目录",
+    )
+
+    # Workspace 配置
+    workspace_root: Path = Field(
+        default=Path(".regreader_workspace"),
+        description="工作区根目录（所有会话数据的统一存储位置）",
+        validation_alias=AliasChoices("workspace_root", "REGREADER_WORKSPACE_ROOT"),
+    )
+    workspace_session_retention_days: int = Field(
+        default=7,
+        description="会话保留天数（超过此天数的会话将被归档）",
+        validation_alias=AliasChoices("workspace_session_retention_days", "REGREADER_WORKSPACE_SESSION_RETENTION_DAYS"),
+    )
+    workspace_archive_enabled: bool = Field(
+        default=True,
+        description="是否启用会话归档（压缩并移动到 archive/ 目录）",
+        validation_alias=AliasChoices("workspace_archive_enabled", "REGREADER_WORKSPACE_ARCHIVE_ENABLED"),
+    )
+    workspace_max_sessions: int = Field(
+        default=100,
+        description="最大活跃会话数（超过此数量将触发自动清理）",
+        validation_alias=AliasChoices("workspace_max_sessions", "REGREADER_WORKSPACE_MAX_SESSIONS"),
     )
 
     # FTS5 索引配置
@@ -121,17 +143,17 @@ class RegReaderSettings(BaseSettings):
     llm_base_url: str = Field(
         default="https://api.anthropic.com",
         description="LLM API 端点",
-        validation_alias=AliasChoices("OPENAI_BASE_URL", "LLM_BASE_URL"),
+        validation_alias=AliasChoices("llm_base_url", "OPENAI_BASE_URL", "LLM_BASE_URL"),
     )
     llm_api_key: str = Field(
         default="",
         description="LLM API 密钥",
-        validation_alias=AliasChoices("OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "LLM_API_KEY"),
+        validation_alias=AliasChoices("llm_api_key", "OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "LLM_API_KEY"),
     )
     llm_model_name: str = Field(
         default="claude-sonnet-4-20250514",
         description="LLM 模型名称（如 claude-sonnet-4-20250514, gpt-4o, gemini-pro）",
-        validation_alias=AliasChoices("OPENAI_MODEL_NAME", "LLM_MODEL_NAME"),
+        validation_alias=AliasChoices("llm_model_name", "OPENAI_MODEL_NAME", "LLM_MODEL_NAME"),
     )
 
     # Ollama 专用配置
@@ -246,6 +268,32 @@ class RegReaderSettings(BaseSettings):
         default="hybrid",
         description="表格搜索默认模式: keyword, semantic, hybrid",
     )
+
+    @model_validator(mode='before')
+    @classmethod
+    def load_from_alternative_env_vars(cls, values):
+        """从备用环境变量加载配置
+
+        支持从 OPENAI_* 环境变量读取 LLM 配置，以兼容标准 OpenAI SDK 配置。
+        """
+        # 如果是字典类型（从环境变量或配置文件加载）
+        if isinstance(values, dict):
+            # LLM Model Name: OPENAI_MODEL_NAME -> llm_model_name
+            if 'llm_model_name' not in values or not values.get('llm_model_name'):
+                if openai_model := os.getenv('OPENAI_MODEL_NAME'):
+                    values['llm_model_name'] = openai_model
+
+            # LLM API Key: OPENAI_API_KEY -> llm_api_key
+            if 'llm_api_key' not in values or not values.get('llm_api_key'):
+                if openai_key := os.getenv('OPENAI_API_KEY'):
+                    values['llm_api_key'] = openai_key
+
+            # LLM Base URL: OPENAI_BASE_URL -> llm_base_url
+            if 'llm_base_url' not in values or not values.get('llm_base_url'):
+                if openai_url := os.getenv('OPENAI_BASE_URL'):
+                    values['llm_base_url'] = openai_url
+
+        return values
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

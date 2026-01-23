@@ -9,11 +9,14 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
 from regreader.core.config import get_settings
+
+if TYPE_CHECKING:
+    from regreader.workspace import WorkspaceManager, SessionWorkspace
 
 
 class HierarchyManager:
@@ -29,15 +32,40 @@ class HierarchyManager:
     Inspired by infiAgent's HierarchyManager.
     """
 
-    def __init__(self, session_id: str | None = None):
+    def __init__(
+        self,
+        session_id: str | None = None,
+        workspace_manager: "WorkspaceManager | None" = None,
+    ):
         """
         Initialize HierarchyManager.
 
         Args:
             session_id: Optional session ID. If not provided, generates a new one.
+            workspace_manager: Optional WorkspaceManager instance. If not provided, creates one.
         """
-        self.session_id = session_id or self._generate_session_id()
         self.config = get_settings()
+
+        # Initialize or use provided workspace manager
+        if workspace_manager is None:
+            from regreader.workspace import WorkspaceManager
+            workspace_manager = WorkspaceManager(self.config.workspace_root)
+
+        self.workspace_manager = workspace_manager
+
+        # Create or get session workspace
+        if session_id:
+            try:
+                self.session_workspace = self.workspace_manager.get_session(session_id)
+            except FileNotFoundError:
+                # Session doesn't exist, create it
+                self.session_workspace = self.workspace_manager.create_session(session_id)
+        else:
+            # Create new session with auto-generated ID
+            self.session_workspace = self.workspace_manager.create_session()
+
+        self.session_id = self.session_workspace.session_id
+        self.session_dir = self.session_workspace.coordinator_dir
 
         # Initialize state
         self.call_stack: list[dict[str, Any]] = []
@@ -48,21 +76,28 @@ class HierarchyManager:
             "current_instruction": None,
         }
 
-        # Setup session directory
-        self.session_dir = self._get_session_dir()
+        # Ensure session directory exists
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"HierarchyManager initialized for session: {self.session_id}")
 
     def _generate_session_id(self) -> str:
-        """Generate a unique session ID."""
+        """Generate a unique session ID.
+
+        Note: This method is kept for backward compatibility but is no longer
+        used in the main initialization flow. Session IDs are now generated
+        by WorkspaceManager.create_session().
+        """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"session_{timestamp}"
 
     def _get_session_dir(self) -> Path:
-        """Get session directory path."""
-        base_dir = Path("coordinator")
-        return base_dir / self.session_id
+        """Get session directory path.
+
+        Note: This method is kept for backward compatibility. New code should
+        use self.session_workspace.coordinator_dir directly.
+        """
+        return self.session_workspace.coordinator_dir
 
     def push_agent(
         self,
@@ -224,8 +259,15 @@ class HierarchyManager:
         Args:
             session_id: Session ID to load
         """
-        self.session_id = session_id
-        self.session_dir = self._get_session_dir()
+        # Get session workspace
+        try:
+            self.session_workspace = self.workspace_manager.get_session(session_id)
+        except FileNotFoundError:
+            logger.error(f"Session {session_id} not found")
+            raise
+
+        self.session_id = self.session_workspace.session_id
+        self.session_dir = self.session_workspace.coordinator_dir
 
         try:
             # Load call stack

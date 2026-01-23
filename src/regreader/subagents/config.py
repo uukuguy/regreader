@@ -16,6 +16,9 @@ class SubagentType(str, Enum):
     """规程检索代理：整合搜索、表格、引用、发现功能的领域子代理"""
 
     # L1 原子化子任务（Atomic Subagents - 新架构）
+    LOCATE_REGULATIONS = "locate_regulations"
+    """定位规程：根据查询自动定位相关规程（当未指定规程ID时必须首先调用）"""
+
     LOCATE_CHAPTERS = "locate_chapters"
     """定位章节：从规程目录中定位主任务可能的章节"""
 

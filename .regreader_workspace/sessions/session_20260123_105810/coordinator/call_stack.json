@@ -1,0 +1,12 @@
+{
+  "stack": [
+    {
+      "agent_id": "orch_20a70c1e",
+      "agent_name": "ClaudeOrchestrator",
+      "parent_id": null,
+      "level": 2,
+      "user_input": "",
+      "start_time": "2026-01-23T10:58:10.795684"
+    }
+  ]
+}

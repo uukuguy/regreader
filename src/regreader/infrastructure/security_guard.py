@@ -9,9 +9,12 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from regreader.workspace import SessionWorkspace
 
 # 可选依赖
 try:
@@ -222,7 +225,7 @@ class SecurityGuard:
     3. 审计日志层 - 记录所有访问尝试
 
     Attributes:
-        project_root: 项目根目录
+        session_workspace: 会话工作区（提供路径访问）
         audit_dir: 审计日志目录
         permissions: Subagent 权限映射
         strict_mode: 严格模式（违规时抛出异常）
@@ -230,31 +233,39 @@ class SecurityGuard:
 
     def __init__(
         self,
-        project_root: Path | None = None,
-        audit_dir: str = "coordinator/logs",
+        session_workspace: "SessionWorkspace | None" = None,
         strict_mode: bool = True,
     ):
         """初始化安全守卫
 
         Args:
-            project_root: 项目根目录
-            audit_dir: 审计日志目录
+            session_workspace: 会话工作区（提供路径访问）
             strict_mode: 严格模式
         """
-        self.project_root = project_root or Path.cwd()
-        self.audit_dir = self.project_root / audit_dir
+        self.session_workspace = session_workspace
         self.strict_mode = strict_mode
 
-        # 复制预定义权限并解析为绝对路径
+        # Determine audit directory
+        if session_workspace:
+            self.audit_dir = session_workspace.logs_dir
+        else:
+            # Legacy path for backward compatibility
+            self.audit_dir = Path.cwd() / "coordinator" / "logs"
+            logger.warning(
+                f"SecurityGuard initialized without session_workspace, "
+                f"using legacy path: {self.audit_dir}"
+            )
+
+        # 复制预定义权限并解析为 session-aware 路径
         self.permissions: dict[str, PermissionMatrix] = {}
         for name, perm in PREDEFINED_PERMISSIONS.items():
-            self.permissions[name] = self._resolve_paths(perm)
+            self.permissions[name] = self._resolve_session_paths(perm)
 
         # 确保审计目录存在
         self.audit_dir.mkdir(parents=True, exist_ok=True)
 
-    def _resolve_paths(self, perm: PermissionMatrix) -> PermissionMatrix:
-        """将相对路径解析为绝对路径
+    def _resolve_session_paths(self, perm: PermissionMatrix) -> PermissionMatrix:
+        """将相对路径解析为 session-aware 绝对路径
 
         Args:
             perm: 权限矩阵
@@ -262,14 +273,81 @@ class SecurityGuard:
         Returns:
             解析后的权限矩阵
         """
+        if not self.session_workspace:
+            # Legacy mode: resolve relative to current directory
+            project_root = Path.cwd()
+            return PermissionMatrix(
+                subagent_name=perm.subagent_name,
+                readable_dirs=[
+                    p if p.is_absolute() else project_root / p for p in perm.readable_dirs
+                ],
+                writable_dirs=[
+                    p if p.is_absolute() else project_root / p for p in perm.writable_dirs
+                ],
+                allowed_tools=perm.allowed_tools.copy(),
+                can_execute_scripts=perm.can_execute_scripts,
+                max_file_size_mb=perm.max_file_size_mb,
+                allowed_extensions=perm.allowed_extensions.copy(),
+                denied_patterns=perm.denied_patterns.copy(),
+            )
+
+        # Session-aware mode: resolve paths relative to session workspace
+        readable_dirs = []
+        writable_dirs = []
+
+        for p in perm.readable_dirs:
+            if p.is_absolute():
+                readable_dirs.append(p)
+            else:
+                # Map legacy paths to session workspace paths
+                path_str = str(p)
+                if path_str.startswith("shared/"):
+                    # Global shared directory
+                    readable_dirs.append(self.session_workspace.workspace_root / "shared" / path_str[7:])
+                    # Also add session-specific shared
+                    readable_dirs.append(self.session_workspace.shared_dir / path_str[7:])
+                elif path_str.startswith("coordinator/"):
+                    # Coordinator directory
+                    readable_dirs.append(self.session_workspace.coordinator_dir / path_str[12:])
+                elif path_str.startswith("subagents/"):
+                    # Subagent directory
+                    subagent_name = path_str.split("/")[1] if "/" in path_str[10:] else ""
+                    if subagent_name:
+                        rest_path = path_str[10 + len(subagent_name) + 1:] if len(path_str) > 10 + len(subagent_name) + 1 else ""
+                        if rest_path:
+                            readable_dirs.append(self.session_workspace.get_subagent_dir(subagent_name) / rest_path)
+                        else:
+                            readable_dirs.append(self.session_workspace.get_subagent_dir(subagent_name))
+                    else:
+                        # All subagents
+                        readable_dirs.append(self.session_workspace.subagents_dir)
+                else:
+                    # Other relative paths
+                    readable_dirs.append(self.session_workspace.session_dir / p)
+
+        for p in perm.writable_dirs:
+            if p.is_absolute():
+                writable_dirs.append(p)
+            else:
+                # Map legacy paths to session workspace paths
+                path_str = str(p)
+                if path_str.startswith("subagents/"):
+                    # Subagent directory
+                    parts = path_str[10:].split("/", 1)
+                    subagent_name = parts[0]
+                    rest_path = parts[1] if len(parts) > 1 else ""
+                    if rest_path:
+                        writable_dirs.append(self.session_workspace.get_subagent_dir(subagent_name) / rest_path)
+                    else:
+                        writable_dirs.append(self.session_workspace.get_subagent_dir(subagent_name))
+                else:
+                    # Other relative paths
+                    writable_dirs.append(self.session_workspace.session_dir / p)
+
         return PermissionMatrix(
             subagent_name=perm.subagent_name,
-            readable_dirs=[
-                p if p.is_absolute() else self.project_root / p for p in perm.readable_dirs
-            ],
-            writable_dirs=[
-                p if p.is_absolute() else self.project_root / p for p in perm.writable_dirs
-            ],
+            readable_dirs=readable_dirs,
+            writable_dirs=writable_dirs,
             allowed_tools=perm.allowed_tools.copy(),
             can_execute_scripts=perm.can_execute_scripts,
             max_file_size_mb=perm.max_file_size_mb,
@@ -283,7 +361,7 @@ class SecurityGuard:
         Args:
             permission: 权限矩阵
         """
-        self.permissions[permission.subagent_name] = self._resolve_paths(permission)
+        self.permissions[permission.subagent_name] = self._resolve_session_paths(permission)
         logger.info(f"Registered security permissions for {permission.subagent_name}")
 
     def get_permission(self, subagent: str) -> PermissionMatrix | None:
@@ -321,7 +399,14 @@ class SecurityGuard:
             allowed = False
             reason = f"Unknown subagent: {subagent}"
         else:
-            abs_path = path if path.is_absolute() else self.project_root / path
+            # Resolve path: if relative, resolve against session workspace or cwd
+            if path.is_absolute():
+                abs_path = path
+            else:
+                if self.session_workspace:
+                    abs_path = self.session_workspace.session_dir / path
+                else:
+                    abs_path = Path.cwd() / path
 
             if operation == "read":
                 allowed_dirs = perm.readable_dirs
@@ -411,7 +496,15 @@ class SecurityGuard:
             reason = "Script execution not allowed"
         else:
             # 检查脚本是否在可读目录中
-            abs_path = script_path if script_path.is_absolute() else self.project_root / script_path
+            # Resolve path: if relative, resolve against session workspace or cwd
+            if script_path.is_absolute():
+                abs_path = script_path
+            else:
+                if self.session_workspace:
+                    abs_path = self.session_workspace.session_dir / script_path
+                else:
+                    abs_path = Path.cwd() / script_path
+
             allowed = any(self._is_under_path(abs_path, d) for d in perm.readable_dirs)
             reason = "" if allowed else f"Script {script_path} not in allowed directories"
 

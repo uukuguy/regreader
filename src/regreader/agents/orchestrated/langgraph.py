@@ -62,6 +62,7 @@ class LangGraphOrchestrator(OrchestratorAgent):
         status_callback: StatusCallback | None = None,
         use_coordinator: bool = False,
         session_id: str | None = None,
+        parallel_mode: bool = False,
     ):
         """初始化 LangGraph Orchestrator
 
@@ -72,6 +73,7 @@ class LangGraphOrchestrator(OrchestratorAgent):
             status_callback: 状态回调
             use_coordinator: 是否使用 Coordinator（Bash+FS 模式）
             session_id: 会话ID
+            parallel_mode: 是否启用并行执行模式
         """
         # 调用父类构造函数
         super().__init__(
@@ -79,6 +81,7 @@ class LangGraphOrchestrator(OrchestratorAgent):
             use_coordinator=use_coordinator,
             callback=status_callback or NullCallback(),
             session_id=session_id,
+            parallel_mode=parallel_mode,
         )
 
         if not HAS_LANGGRAPH:

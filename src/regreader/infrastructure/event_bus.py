@@ -12,9 +12,12 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from regreader.workspace import SessionWorkspace
 
 # 可选依赖
 try:
@@ -182,27 +185,35 @@ class EventBus:
     4. 支持事件过滤（按类型、来源、目标）
 
     Attributes:
-        project_root: 项目根目录
+        session_workspace: 会话工作区（提供路径访问）
         events_dir: 事件日志目录
         persist: 是否持久化事件
     """
 
     def __init__(
         self,
-        project_root: Path | None = None,
-        events_dir: str = "coordinator/logs",
+        session_workspace: "SessionWorkspace | None" = None,
         persist: bool = True,
     ):
         """初始化事件总线
 
         Args:
-            project_root: 项目根目录
-            events_dir: 事件日志目录
+            session_workspace: 会话工作区（提供路径访问）
             persist: 是否持久化事件
         """
-        self.project_root = project_root or Path.cwd()
-        self.events_dir = self.project_root / events_dir
+        self.session_workspace = session_workspace
         self.persist = persist
+
+        # Determine events directory
+        if session_workspace:
+            self.events_dir = session_workspace.logs_dir
+        else:
+            # Legacy path for backward compatibility
+            self.events_dir = Path.cwd() / "coordinator" / "logs"
+            logger.warning(
+                f"EventBus initialized without session_workspace, "
+                f"using legacy path: {self.events_dir}"
+            )
 
         # 订阅者映射：事件类型 -> 处理器列表
         self._subscribers: dict[SubagentEvent, list[EventHandler]] = defaultdict(list)

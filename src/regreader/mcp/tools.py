@@ -27,6 +27,7 @@ from regreader.storage.models import (
     ChapterNode,
     DocumentStructure,
     PageContent,
+    RegulationMatch,
     SearchResult,
     TocItem,
     TocTree,
@@ -60,6 +61,104 @@ class RegReaderTools:
         if self._table_search is None:
             self._table_search = TableHybridSearch()
         return self._table_search
+
+    # ==================== Phase 0: 规程定位工具 ====================
+
+    def locate_regulations(
+        self,
+        query: str,
+        top_k: int = 3,
+        min_score: float = 0.3,
+    ) -> dict:
+        """
+        根据用户查询自动定位相关规程
+
+        使用语义匹配（基于 embedding）和关键词匹配来找到最相关的规程。
+        当用户提问时没有指定规程ID时，应该首先调用此工具。
+
+        Args:
+            query: 用户查询内容
+            top_k: 返回最相关的 N 个规程（默认3个）
+            min_score: 最低相似度阈值（0-1，默认0.3）
+
+        Returns:
+            包含匹配规程列表的字典:
+            - matches: list[RegulationMatch] - 匹配的规程列表（按相关度排序）
+            - total_regulations: int - 系统中的规程总数
+            - query: str - 原始查询
+
+        Raises:
+            ValueError: 参数无效
+        """
+        # 参数验证
+        if not query or not query.strip():
+            raise ValueError("查询内容不能为空")
+        if top_k < 1:
+            raise ValueError("top_k 必须大于 0")
+        if not 0 <= min_score <= 1:
+            raise ValueError("min_score 必须在 0-1 之间")
+
+        # 加载所有规程信息
+        all_regs = self.page_store.list_regulations()
+        if not all_regs:
+            logger.warning("系统中没有任何规程")
+            return {
+                "matches": [],
+                "total_regulations": 0,
+                "query": query,
+            }
+
+        logger.info(f"locate_regulations: 查询='{query}', 候选规程数={len(all_regs)}")
+
+        # 方案1：关键词匹配（快速）
+        matches = []
+        for reg_info in all_regs:
+            score, reason, matched_keywords = self._calculate_regulation_score(
+                query, reg_info
+            )
+
+            if score >= min_score:
+                matches.append(
+                    RegulationMatch(
+                        reg_id=reg_info.reg_id,
+                        title=reg_info.title,
+                        score=score,
+                        match_reason=reason,
+                        keywords=matched_keywords,
+                        scope=reg_info.scope,
+                    )
+                )
+
+        # 按分数降序排序
+        matches.sort(key=lambda x: x.score, reverse=True)
+        top_matches = matches[:top_k]
+
+        # 检查置信度：如果最高分 < 0.3，使用 LLM fallback
+        max_score = top_matches[0].score if top_matches else 0.0
+        if max_score < 0.3:
+            logger.info(
+                f"locate_regulations: 关键词匹配置信度低 ({max_score:.2f}), "
+                f"使用 LLM fallback"
+            )
+            try:
+                llm_matches = self._locate_with_llm(query, all_regs, top_k)
+                if llm_matches:
+                    top_matches = llm_matches
+                    logger.info(f"locate_regulations: LLM 返回 {len(llm_matches)} 个匹配")
+            except Exception as e:
+                logger.warning(f"locate_regulations: LLM fallback 失败: {e}")
+                # 继续使用关键词匹配结果
+
+        logger.info(
+            f"locate_regulations: 找到 {len(matches)} 个匹配规程，"
+            f"返回 top {len(top_matches)} 个"
+        )
+
+        return {
+            "matches": [m.model_dump() for m in top_matches],
+            "total_regulations": len(all_regs),
+            "query": query,
+        }
 
     def get_toc(
         self,
@@ -96,6 +195,194 @@ class RegReaderTools:
             return self._truncate_toc(toc, max_depth, expand_section)
 
         return toc.model_dump()
+
+    def _locate_with_llm(
+        self, query: str, all_regs: list, top_k: int
+    ) -> list[RegulationMatch]:
+        """
+        使用 LLM 进行智能规程定位（fallback 方案）
+
+        Args:
+            query: 用户查询
+            all_regs: 所有规程信息列表
+            top_k: 返回最相关的 N 个规程
+
+        Returns:
+            匹配的规程列表
+        """
+        from regreader.core.config import get_settings
+        from openai import OpenAI
+        import json
+
+        settings = get_settings()
+
+        # 准备规程信息
+        regs_info = []
+        for reg in all_regs:
+            regs_info.append({
+                "reg_id": reg.reg_id,
+                "title": reg.title,
+                "description": reg.description or "",
+                "keywords": reg.keywords or [],
+                "scope": reg.scope or "",
+            })
+
+        # 构建提示词
+        system_prompt = """你是电力系统规程分析专家。根据用户查询，从给定的规程列表中选择最相关的规程。
+
+返回 JSON 格式：
+{
+  "matches": [
+    {
+      "reg_id": "规程ID",
+      "score": 0.8,
+      "reason": "匹配原因说明"
+    }
+  ]
+}
+
+只返回 JSON，不要其他内容。"""
+
+        user_prompt = f"""用户查询：{query}
+
+可用规程列表：
+{json.dumps(regs_info, ensure_ascii=False, indent=2)}
+
+请选择最相关的 {top_k} 个规程。"""
+
+        # 调用 LLM
+        base_url = settings.llm_base_url
+        if settings.is_ollama_backend() and not base_url.endswith("/v1"):
+            base_url = base_url.rstrip("/") + "/v1"
+
+        client = OpenAI(
+            api_key=settings.llm_api_key or "ollama",
+            base_url=base_url,
+        )
+
+        response = client.chat.completions.create(
+            model=settings.llm_model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+        )
+
+        result_text = response.choices[0].message.content
+        if not result_text:
+            raise ValueError("LLM 返回空响应")
+
+        # 解析 JSON 响应
+        result_text = result_text.strip()
+        if result_text.startswith("```json"):
+            result_text = result_text[7:]
+        elif result_text.startswith("```"):
+            result_text = result_text[3:]
+        if result_text.endswith("```"):
+            result_text = result_text[:-3]
+
+        result = json.loads(result_text.strip())
+        llm_matches = result.get("matches", [])
+
+        # 转换为 RegulationMatch 对象
+        matches = []
+        for match in llm_matches[:top_k]:
+            reg_id = match.get("reg_id")
+            reg_info = next((r for r in all_regs if r.reg_id == reg_id), None)
+            if reg_info:
+                matches.append(
+                    RegulationMatch(
+                        reg_id=reg_id,
+                        title=reg_info.title,
+                        score=match.get("score", 0.5),
+                        match_reason=f"LLM 推理: {match.get('reason', '相关')}",
+                        keywords=reg_info.keywords or [],
+                        scope=reg_info.scope,
+                    )
+                )
+
+        return matches
+
+    def _calculate_regulation_score(
+        self, query: str, reg_info
+    ) -> tuple[float, str, list[str]]:
+        """
+        计算规程与查询的相关性分数
+
+        Args:
+            query: 用户查询
+            reg_info: RegulationInfo 对象
+
+        Returns:
+            (score, reason, matched_keywords) 元组
+        """
+        query_lower = query.lower()
+        score = 0.0
+        reasons = []
+        matched_keywords = []
+
+        # 1. 标题匹配（权重 0.4）
+        title_lower = reg_info.title.lower()
+        if query_lower in title_lower:
+            score += 0.4
+            reasons.append("标题完全匹配")
+        else:
+            # 部分匹配
+            query_words = set(query_lower.split())
+            title_words = set(title_lower.split())
+            common_words = query_words & title_words
+            if common_words:
+                title_score = len(common_words) / len(query_words) * 0.4
+                score += title_score
+                reasons.append(f"标题部分匹配({len(common_words)}个词)")
+
+        # 2. 关键词匹配（权重 0.4）
+        if reg_info.keywords:
+            keywords_lower = [kw.lower() for kw in reg_info.keywords]
+            keyword_score = 0.0
+            for kw in keywords_lower:
+                # 双向匹配：
+                # 1. 关键词在查询中（完整匹配）
+                # 2. 关键词的任意字在查询中（部分匹配）
+                if kw in query_lower:
+                    # 完整匹配，给满分
+                    keyword_score += 0.4 / len(reg_info.keywords)
+                    matched_keywords.append(kw)
+                else:
+                    # 部分匹配：检查关键词中的字是否在查询中
+                    kw_chars = set(kw)
+                    query_chars = set(query_lower)
+                    common_chars = kw_chars & query_chars
+                    if len(common_chars) >= 2:  # 至少匹配2个字
+                        # 部分匹配，给部分分数
+                        partial_score = (len(common_chars) / len(kw_chars)) * (0.4 / len(reg_info.keywords))
+                        keyword_score += partial_score
+                        matched_keywords.append(kw)
+            score += keyword_score
+            if matched_keywords:
+                reasons.append(f"关键词匹配: {', '.join(matched_keywords)}")
+
+        # 3. 描述和范围匹配（权重 0.2）
+        if reg_info.description:
+            desc_lower = reg_info.description.lower()
+            if query_lower in desc_lower:
+                score += 0.1
+                reasons.append("描述匹配")
+
+        if reg_info.scope:
+            scope_lower = reg_info.scope.lower()
+            if query_lower in scope_lower:
+                score += 0.1
+                reasons.append("适用范围匹配")
+
+        # 确保分数在 0-1 之间
+        score = min(score, 1.0)
+
+        # 生成匹配原因说明
+        reason = "; ".join(reasons) if reasons else "无明显匹配"
+
+        return score, reason, matched_keywords
 
     def _truncate_toc(
         self,

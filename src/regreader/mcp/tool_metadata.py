@@ -26,9 +26,10 @@ class ToolCategory(str, Enum):
 
 # ==================== 工具集定义 ====================
 
-# 核心工具（8个，始终启用）
+# 核心工具（9个，始终启用）
 CORE_TOOLS: list[str] = [
-    # 基础工具（4个）
+    # 基础工具（5个）
+    "locate_regulations",  # 入口：自动定位相关规程
     "list_regulations",  # 入口：列出可用规程
     "get_toc",  # 导航：获取目录结构
     "smart_search",  # 检索：混合搜索
@@ -178,7 +179,29 @@ class ToolMetadata:
 # ==================== 工具元数据注册表 ====================
 
 TOOL_METADATA: dict[str, ToolMetadata] = {
-    # === 基础工具（4个） ===
+    # === 基础工具（5个） ===
+    "locate_regulations": ToolMetadata(
+        name="locate_regulations",
+        brief="自动定位相关规程",
+        description=(
+            "根据用户查询自动定位最相关的规程。使用语义匹配和关键词匹配找到最相关的规程列表。"
+            "【重要】当用户提问时没有指定规程ID时，应首先调用此工具自动定位目标规程。"
+            "返回匹配的规程列表（按相关度排序），包含 reg_id、title、score、match_reason 等信息。"
+        ),
+        params_doc={
+            "query": "用户查询内容",
+            "top_k": "返回最相关的 N 个规程（默认3个）",
+            "min_score": "最低相似度阈值（0-1，默认0.3）",
+        },
+        category=ToolCategory.BASE,
+        phase=0,
+        priority=1,
+        prerequisites=[],
+        next_tools=["get_toc", "smart_search"],
+        use_cases=["自动定位目标规程", "多规程智能选择", "跨规程查询"],
+        cli_command="locate",
+        expected_params={"query": "str", "top_k": "int", "min_score": "float"},
+    ),
     "list_regulations": ToolMetadata(
         name="list_regulations",
         brief="列出已入库规程",

@@ -557,6 +557,9 @@ def chat(
     orchestrator: bool = typer.Option(
         False, "--orchestrator", "-o", help="启用 Orchestrator 模式（等同于 --mode orchestrated，保留用于向后兼容）"
     ),
+    parallel: bool = typer.Option(
+        False, "--parallel", "-p", help="启用并行执行模式（仅在 orchestrated 模式下生效）"
+    ),
     display: str = typer.Option(
         "simple",
         "--display",
@@ -640,13 +643,28 @@ def chat(
             # Orchestrator 模式（Subagent 架构）
             if agent_type == AgentType.claude:
                 from regreader.agents import ClaudeOrchestrator
-                agent = ClaudeOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+                agent = ClaudeOrchestrator(
+                    reg_id=reg_id,
+                    mcp_config=mcp_config,
+                    status_callback=status_callback,
+                    parallel_mode=parallel
+                )
             elif agent_type == AgentType.pydantic:
                 from regreader.agents import PydanticOrchestrator
-                agent = PydanticOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+                agent = PydanticOrchestrator(
+                    reg_id=reg_id,
+                    mcp_config=mcp_config,
+                    status_callback=status_callback,
+                    parallel_mode=parallel
+                )
             else:
                 from regreader.agents import LangGraphOrchestrator
-                agent = LangGraphOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+                agent = LangGraphOrchestrator(
+                    reg_id=reg_id,
+                    mcp_config=mcp_config,
+                    status_callback=status_callback,
+                    parallel_mode=parallel
+                )
         else:
             # 原始 Agent 模式
             if agent_type == AgentType.claude:
@@ -738,6 +756,9 @@ def ask(
     orchestrator: bool = typer.Option(
         False, "--orchestrator", "-o", help="启用 Orchestrator 模式（等同于 --mode orchestrated，保留用于向后兼容）"
     ),
+    parallel: bool = typer.Option(
+        False, "--parallel", "-p", help="启用并行执行模式（仅在 orchestrated 模式下生效）"
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="JSON 格式输出"),
     display: str = typer.Option(
         "simple",
@@ -820,13 +841,28 @@ def ask(
             # Orchestrator 模式（Subagent 架构）
             if agent_type == AgentType.claude:
                 from regreader.agents import ClaudeOrchestrator
-                agent = ClaudeOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+                agent = ClaudeOrchestrator(
+                    reg_id=reg_id,
+                    mcp_config=mcp_config,
+                    status_callback=status_callback,
+                    parallel_mode=parallel
+                )
             elif agent_type == AgentType.pydantic:
                 from regreader.agents import PydanticOrchestrator
-                agent = PydanticOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+                agent = PydanticOrchestrator(
+                    reg_id=reg_id,
+                    mcp_config=mcp_config,
+                    status_callback=status_callback,
+                    parallel_mode=parallel
+                )
             else:
                 from regreader.agents import LangGraphOrchestrator
-                agent = LangGraphOrchestrator(reg_id=reg_id, mcp_config=mcp_config, status_callback=status_callback)
+                agent = LangGraphOrchestrator(
+                    reg_id=reg_id,
+                    mcp_config=mcp_config,
+                    status_callback=status_callback,
+                    parallel_mode=parallel
+                )
         else:
             # 原始 Agent 模式
             if agent_type == AgentType.claude:
@@ -2019,6 +2055,272 @@ def _verify_mcp_tools(tools: list[dict], verbose: bool):
         if param_mismatches:
             issues.append(f"参数不匹配: {', '.join(m['tool'] for m in param_mismatches)}")
         console.print(f"验证结果: [bold red]✗ 失败[/bold red] ({'; '.join(issues)})")
+
+
+# ==================== Workspace 管理命令 ====================
+
+
+@app.command()
+def workspace_info():
+    """显示工作区信息和统计数据"""
+    from regreader.core.config import get_settings
+    from regreader.workspace import WorkspaceManager
+    from regreader.workspace.compat import LegacyWorkspaceAdapter
+
+    settings = get_settings()
+    workspace_manager = WorkspaceManager(settings.workspace_root)
+    adapter = LegacyWorkspaceAdapter(Path.cwd())
+
+    # 获取统计信息
+    sessions = workspace_manager.list_sessions()
+    migration_status = adapter.get_migration_status()
+
+    # 显示工作区信息
+    console.print("[bold]工作区信息[/bold]")
+    console.print("=" * 60)
+    console.print()
+
+    # 基本信息
+    console.print(f"工作区根目录: [cyan]{workspace_manager.workspace_root}[/cyan]")
+    console.print(f"会话目录: [cyan]{workspace_manager.sessions_dir}[/cyan]")
+    console.print(f"共享目录: [cyan]{workspace_manager.shared_dir}[/cyan]")
+    console.print(f"归档目录: [cyan]{workspace_manager.archive_dir}[/cyan]")
+    console.print()
+
+    # 会话统计
+    console.print("[bold]会话统计[/bold]")
+    console.print(f"活跃会话数: [green]{len(sessions)}[/green]")
+    if sessions:
+        console.print(f"最新会话: [cyan]{sessions[-1]}[/cyan]")
+    console.print()
+
+    # 配置信息
+    console.print("[bold]配置[/bold]")
+    console.print(f"会话保留天数: {settings.workspace_session_retention_days}")
+    console.print(f"最大会话数: {settings.workspace_max_sessions}")
+    console.print(f"归档启用: {'是' if settings.workspace_archive_enabled else '否'}")
+    console.print()
+
+    # 迁移状态
+    if migration_status["has_legacy_structure"]:
+        console.print("[bold yellow]⚠ 检测到旧版工作区结构[/bold yellow]")
+        console.print(f"旧版会话数: [yellow]{migration_status['legacy_sessions_count']}[/yellow]")
+        console.print(f"新版会话数: [green]{migration_status['new_sessions_count']}[/green]")
+        if migration_status["migration_needed"]:
+            console.print()
+            console.print("[yellow]建议运行 'regreader workspace-migrate' 进行迁移[/yellow]")
+    else:
+        console.print("[green]✓ 使用统一工作区结构[/green]")
+
+
+@app.command()
+def workspace_migrate(
+    dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run", help="预览更改而不实际执行"),
+    all_sessions: bool = typer.Option(False, "--all", "-a", help="迁移所有会话"),
+    session: str | None = typer.Option(None, "--session", "-s", help="迁移指定会话"),
+    backup: bool = typer.Option(True, "--backup/--no-backup", help="迁移前创建备份"),
+):
+    """迁移到统一工作区结构"""
+    from regreader.core.config import get_settings
+    from regreader.workspace import WorkspaceManager
+    from regreader.workspace.migrator import WorkspaceMigrator
+
+    settings = get_settings()
+    workspace_manager = WorkspaceManager(settings.workspace_root)
+    migrator = WorkspaceMigrator(workspace_manager)
+
+    # 检测旧版会话
+    legacy_sessions = migrator.detect_legacy_sessions()
+    if not legacy_sessions:
+        console.print("[green]✓ 未检测到需要迁移的旧版会话[/green]")
+        return
+
+    console.print(f"[bold]检测到 {len(legacy_sessions)} 个旧版会话[/bold]")
+    console.print()
+
+    # 确定要迁移的会话
+    if session:
+        if session not in legacy_sessions:
+            console.print(f"[red]错误: 会话 {session} 不存在[/red]")
+            raise typer.Exit(1)
+        sessions_to_migrate = [session]
+    elif all_sessions:
+        sessions_to_migrate = legacy_sessions
+    else:
+        console.print("[yellow]请使用 --all 迁移所有会话，或使用 --session 指定会话[/yellow]")
+        console.print(f"可用会话: {', '.join(legacy_sessions[:5])}")
+        if len(legacy_sessions) > 5:
+            console.print(f"... 以及其他 {len(legacy_sessions) - 5} 个会话")
+        raise typer.Exit(0)
+
+    # 显示迁移计划
+    mode_str = "[yellow]预览模式[/yellow]" if dry_run else "[red]执行模式[/red]"
+    console.print(f"迁移模式: {mode_str}")
+    console.print(f"备份: {'是' if backup else '否'}")
+    console.print(f"会话数: {len(sessions_to_migrate)}")
+    console.print()
+
+    if not dry_run:
+        confirm = typer.confirm("确定要执行迁移吗?")
+        if not confirm:
+            console.print("已取消")
+            raise typer.Exit(0)
+
+    # 执行迁移
+    with console.status("迁移中..."):
+        reports = []
+        for session_id in sessions_to_migrate:
+            report = migrator.migrate_session(session_id, dry_run=dry_run, backup=backup)
+            reports.append(report)
+
+    # 显示结果
+    console.print()
+    console.print("[bold]迁移结果[/bold]")
+    console.print("=" * 60)
+
+    successful = sum(1 for r in reports if r.success)
+    failed = len(reports) - successful
+
+    for report in reports:
+        status = "[green]✓[/green]" if report.success else "[red]✗[/red]"
+        console.print(f"{status} {report.session_id}: {report.files_migrated} 个文件")
+        if report.errors:
+            for error in report.errors:
+                console.print(f"  [red]错误: {error}[/red]")
+
+    console.print()
+    console.print(f"成功: [green]{successful}[/green] | 失败: [red]{failed}[/red]")
+
+    if dry_run:
+        console.print()
+        console.print("[yellow]这是预览模式，未实际执行迁移[/yellow]")
+        console.print("[yellow]使用 --no-dry-run 执行实际迁移[/yellow]")
+
+
+@app.command()
+def workspace_cleanup(
+    retention_days: int | None = typer.Option(None, "--retention-days", "-r", help="覆盖保留天数"),
+    force: bool = typer.Option(False, "--force", "-f", help="跳过确认"),
+):
+    """根据保留策略清理旧会话"""
+    from regreader.core.config import get_settings
+    from regreader.workspace import WorkspaceManager
+
+    settings = get_settings()
+    workspace_manager = WorkspaceManager(settings.workspace_root)
+
+    # 使用配置或命令行参数
+    days = retention_days if retention_days is not None else settings.workspace_session_retention_days
+
+    console.print(f"[bold]清理旧会话 (保留 {days} 天)[/bold]")
+    console.print()
+
+    # 获取要清理的会话
+    with console.status("扫描会话..."):
+        old_sessions = workspace_manager.cleanup_old_sessions(days, dry_run=True)
+
+    if not old_sessions:
+        console.print("[green]✓ 没有需要清理的会话[/green]")
+        return
+
+    console.print(f"找到 {len(old_sessions)} 个超过 {days} 天的会话:")
+    for session_id in old_sessions[:10]:
+        console.print(f"  - {session_id}")
+    if len(old_sessions) > 10:
+        console.print(f"  ... 以及其他 {len(old_sessions) - 10} 个会话")
+    console.print()
+
+    if not force:
+        confirm = typer.confirm(f"确定要归档这 {len(old_sessions)} 个会话吗?")
+        if not confirm:
+            console.print("已取消")
+            raise typer.Exit(0)
+
+    # 执行清理
+    with console.status("归档会话..."):
+        archived = workspace_manager.cleanup_old_sessions(days, dry_run=False)
+
+    console.print()
+    console.print(f"[green]✓ 已归档 {len(archived)} 个会话[/green]")
+
+
+@app.command()
+def workspace_list(
+    include_archived: bool = typer.Option(False, "--archived", "-a", help="包含已归档会话"),
+):
+    """列出工作区中的所有会话"""
+    from regreader.core.config import get_settings
+    from regreader.workspace import WorkspaceManager
+
+    settings = get_settings()
+    workspace_manager = WorkspaceManager(settings.workspace_root)
+
+    sessions = workspace_manager.list_sessions(include_archived=include_archived)
+
+    if not sessions:
+        console.print("[yellow]工作区中没有会话[/yellow]")
+        return
+
+    console.print(f"[bold]会话列表 ({len(sessions)} 个)[/bold]")
+    console.print()
+
+    for session_id in sessions:
+        try:
+            session = workspace_manager.get_session(session_id)
+            session_dir = session.session_dir
+
+            # 获取会话信息
+            if session_dir.exists():
+                # 计算文件数
+                file_count = sum(1 for _ in session_dir.rglob("*") if _.is_file())
+                # 计算大小
+                size_bytes = sum(f.stat().st_size for f in session_dir.rglob("*") if f.is_file())
+                size_mb = size_bytes / (1024 * 1024)
+
+                console.print(f"[cyan]{session_id}[/cyan]")
+                console.print(f"  路径: {session_dir}")
+                console.print(f"  文件: {file_count} 个 | 大小: {size_mb:.2f} MB")
+            else:
+                console.print(f"[dim]{session_id}[/dim] (已归档)")
+        except Exception as e:
+            console.print(f"[red]{session_id}[/red] (错误: {e})")
+
+        console.print()
+
+
+@app.command()
+def workspace_archive(
+    session: str = typer.Argument(..., help="要归档的会话 ID"),
+):
+    """归档指定会话"""
+    from regreader.core.config import get_settings
+    from regreader.workspace import WorkspaceManager
+
+    settings = get_settings()
+    workspace_manager = WorkspaceManager(settings.workspace_root)
+
+    # 检查会话是否存在
+    try:
+        session_workspace = workspace_manager.get_session(session)
+    except FileNotFoundError:
+        console.print(f"[red]错误: 会话 {session} 不存在[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]归档会话: {session}[/bold]")
+    console.print(f"路径: {session_workspace.session_dir}")
+    console.print()
+
+    confirm = typer.confirm("确定要归档此会话吗?")
+    if not confirm:
+        console.print("已取消")
+        raise typer.Exit(0)
+
+    # 执行归档
+    with console.status("归档中..."):
+        archive_path = workspace_manager.archive_session(session)
+
+    console.print()
+    console.print(f"[green]✓ 会话已归档到: {archive_path}[/green]")
 
 
 @app.command()

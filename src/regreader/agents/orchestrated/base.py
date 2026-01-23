@@ -40,6 +40,7 @@ class BaseOrchestrator(BaseRegReaderAgent, ABC):
         reg_id: str | None = None,
         use_coordinator: bool = False,
         callback: StatusCallback | None = None,
+        parallel_mode: bool = False,
     ):
         """初始化 Orchestrator
 
@@ -47,10 +48,12 @@ class BaseOrchestrator(BaseRegReaderAgent, ABC):
             reg_id: 默认规程ID
             use_coordinator: 是否使用 Coordinator（Bash+FS 模式）
             callback: 状态回调
+            parallel_mode: 是否启用并行执行模式
         """
         super().__init__(reg_id)
         self.use_coordinator = use_coordinator
         self.callback = callback or NullCallback()
+        self.parallel_mode = parallel_mode
         self._initialized = False
         self._sources: list[str] = []
         self._tool_calls: list[dict] = []

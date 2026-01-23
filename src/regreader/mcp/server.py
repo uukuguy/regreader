@@ -122,7 +122,20 @@ def create_mcp_server(
     mcp = FastMCP(name, host=host, port=port)
     tools = RegReaderTools()
 
-    # ==================== 基础工具（4个，始终启用） ====================
+    # ==================== 基础工具（5个，始终启用） ====================
+
+    @mcp.tool(meta=TOOL_METADATA["locate_regulations"].to_dict())
+    @log_tool_call
+    def locate_regulations(
+        query: str,
+        top_k: int = 3,
+        min_score: float = 0.3,
+    ) -> dict:
+        """根据用户查询自动定位相关规程。"""
+        try:
+            return tools.locate_regulations(query, top_k, min_score)
+        except Exception as e:
+            return {"error": str(e), "matches": [], "total_regulations": 0, "query": query}
 
     @mcp.tool(meta=TOOL_METADATA["list_regulations"].to_dict())
     @log_tool_call

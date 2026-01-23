@@ -413,3 +413,32 @@ class TableSearchResult(BaseModel):
         """来源引用"""
         page_ref = f"P{self.page_start}" if self.page_start == self.page_end else f"P{self.page_start}-{self.page_end}"
         return f"{self.reg_id} {page_ref}" + (f" {self.caption}" if self.caption else "")
+
+
+# ============================================================================
+# 规程匹配模型（用于自动定位目标规程）
+# ============================================================================
+
+
+class RegulationMatch(BaseModel):
+    """规程匹配结果
+
+    用于 locate_regulations 工具返回与用户查询最相关的规程列表。
+    """
+
+    reg_id: str = Field(description="规程标识")
+    title: str = Field(description="规程标题")
+    score: float = Field(description="相关性分数 (0-1)")
+    match_reason: str = Field(description="匹配原因说明")
+    keywords: list[str] = Field(default_factory=list, description="匹配的关键词")
+    scope: str | None = Field(default=None, description="适用范围描述")
+
+    @property
+    def confidence_level(self) -> str:
+        """置信度等级"""
+        if self.score >= 0.7:
+            return "high"
+        elif self.score >= 0.4:
+            return "medium"
+        else:
+            return "low"

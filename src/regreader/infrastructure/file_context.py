@@ -9,9 +9,12 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from regreader.workspace.session import SessionWorkspace
 
 # 可选依赖
 try:
@@ -47,17 +50,17 @@ class FileContext:
 
     Attributes:
         subagent_name: Subagent 标识名
-        base_dir: Subagent 工作目录根路径
+        session_workspace: 会话工作区（提供路径访问）
         can_read: 可读路径白名单
         can_write: 可写路径白名单
-        project_root: 项目根目录（用于解析相对路径）
+        base_dir: Subagent 工作目录根路径（从 session_workspace 派生）
     """
 
     subagent_name: str
     """Subagent 标识名"""
 
-    base_dir: Path
-    """Subagent 工作目录根路径"""
+    session_workspace: SessionWorkspace | None = None
+    """会话工作区（提供路径访问）"""
 
     can_read: list[Path] = field(default_factory=list)
     """可读路径白名单"""
@@ -65,21 +68,31 @@ class FileContext:
     can_write: list[Path] = field(default_factory=list)
     """可写路径白名单"""
 
-    project_root: Path = field(default_factory=Path.cwd)
-    """项目根目录"""
+    base_dir: Path | None = field(default=None, init=False)
+    """Subagent 工作目录根路径（从 session_workspace 派生）"""
 
     def __post_init__(self) -> None:
         """初始化后处理"""
-        # 确保 base_dir 是绝对路径
-        if not self.base_dir.is_absolute():
-            self.base_dir = self.project_root / self.base_dir
+        # 从 session_workspace 派生 base_dir
+        if self.session_workspace:
+            self.base_dir = self.session_workspace.get_subagent_dir(self.subagent_name)
+        else:
+            # 向后兼容：如果没有 session_workspace，使用旧的路径结构
+            self.base_dir = Path.cwd() / "subagents" / self.subagent_name
+            logger.warning(
+                f"FileContext initialized without session_workspace, "
+                f"using legacy path: {self.base_dir}"
+            )
 
-        # 默认可读：自己的工作目录 + shared/
+        # 默认可读：自己的工作目录 + session shared + global shared
         if not self.can_read:
-            self.can_read = [
-                self.base_dir,
-                self.project_root / "shared",
-            ]
+            read_paths = [self.base_dir]
+            if self.session_workspace:
+                read_paths.append(self.session_workspace.shared_dir)  # Session-specific
+                read_paths.append(self.session_workspace.workspace_root / "shared")  # Global
+            else:
+                read_paths.append(Path.cwd() / "shared")  # Legacy
+            self.can_read = read_paths
 
         # 默认可写：scratch/ 和 logs/
         if not self.can_write:
@@ -105,9 +118,9 @@ class FileContext:
         Returns:
             是否有读取权限
         """
-        abs_path = path if path.is_absolute() else self.project_root / path
+        abs_path = path if path.is_absolute() else path.resolve()
         for allowed in self.can_read:
-            allowed_abs = allowed if allowed.is_absolute() else self.project_root / allowed
+            allowed_abs = allowed if allowed.is_absolute() else allowed.resolve()
             try:
                 abs_path.relative_to(allowed_abs)
                 return True
@@ -124,9 +137,9 @@ class FileContext:
         Returns:
             是否有写入权限
         """
-        abs_path = path if path.is_absolute() else self.project_root / path
+        abs_path = path if path.is_absolute() else path.resolve()
         for allowed in self.can_write:
-            allowed_abs = allowed if allowed.is_absolute() else self.project_root / allowed
+            allowed_abs = allowed if allowed.is_absolute() else allowed.resolve()
             try:
                 abs_path.relative_to(allowed_abs)
                 return True
@@ -202,7 +215,15 @@ class FileContext:
             FileAccessError: 无读取权限
             FileNotFoundInContextError: 文件不存在
         """
-        file_path = self.project_root / "shared" / path
+        # Try session-specific shared first, then global shared
+        if self.session_workspace:
+            file_path = self.session_workspace.shared_dir / path
+            if not file_path.exists():
+                file_path = self.session_workspace.workspace_root / "shared" / path
+        else:
+            # Legacy path
+            file_path = Path.cwd() / "shared" / path
+
         if not self._check_read_access(file_path):
             raise FileAccessError(f"No read access to {file_path}")
         if not file_path.exists():
@@ -218,7 +239,13 @@ class FileContext:
         Raises:
             FileNotFoundInContextError: plan.md 不存在
         """
-        plan_path = self.project_root / "coordinator" / "plan.md"
+        # Try session-specific coordinator directory first
+        if self.session_workspace:
+            plan_path = self.session_workspace.coordinator_dir / "plan.md"
+        else:
+            # Legacy path
+            plan_path = Path.cwd() / "coordinator" / "plan.md"
+
         if not plan_path.exists():
             raise FileNotFoundInContextError(f"Plan not found: {plan_path}")
 
