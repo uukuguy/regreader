@@ -20,6 +20,15 @@ AGENTS := claude pydantic langgraph
 AGENT_FLAGS ?=  # 额外的 agent 参数，如 -v (verbose), -q (quiet)
 DISPLAY ?= simple  # 显示模式: simple (默认), clean (简洁), enhanced (增强)
 
+# AgentEx 配置（新的 agents_v2 实现）
+# 设置 USE_AGENTEX=true 使用基于 agentex 的新实现
+USE_AGENTEX ?= false
+ifeq ($(USE_AGENTEX),true)
+    AGENTEX_ENV := REGREADER_USE_AGENTEX=true
+else
+    AGENTEX_ENV :=
+endif
+
 # 默认值集中管理
 REG_ID ?=  # 空值表示自动识别规程（推荐），也可显式指定如 REG_ID=wengui_2024
 FILE ?= ./data/raw/wengui_2024.pdf

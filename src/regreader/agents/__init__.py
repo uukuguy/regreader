@@ -19,11 +19,41 @@ Subagent 架构（Orchestrator 模式）：
 - AgentEvent/AgentEventType: 事件系统
 - StatusCallback: 回调协议
 - AgentStatusDisplay: 状态显示组件
+
+兼容性 Shim：
+- 设置环境变量 REGREADER_USE_AGENTEX=true 使用新的 agents_v2 实现
+- 默认使用旧的 agents 实现
 """
 
-from .base import AgentResponse, BaseRegReaderAgent
+import os
+
+# 检查是否使用新的 agentex 实现
+_USE_AGENTEX = os.environ.get("REGREADER_USE_AGENTEX", "").lower() in ("true", "1", "yes")
+
+if _USE_AGENTEX:
+    # 使用新的 agents_v2 实现（基于 agentex）
+    from ..agents_v2 import (
+        AgentResponse,
+        RegReaderAgent as BaseRegReaderAgent,
+        ClaudeAgent,
+        PydanticAIAgent,
+        LangGraphAgent,
+        ClaudeOrchestrator,
+        PydanticOrchestrator,
+        LangGraphOrchestrator,
+    )
+else:
+    # 使用旧的 agents 实现
+    from .base import AgentResponse, BaseRegReaderAgent
+    from .direct.claude import ClaudeAgent
+    from .direct.langgraph import LangGraphAgent
+    from .direct.pydantic import PydanticAIAgent
+    from .orchestrated.langgraph import LangGraphOrchestrator
+    from .orchestrated.pydantic import PydanticOrchestrator
+    from .orchestrated.claude import ClaudeOrchestrator
+
+# 以下模块始终从旧实现导入（共享基础设施）
 from .shared.callbacks import CompositeCallback, LoggingCallback, NullCallback, StatusCallback
-from .direct.claude import ClaudeAgent
 from .shared.display import AgentStatusDisplay, SimpleStatusDisplay
 from .shared.events import (
     AgentEvent,
@@ -43,12 +73,7 @@ from .hooks import (
     set_status_callback,
     source_extraction_hook,
 )
-from .direct.langgraph import LangGraphAgent
-from .orchestrated.langgraph import LangGraphOrchestrator
-from .orchestrated.pydantic import PydanticOrchestrator
-from .orchestrated.claude import ClaudeOrchestrator
 from .shared.mcp_connection import MCPConnectionConfig, MCPConnectionManager, configure_mcp, get_mcp_manager
-from .direct.pydantic import PydanticAIAgent
 from .session import SessionManager, SessionState
 
 __all__ = [

@@ -18,7 +18,9 @@ include makefiles/mcp-tools.mk
 	chat-mcp-sse chat-claude-sse chat-pydantic-sse chat-langgraph-sse \
 	mcp-tools mcp-tools-v mcp-tools-live mcp-verify mcp-verify-v mcp-verify-sse \
 	enrich-metadata enrich-metadata-all search-all search-multi search-smart \
-	test-bash-fs verify-bash-fs test-infrastructure test-regsearch
+	test-bash-fs verify-bash-fs test-infrastructure test-regsearch \
+	chat-agentex ask-agentex chat-orch-agentex ask-orch-agentex \
+	test-agentex test-agents-v2 test-agentex-shim verify-agentex
 
 # Default target
 .DEFAULT_GOAL := help
@@ -99,6 +101,17 @@ help: ## Show this help message
 	@echo "  make test-infrastructure      # Test infrastructure layer (FileContext, EventBus, etc.)"
 	@echo "  make test-regsearch           # Test RegSearchSubagent"
 	@echo "  make verify-bash-fs           # Run architecture verification (no pytest needed)"
+	@echo ""
+	@echo "$(GREEN)AgentEx Implementation (New agents_v2):$(NC)"
+	@echo "  USE_AGENTEX=true              # Enable agentex-based implementation"
+	@echo "  make chat USE_AGENTEX=true    # Chat using new implementation"
+	@echo "  make chat-agentex             # Shortcut for agentex chat"
+	@echo "  make ask-agentex ASK_QUERY=\"...\"  # Single query with agentex"
+	@echo "  make chat-orch-agentex        # Orchestrator with agentex"
+	@echo "  make test-agentex             # Run agentex unit tests"
+	@echo "  make test-agents-v2           # Test agents_v2 imports"
+	@echo "  make test-agentex-shim        # Test compatibility shim"
+	@echo "  make verify-agentex           # Run all agentex verifications"
 
 #----------------------------------------------------------------------
 # Installation

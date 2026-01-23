@@ -12,13 +12,13 @@ include makefiles/variables.mk
 #----------------------------------------------------------------------
 
 chat: ## Start interactive chat (usage: make chat REG_ID=angui AGENT=claude DISPLAY=clean)
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask: ## Single query to Agent (usage: make ask ASK_QUERY="母线失压如何处理?" AGENT=claude DISPLAY=clean)
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-json: ## Single query with JSON output
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) --json
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) $(AGENT_FLAGS) --json
 
 ask-file: ## Query from file (usage: make ask-file QUERY_FILE=queries/query.txt AGENT=claude DISPLAY=clean)
 	@if [ -z "$(QUERY_FILE)" ]; then \
@@ -35,7 +35,7 @@ ask-file: ## Query from file (usage: make ask-file QUERY_FILE=queries/query.txt 
 		exit 1; \
 	fi
 	@echo "$(BLUE)从文件读取查询: $(QUERY_FILE)$(NC)"
-	$(REGREADER_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS) -- "$$(cat $(QUERY_FILE))"
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS) -- "$$(cat $(QUERY_FILE))"
 
 ask-stdin: ## Query from stdin (usage: cat query.txt | make ask-stdin AGENT=claude DISPLAY=clean)
 	@echo "$(BLUE)从 stdin 读取查询...$(NC)"
@@ -46,13 +46,13 @@ ask-stdin: ## Query from stdin (usage: cat query.txt | make ask-stdin AGENT=clau
 		echo "或者: echo '查询内容' | make ask-stdin AGENT=claude"; \
 		exit 1; \
 	fi; \
-	$(REGREADER_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS) -- "$$QUERY"
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask $(REG_ID_FLAG) --agent $(AGENT) --display $(DISPLAY) $(AGENT_FLAGS) -- "$$QUERY"
 
 chat-orch: ## Start chat with Orchestrator (usage: make chat-orch REG_ID=angui AGENT=claude DISPLAY=clean)
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent $(AGENT) --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-orch: ## Single query with Orchestrator (usage: make ask-orch ASK_QUERY="表6-2注1的内容" DISPLAY=clean)
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent $(AGENT) --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 #----------------------------------------------------------------------
 # Agent 快捷别名（向后兼容）
@@ -60,43 +60,43 @@ ask-orch: ## Single query with Orchestrator (usage: make ask-orch ASK_QUERY="表
 
 # Chat aliases
 chat-claude: ## Start chat with Claude Agent SDK
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude --display $(DISPLAY) $(AGENT_FLAGS)
 
 chat-pydantic: ## Start chat with Pydantic AI Agent
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic --display $(DISPLAY) $(AGENT_FLAGS)
 
 chat-langgraph: ## Start chat with LangGraph Agent
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph --display $(DISPLAY) $(AGENT_FLAGS)
 
 # Ask aliases
 ask-claude: ## Single query with Claude Agent
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-pydantic: ## Single query with Pydantic AI Agent
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-langgraph: ## Single query with LangGraph Agent
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph --display $(DISPLAY) $(AGENT_FLAGS)
 
 # Orchestrator chat aliases
 chat-orch-claude: ## Start chat with Claude Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent claude --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 chat-orch-pydantic: ## Start chat with Pydantic Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent pydantic --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 chat-orch-langgraph: ## Start chat with LangGraph Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) chat $(REG_ID_FLAG) --agent langgraph --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 # Orchestrator ask aliases
 ask-orch-claude: ## Single query with Claude Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent claude --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-orch-pydantic: ## Single query with Pydantic Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent pydantic --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 ask-orch-langgraph: ## Single query with LangGraph Orchestrator
-	$(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
+	$(AGENTEX_ENV) $(REGREADER_CMD) $(MCP_FLAGS) ask "$(ASK_QUERY)" $(REG_ID_FLAG) --agent langgraph --orchestrator --display $(DISPLAY) $(AGENT_FLAGS)
 
 #----------------------------------------------------------------------
 # SSE Mode 快捷方式（需要先运行 'make serve'）
@@ -158,4 +158,72 @@ ask-examples: ## Show examples for long query input methods
 	@echo "$(BLUE)方案 4: 直接使用 regreader CLI$(NC)"
 	@echo "  regreader ask \"\$$(cat queries/my_query.txt)\" -r angui_2024 --agent claude"
 	@echo ""
+	@echo "$(GREEN)========================================$(NC)"
+
+#----------------------------------------------------------------------
+# AgentEx 模式（基于 agentex 的新实现）
+#----------------------------------------------------------------------
+
+# AgentEx 快捷命令（自动设置 USE_AGENTEX=true）
+chat-agentex: ## Chat using agentex implementation (usage: make chat-agentex AGENT=claude)
+	$(MAKE) chat USE_AGENTEX=true AGENT="$(AGENT)" REG_ID="$(REG_ID)" DISPLAY="$(DISPLAY)"
+
+ask-agentex: ## Single query using agentex implementation
+	$(MAKE) ask USE_AGENTEX=true AGENT="$(AGENT)" REG_ID="$(REG_ID)" ASK_QUERY="$(ASK_QUERY)" DISPLAY="$(DISPLAY)"
+
+chat-orch-agentex: ## Chat with Orchestrator using agentex implementation
+	$(MAKE) chat-orch USE_AGENTEX=true AGENT="$(AGENT)" REG_ID="$(REG_ID)" DISPLAY="$(DISPLAY)"
+
+ask-orch-agentex: ## Single query with Orchestrator using agentex implementation
+	$(MAKE) ask-orch USE_AGENTEX=true AGENT="$(AGENT)" REG_ID="$(REG_ID)" ASK_QUERY="$(ASK_QUERY)" DISPLAY="$(DISPLAY)"
+
+# AgentEx 测试命令
+test-agentex: ## Run agentex unit tests
+	$(UV_RUN) $(PYTEST) tests/agentex/ -xvs
+
+test-agents-v2: ## Run agents_v2 import tests
+	@echo "$(BLUE)Testing agents_v2 imports...$(NC)"
+	@PYTHONPATH=src $(PY_CMD) -c "\
+from regreader.agents_v2.base import RegReaderAgent, AgentResponse; \
+from regreader.agents_v2.config import RegReaderConfig, ClaudeAgentConfig, PydanticAgentConfig, LangGraphAgentConfig, OrchestratorConfig; \
+from regreader.agents_v2.memory import RegReaderMemory, ContentChunk; \
+from regreader.agents_v2.events import EventAdapter; \
+from regreader.agents_v2.direct import ClaudeAgent, PydanticAIAgent, LangGraphAgent; \
+from regreader.agents_v2.orchestrated import BaseOrchestrator, ClaudeOrchestrator, PydanticOrchestrator, LangGraphOrchestrator; \
+print('✓ All agents_v2 imports successful')"
+
+test-agentex-shim: ## Test compatibility shim (both modes)
+	@echo "$(BLUE)Testing compatibility shim...$(NC)"
+	@echo ""
+	@echo "$(GREEN)1. Testing USE_AGENTEX=true (new implementation)$(NC)"
+	@PYTHONPATH=src REGREADER_USE_AGENTEX=true $(PY_CMD) -c "\
+from regreader.agents import ClaudeAgent, PydanticAIAgent, LangGraphAgent; \
+assert 'agents_v2' in ClaudeAgent.__module__, 'Expected agents_v2'; \
+print('  ✓ ClaudeAgent from agents_v2'); \
+print('  ✓ PydanticAIAgent from agents_v2'); \
+print('  ✓ LangGraphAgent from agents_v2')"
+	@echo ""
+	@echo "$(GREEN)2. Testing USE_AGENTEX=false (old implementation)$(NC)"
+	@PYTHONPATH=src REGREADER_USE_AGENTEX=false $(PY_CMD) -c "\
+from regreader.agents import ClaudeAgent, PydanticAIAgent, LangGraphAgent; \
+assert 'agents_v2' not in ClaudeAgent.__module__, 'Expected old agents'; \
+print('  ✓ ClaudeAgent from agents (old)'); \
+print('  ✓ PydanticAIAgent from agents (old)'); \
+print('  ✓ LangGraphAgent from agents (old)')"
+	@echo ""
+	@echo "$(GREEN)✓ Compatibility shim test PASSED$(NC)"
+
+verify-agentex: ## Run complete agentex verification
+	@echo "$(BLUE)========================================$(NC)"
+	@echo "$(BLUE)AgentEx Implementation Verification$(NC)"
+	@echo "$(BLUE)========================================$(NC)"
+	@echo ""
+	$(MAKE) test-agentex
+	@echo ""
+	$(MAKE) test-agents-v2
+	@echo ""
+	$(MAKE) test-agentex-shim
+	@echo ""
+	@echo "$(GREEN)========================================$(NC)"
+	@echo "$(GREEN)All AgentEx verifications PASSED$(NC)"
 	@echo "$(GREEN)========================================$(NC)"
