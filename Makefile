@@ -3,7 +3,7 @@
 
 # 导入变量定义
 include makefiles/variables.mk
-include makefiles/conda.mk
+# include makefiles/conda.mk
 include makefiles/agents.mk
 include makefiles/mcp-tools.mk
 
@@ -114,42 +114,52 @@ help: ## Show this help message
 	@echo "  make verify-agentex           # Run all agentex verifications"
 
 #----------------------------------------------------------------------
-# Installation
+# Installation (统一接口，自动检测 uv/conda)
 #----------------------------------------------------------------------
 
-install: ## Install base dependencies
-	$(UV) sync
+install: pkgmgr-install ## Install base dependencies (auto-detect backend)
 
-install-dev: ## Install with dev dependencies (pytest, ruff)
-	$(UV) sync --extra dev
+install-dev: pkgmgr-install-dev ## Install with dev dependencies (pytest, ruff)
 
-install-all: ## Install with all optional index backends
-	$(UV) sync --extra dev --extra tantivy --extra whoosh --extra qdrant
+install-all: pkgmgr-install-all ## Install with all optional index backends
 
+# 特定后端的安装命令（保留用于特殊需求）
 install-tantivy: ## Install with Tantivy keyword index
-	$(UV) sync --extra tantivy
+ifeq ($(BACKEND),uv)
+	uv sync --extra tantivy
+else
+	pip install $(INSTALL_FLAGS) -e ".[tantivy]"
+endif
 
 install-whoosh: ## Install with Whoosh keyword index (Chinese tokenization)
-	$(UV) sync --extra whoosh
+ifeq ($(BACKEND),uv)
+	uv sync --extra whoosh
+else
+	pip install $(INSTALL_FLAGS) -e ".[whoosh]"
+endif
 
 install-qdrant: ## Install with Qdrant vector index
-	$(UV) sync --extra qdrant
+ifeq ($(BACKEND),uv)
+	uv sync --extra qdrant
+else
+	pip install $(INSTALL_FLAGS) -e ".[qdrant]"
+endif
 
 #----------------------------------------------------------------------
 # Code Quality
 #----------------------------------------------------------------------
 
 lint: ## Run ruff linter
-	$(UV_RUN) $(RUFF) check src/regreader tests
+	$(RUN_PREFIX) $(RUFF) check src/regreader tests
 
 lint-fix: ## Run ruff linter with auto-fix
-	$(UV_RUN) $(RUFF) check --fix src/regreader tests
+	$(RUN_PREFIX) $(RUFF) check --fix src/regreader tests
 
 format: ## Format code with ruff
-	$(UV_RUN) $(RUFF) format src/regreader tests
+	$(RUN_PREFIX) $(RUFF) format src/regreader tests
 
 format-check: ## Check code formatting without changes
-	$(UV_RUN) $(RUFF) format --check src/regreader tests
+	$(RUN_PREFIX) $(RUFF) format --check src/regreader tests
 
 check: lint format-check ## Run all code quality checks
 

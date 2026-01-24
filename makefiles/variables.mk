@@ -2,17 +2,18 @@
 # RegReader Makefile 变量定义
 # ============================================================
 
+# 导入统一包管理器模板（自动检测 uv/conda）
+include makefiles/pkgmgr.mk
+
 # 工具链
 PYTHON := python
-UV := uv
 PYTEST := pytest
 RUFF := ruff
 REGREADER := regreader
 
-# 命令前缀（消除 70+ 处重复）
-UV_RUN := $(UV) run
-REGREADER_CMD := $(UV_RUN) $(REGREADER)
-PY_CMD := $(UV_RUN) $(PYTHON)
+# 命令前缀（使用统一的 RUN_PREFIX，自动适配 uv/conda）
+REGREADER_CMD := $(RUN_PREFIX) $(REGREADER)
+PY_CMD := $(RUN_PREFIX) $(PYTHON)
 
 # Agent 配置
 AGENT ?= claude
@@ -68,7 +69,8 @@ GREEN := \033[0;32m
 YELLOW := \033[0;33m
 NC := \033[0m
 
-# Conda 依赖包列表（消除 5 处重复）
+# Conda 依赖包列表（已弃用，保留用于向后兼容）
+# 注意：现在使用 Makefile.pkgmgr 的统一接口，这些变量仅用于 conda.mk 的向后兼容
 CONDA_BASE_DEPS := pydantic pydantic-settings lancedb mcp typer rich loguru \
                    anthropic claude-agent-sdk "pydantic-ai>=1.0.0" \
                    langgraph langchain-anthropic langchain-openai sentence-transformers

@@ -1,11 +1,35 @@
 # ============================================================
 # RegReader Makefile - Conda 模块
 # ============================================================
-# Conda 环境专用命令（仅 Linux 服务器使用）
-# 依赖: mk/variables.mk
+# ⚠️  DEPRECATED: 此文件已弃用，将在未来版本中移除
+# ============================================================
+#
+# 弃用原因：
+#   所有功能已被 makefiles/pkgmgr.mk 统一接口替代
+#   pkgmgr.mk 自动检测 uv/conda，无需手动指定
+#
+# 迁移指南：
+#   make install-conda      → make install
+#   make install-conda-dev  → make install-dev
+#   make install-conda-all  → make install-all
+#   make chat-conda         → make chat
+#   make ask-conda          → make ask
+#
+# 强制使用 conda 后端（如需要）：
+#   PKGMGR_BACKEND=conda make install-dev
+#   PKGMGR_BACKEND=conda make chat
+#
+# 移除计划：
+#   - v1.1.0: 添加弃用警告（当前版本）
+#   - v1.2.0: 默认不加载（需手动 include）
+#   - v1.3.0: 完全移除此文件
 # ============================================================
 
-include makefiles/variables.mk
+$(warning ⚠️  makefiles/conda.mk is DEPRECATED and will be removed in v1.3.0)
+$(warning ⚠️  Use unified commands: make install, make chat, etc.)
+$(warning ⚠️  See makefiles/pkgmgr.mk for the new interface)
+
+# 注意：不再包含 variables.mk，因为主 Makefile 已经包含了
 
 #----------------------------------------------------------------------
 # Conda 安装目标
