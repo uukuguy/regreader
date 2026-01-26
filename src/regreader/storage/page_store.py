@@ -199,13 +199,19 @@ class PageStore:
             has_merged_tables=has_merged_tables,
         )
 
-    def _merge_pages(self, pages: list[PageDocument]) -> tuple[str, bool]:
+    def _merge_pages(
+        self, pages: list[PageDocument], include_page_markers: bool = True
+    ) -> tuple[str, bool]:
         """
         合并多页内容，处理跨页表格
 
         使用显式标记和启发式检测两种方式识别跨页表格：
         1. 显式标记：使用 continues_from_prev/continues_to_next 标记
         2. 启发式：当上页最后是表格、下页第一个也是表格且列数相同时合并
+
+        Args:
+            pages: 页面列表
+            include_page_markers: 是否包含页码标记（默认 True）
 
         Returns:
             (合并后的 Markdown, 是否包含合并的表格)
@@ -243,8 +249,9 @@ class PageStore:
             return prev_cols == next_cols
 
         for i, page in enumerate(pages):
-            # 添加页面分隔标记
-            parts.append(f"\n<!-- Page {page.page_num} -->\n")
+            # 添加页面分隔标记（如果配置启用）
+            if include_page_markers:
+                parts.append(f"\n<!-- Page {page.page_num} -->\n")
 
             # 获取下一页信息（用于启发式检测）
             next_page = pages[i + 1] if i + 1 < len(pages) else None

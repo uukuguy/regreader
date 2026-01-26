@@ -258,18 +258,21 @@ search-all: ## Search all regulations (usage: make search-all QUERY="故障处�
 # Markdown Export
 #----------------------------------------------------------------------
 
-OUTPUT ?= output.md
-export-full: ## Export full regulation (usage: make export-full REG_ID=angui_2024 OUTPUT=angui.md)
-	$(REGREADER_CMD) export $(REG_ID) --mode full -o $(OUTPUT)
+OUTPUT ?= outputs/reg_exported.md
+PURE ?=
+PURE_FLAG = $(if $(filter true,$(PURE)),--pure,)
+
+export-full: ## Export full regulation (usage: make export-full REG_ID=angui_2024 OUTPUT=angui.md PURE=true)
+	$(REGREADER_CMD) export $(REG_ID) --mode full $(PURE_FLAG) -o $(OUTPUT)
 
 CHAPTER ?= 2.1.4
-export-chapter: ## Export specific chapter (usage: make export-chapter REG_ID=angui_2024 CHAPTER=2.1.4)
-	$(REGREADER_CMD) export $(REG_ID) --mode chapter --chapter $(CHAPTER) -o $(OUTPUT)
+export-chapter: ## Export specific chapter (usage: make export-chapter REG_ID=angui_2024 CHAPTER=2.1.4 PURE=true)
+	$(REGREADER_CMD) export $(REG_ID) --mode chapter --chapter $(CHAPTER) $(PURE_FLAG) -o $(OUTPUT)
 
 START_PAGE ?= 1
 END_PAGE ?= 10
-export-pages: ## Export page range (usage: make export-pages REG_ID=angui_2024 START_PAGE=45 END_PAGE=52)
-	$(REGREADER_CMD) export $(REG_ID) --mode pages --start $(START_PAGE) --end $(END_PAGE) -o $(OUTPUT)
+export-pages: ## Export page range (usage: make export-pages REG_ID=angui_2024 START_PAGE=45 END_PAGE=52 PURE=true)
+	$(REGREADER_CMD) export $(REG_ID) --mode pages --start $(START_PAGE) --end $(END_PAGE) $(PURE_FLAG) -o $(OUTPUT)
 
 export-pure: ## Export pure content without metadata (usage: make export-pure REG_ID=angui_2024)
 	$(REGREADER_CMD) export $(REG_ID) --pure -o $(OUTPUT)

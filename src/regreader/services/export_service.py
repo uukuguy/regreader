@@ -381,9 +381,9 @@ class ExportService:
 
         # 4. 正文内容
         if config.merge_cross_page_tables:
-            merged_content, has_merged = self.page_store._merge_pages(pages)
-            if config.include_page_markers:
-                merged_content = self._add_page_markers_to_merged(merged_content, pages)
+            merged_content, has_merged = self.page_store._merge_pages(
+                pages, include_page_markers=config.include_page_markers
+            )
             parts.append(merged_content)
         else:
             for page in pages:
