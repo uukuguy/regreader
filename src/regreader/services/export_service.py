@@ -15,6 +15,7 @@ from regreader.core.exceptions import (
 from regreader.storage import PageStore
 from regreader.storage.models import (
     ChapterNode,
+    ContentBlock,
     DocumentStructure,
     ExportConfig,
     ExportMetadata,
@@ -121,7 +122,7 @@ class ExportService:
         config: ExportConfig | None = None,
         include_children: bool = True,
     ) -> ExportResult:
-        """导出指定章节到 Markdown
+        """导出指定章节到 Markdown（基于内容块精确过滤）
 
         Args:
             reg_id: 规程标识
@@ -148,26 +149,31 @@ class ExportService:
             if not chapter_node:
                 raise ChapterNotFoundError(reg_id, section_number)
 
-            # 收集章节页面
-            pages = self._collect_chapter_pages(reg_id, chapter_node, doc_structure, include_children)
+            # 收集章节内容块（精确过滤）
+            blocks_with_pages, page_nums = self._collect_chapter_blocks(
+                reg_id, chapter_node, doc_structure, include_children
+            )
+
+            if not blocks_with_pages:
+                logger.warning(f"No content blocks found for chapter {section_number}")
 
             # 构建元数据
             chapter_path = doc_structure.get_chapter_path(chapter_node.node_id)
+            sorted_pages = sorted(page_nums) if page_nums else []
             metadata = ExportMetadata(
                 reg_id=reg_id,
                 title=self.page_store.load_info(reg_id).title,
                 chapter=" > ".join(chapter_path),
                 section_number=section_number,
-                pages=f"{pages[0].page_num}-{pages[-1].page_num}" if pages else None,
+                pages=f"{sorted_pages[0]}-{sorted_pages[-1]}" if sorted_pages else None,
                 export_mode="chapter",
-                total_pages=len(pages),
+                total_pages=len(page_nums),
             )
 
-            # 生成内容
-            content = self._build_markdown_content(
-                pages=pages,
+            # 生成内容（基于内容块）
+            content = self._build_markdown_from_blocks(
+                blocks_with_pages=blocks_with_pages,
                 metadata=metadata,
-                toc=None,
                 config=config,
             )
 
@@ -178,14 +184,14 @@ class ExportService:
                     success=True,
                     output_path=output_path,
                     metadata=metadata,
-                    stats=self._calculate_stats(pages, content),
+                    stats=self._calculate_stats_from_blocks(blocks_with_pages, content),
                 )
             else:
                 return ExportResult(
                     success=True,
                     content=content,
                     metadata=metadata,
-                    stats=self._calculate_stats(pages, content),
+                    stats=self._calculate_stats_from_blocks(blocks_with_pages, content),
                 )
 
         except Exception as e:
@@ -266,6 +272,85 @@ class ExportService:
             return ExportResult(success=False, error=str(e))
 
     # ==================== 辅助方法 ====================
+
+    def _build_markdown_from_blocks(
+        self,
+        blocks_with_pages: list[tuple[ContentBlock, int]],
+        metadata: ExportMetadata,
+        config: ExportConfig,
+    ) -> str:
+        """从内容块列表构建 Markdown 内容（用于章节导出）
+
+        Args:
+            blocks_with_pages: (内容块, 页码)元组列表
+            metadata: 导出元数据
+            config: 导出配置
+
+        Returns:
+            完整的 Markdown 内容
+        """
+        parts = []
+
+        # 1. YAML frontmatter
+        if config.include_yaml_frontmatter:
+            parts.append(self._build_yaml_frontmatter(metadata))
+            parts.append("")
+
+        # 2. 标题
+        parts.append(f"# {metadata.title}")
+        if metadata.chapter:
+            parts.append(f"\n## {metadata.chapter}")
+        parts.append("")
+
+        # 3. 正文内容（按页码和 order_in_page 排序）
+        sorted_blocks = sorted(blocks_with_pages, key=lambda x: (x[1], x[0].order_in_page))
+
+        current_page = None
+        for block, page_num in sorted_blocks:
+            # 添加页码标记（如果配置启用且页码变化）
+            if config.include_page_markers and page_num != current_page:
+                if current_page is not None:  # 不在第一个块前添加标记
+                    parts.append("")
+                parts.append(f"<!-- Page {page_num} -->")
+                parts.append("")
+                current_page = page_num
+
+            # 添加内容块
+            parts.append(block.content_markdown)
+
+        # 4. 注释汇总（如果配置启用）
+        if config.include_annotations:
+            # 注意：内容块本身不包含注释，需要从页面加载
+            # 这里简化处理，暂不支持注释汇总
+            pass
+
+        return "\n".join(parts)
+
+    def _calculate_stats_from_blocks(
+        self, blocks_with_pages: list[tuple[ContentBlock, int]], content: str
+    ) -> dict[str, int]:
+        """从内容块列表计算统计信息
+
+        Args:
+            blocks_with_pages: (内容块, 页码)元组列表
+            content: 生成的 Markdown 内容
+
+        Returns:
+            统计信息字典
+        """
+        # 统计表格数量
+        table_count = sum(1 for block, _ in blocks_with_pages if block.block_type == "table")
+
+        # 统计涉及的页面数量
+        page_nums = set(page_num for _, page_num in blocks_with_pages)
+
+        return {
+            "pages": len(page_nums),
+            "blocks": len(blocks_with_pages),
+            "tables": table_count,
+            "annotations": 0,  # 暂不支持
+            "size_kb": len(content.encode("utf-8")) // 1024,
+        }
 
     def _build_markdown_content(
         self,
@@ -407,7 +492,7 @@ class ExportService:
         doc_structure: DocumentStructure,
         include_children: bool,
     ) -> list[PageDocument]:
-        """收集章节的所有页面
+        """收集章节的所有页面（已废弃，保留用于向后兼容）
 
         Args:
             reg_id: 规程标识
@@ -435,6 +520,113 @@ class ExportService:
                 logger.warning(f"Failed to load page {page_num}: {e}")
 
         return pages
+
+    def _collect_chapter_blocks(
+        self,
+        reg_id: str,
+        chapter_node: ChapterNode,
+        doc_structure: DocumentStructure,
+        include_children: bool,
+    ) -> tuple[list[tuple[ContentBlock, int]], set[int]]:
+        """收集章节的所有内容块（基于 chapter_node_id 精确过滤）
+
+        Args:
+            reg_id: 规程标识
+            chapter_node: 章节节点
+            doc_structure: 文档结构
+            include_children: 是否包含子章节
+
+        Returns:
+            ((内容块, 页码)元组列表, 涉及的页码集合)
+        """
+        blocks_with_pages: list[tuple[ContentBlock, int]] = []
+        page_nums: set[int] = set()
+
+        # 收集目标章节节点ID
+        target_node_ids = {chapter_node.node_id}
+        if include_children:
+            target_node_ids.update(self._collect_descendant_node_ids(chapter_node, doc_structure))
+
+        # 获取章节起始页和结束页范围
+        start_page = chapter_node.page_num
+        end_page = self._find_chapter_end_page(chapter_node, doc_structure)
+
+        # 遍历页面范围，收集匹配的内容块
+        for page_num in range(start_page, end_page + 1):
+            try:
+                page = self.page_store.load_page(reg_id, page_num)
+                for block in page.content_blocks:
+                    # 如果 chapter_node_id 存在，使用精确匹配
+                    if block.chapter_node_id is not None:
+                        if block.chapter_node_id in target_node_ids:
+                            blocks_with_pages.append((block, page_num))
+                            page_nums.add(page_num)
+                    else:
+                        # 如果 chapter_node_id 为 None，使用章节路径匹配（降级方案）
+                        # 检查块的章节路径是否以目标章节开头
+                        if self._block_belongs_to_chapter(block, chapter_node, doc_structure, include_children):
+                            blocks_with_pages.append((block, page_num))
+                            page_nums.add(page_num)
+            except Exception as e:
+                logger.warning(f"Failed to load page {page_num}: {e}")
+
+        return blocks_with_pages, page_nums
+
+    def _block_belongs_to_chapter(
+        self,
+        block: ContentBlock,
+        chapter_node: ChapterNode,
+        doc_structure: DocumentStructure,
+        include_children: bool,
+    ) -> bool:
+        """检查内容块是否属于指定章节（降级方案，用于 chapter_node_id 为 None 的情况）
+
+        Args:
+            block: 内容块
+            chapter_node: 章节节点
+            doc_structure: 文档结构
+            include_children: 是否包含子章节
+
+        Returns:
+            是否属于该章节
+        """
+        if not block.chapter_path:
+            return False
+
+        # 获取目标章节的完整标题
+        target_section = chapter_node.section_number
+
+        # 检查块的章节路径中是否包含目标章节
+        for path_item in block.chapter_path:
+            if path_item.startswith(target_section):
+                if include_children:
+                    # 包含子章节：只要以目标章节编号开头即可
+                    return True
+                else:
+                    # 不包含子章节：必须完全匹配
+                    return path_item.startswith(f"{target_section} ") or path_item == target_section
+
+        return False
+
+    def _collect_descendant_node_ids(
+        self, node: ChapterNode, doc_structure: DocumentStructure
+    ) -> set[str]:
+        """递归收集所有子孙节点ID
+
+        Args:
+            node: 起始节点
+            doc_structure: 文档结构
+
+        Returns:
+            子孙节点ID集合
+        """
+        descendants = set()
+        for child_id in node.children_ids:
+            descendants.add(child_id)
+            child_node = doc_structure.all_nodes.get(child_id)
+            if child_node:
+                descendants.update(self._collect_descendant_node_ids(child_node, doc_structure))
+        return descendants
 
     def _find_chapter_end_page(
         self, node: ChapterNode, doc_structure: DocumentStructure
@@ -465,7 +657,12 @@ class ExportService:
         # 查找下一个同级或更高级别的节点
         for next_node in all_nodes[current_index + 1 :]:
             if next_node.level <= node.level:
-                return next_node.page_num - 1
+                # 如果下一个节点在同一页，结束页就是当前页
+                # 否则结束页是下一个节点的前一页
+                if next_node.page_num == node.page_num:
+                    return node.page_num
+                else:
+                    return next_node.page_num - 1
 
         # 没有找到，使用总页数
         return info.total_pages

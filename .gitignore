@@ -25,3 +25,5 @@ outputs/
 
 data/raw/
 .mcp.json
+
+.regreader_workspace/
