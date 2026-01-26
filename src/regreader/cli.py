@@ -2324,6 +2324,100 @@ def workspace_archive(
 
 
 @app.command()
+def export(
+    reg_id: str = typer.Argument(..., help="规程标识"),
+    mode: str = typer.Option(
+        "full",
+        "--mode", "-m",
+        help="导出模式: full（完整）, chapter（章节）, pages（页面范围）"
+    ),
+    output: Path = typer.Option(None, "--output", "-o", help="输出路径"),
+
+    # 模式特定选项
+    chapter: str = typer.Option(None, "--chapter", "-c", help="章节编号（chapter模式）"),
+    start_page: int = typer.Option(None, "--start", "-s", help="起始页码（pages模式）"),
+    end_page: int = typer.Option(None, "--end", "-e", help="结束页码（pages模式）"),
+
+    # 元数据选项
+    no_yaml: bool = typer.Option(False, "--no-yaml", help="不包含YAML frontmatter"),
+    no_toc: bool = typer.Option(False, "--no-toc", help="不包含目录"),
+    no_page_markers: bool = typer.Option(False, "--no-page-markers", help="不包含页码标记"),
+    pure: bool = typer.Option(False, "--pure", help="纯内容模式"),
+
+    # TOC选项
+    toc_depth: int = typer.Option(3, "--toc-depth", help="目录深度（1-6）"),
+):
+    """导出规程为Markdown格式
+
+    示例:
+        # 导出完整规程
+        regreader export angui_2024 -o angui_2024.md
+
+        # 导出指定章节
+        regreader export angui_2024 --mode chapter --chapter 2.1.4
+
+        # 导出页面范围
+        regreader export angui_2024 --mode pages --start 45 --end 52
+    """
+    from regreader.services.export_service import ExportService
+    from regreader.storage.models import ExportConfig
+
+    # 验证模式特定要求
+    if mode == "chapter" and not chapter:
+        console.print("[red]错误: chapter模式需要指定 --chapter[/red]")
+        raise typer.Exit(1)
+
+    if mode == "pages" and (start_page is None or end_page is None):
+        console.print("[red]错误: pages模式需要指定 --start 和 --end[/red]")
+        raise typer.Exit(1)
+
+    # 构建导出配置
+    if pure:
+        config = ExportConfig(
+            include_yaml_frontmatter=False,
+            include_toc=False,
+            include_page_markers=False,
+            output_path=output,
+        )
+    else:
+        config = ExportConfig(
+            include_yaml_frontmatter=not no_yaml,
+            include_toc=not no_toc,
+            include_page_markers=not no_page_markers,
+            toc_max_depth=toc_depth,
+            output_path=output,
+        )
+
+    # 执行导出
+    service = ExportService()
+    with console.status("导出中..."):
+        if mode == "full":
+            result = service.export_full_regulation(reg_id, config)
+        elif mode == "chapter":
+            result = service.export_chapter(reg_id, chapter, config)
+        elif mode == "pages":
+            result = service.export_page_range(reg_id, start_page, end_page, config)
+        else:
+            console.print(f"[red]错误: 未知模式 '{mode}'[/red]")
+            raise typer.Exit(1)
+
+    # 显示结果
+    if result.success:
+        console.print("[green]✓ 导出成功[/green]")
+
+        if result.output_path:
+            console.print(f"输出文件: {result.output_path}")
+
+        if result.stats:
+            console.print("\n统计信息:")
+            for key, value in result.stats.items():
+                console.print(f"  {key}: {value}")
+    else:
+        console.print(f"[red]✗ 导出失败: {result.error}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
 def version():
     """显示版本信息"""
     from regreader import __version__

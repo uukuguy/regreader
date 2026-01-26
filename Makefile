@@ -18,9 +18,11 @@ include makefiles/mcp-tools.mk
 	chat-mcp-sse chat-claude-sse chat-pydantic-sse chat-langgraph-sse \
 	mcp-tools mcp-tools-v mcp-tools-live mcp-verify mcp-verify-v mcp-verify-sse \
 	enrich-metadata enrich-metadata-all search-all search-multi search-smart \
+	export-full export-chapter export-pages export-pure \
 	test-bash-fs verify-bash-fs test-infrastructure test-regsearch \
 	chat-agentex ask-agentex chat-orch-agentex ask-orch-agentex \
-	test-agentex test-agents-v2 test-agentex-shim verify-agentex
+	test-agentex test-agents-v2 test-agentex-shim verify-agentex \
+	list ingest inspect inspect-vectors delete delete-force version
 
 # Default target
 .DEFAULT_GOAL := help
@@ -95,6 +97,19 @@ help: ## Show this help message
 	@echo "  make search MODE=mcp-sse QUERY=\"母线失压\"  # Search via MCP SSE"
 	@echo "  make chat MODE=mcp-sse AGENT=claude      # Chat via MCP SSE"
 	@echo "  make chat-claude-sse          # Chat with Claude Agent via SSE"
+	@echo ""
+	@echo "$(GREEN)Page Store Management:$(NC)"
+	@echo "  make list                     # List all ingested regulations"
+	@echo "  make ingest FILE=doc.pdf REG_ID=angui_2024  # Ingest a document"
+	@echo "  make inspect REG_ID=angui_2024 PAGE_NUM=25  # Inspect page data"
+	@echo "  make delete REG_ID=angui_2024              # Delete regulation (with confirmation)"
+	@echo "  make delete-force REG_ID=angui_2024        # Delete without confirmation"
+	@echo ""
+	@echo "$(GREEN)Markdown Export:$(NC)"
+	@echo "  make export-full REG_ID=angui_2024 OUTPUT=angui.md  # Export full regulation"
+	@echo "  make export-chapter REG_ID=angui_2024 CHAPTER=2.1.4 # Export specific chapter"
+	@echo "  make export-pages REG_ID=angui_2024 START_PAGE=45 END_PAGE=52  # Export page range"
+	@echo "  make export-pure REG_ID=angui_2024         # Export pure content (no metadata)"
 	@echo ""
 	@echo "$(GREEN)Bash+FS Subagents Architecture:$(NC)"
 	@echo "  make test-bash-fs             # Run Bash+FS unit tests"
@@ -240,6 +255,26 @@ search-all: ## Search all regulations (usage: make search-all QUERY="故障处�
 	$(REGREADER_CMD) $(MCP_FLAGS) search "$(QUERY)" --all
 
 #----------------------------------------------------------------------
+# Markdown Export
+#----------------------------------------------------------------------
+
+OUTPUT ?= output.md
+export-full: ## Export full regulation (usage: make export-full REG_ID=angui_2024 OUTPUT=angui.md)
+	$(REGREADER_CMD) export $(REG_ID) --mode full -o $(OUTPUT)
+
+CHAPTER ?= 2.1.4
+export-chapter: ## Export specific chapter (usage: make export-chapter REG_ID=angui_2024 CHAPTER=2.1.4)
+	$(REGREADER_CMD) export $(REG_ID) --mode chapter --chapter $(CHAPTER) -o $(OUTPUT)
+
+START_PAGE ?= 1
+END_PAGE ?= 10
+export-pages: ## Export page range (usage: make export-pages REG_ID=angui_2024 START_PAGE=45 END_PAGE=52)
+	$(REGREADER_CMD) export $(REG_ID) --mode pages --start $(START_PAGE) --end $(END_PAGE) -o $(OUTPUT)
+
+export-pure: ## Export pure content without metadata (usage: make export-pure REG_ID=angui_2024)
+	$(REGREADER_CMD) export $(REG_ID) --pure -o $(OUTPUT)
+
+#----------------------------------------------------------------------
 # Metadata Enrichment
 #----------------------------------------------------------------------
 
@@ -274,6 +309,20 @@ inspect: ## Inspect page data across indexes (usage: make inspect REG_ID=angui P
 
 inspect-vectors: ## Inspect page data with vector display
 	$(REGREADER_CMD) inspect $(REG_ID) $(PAGE_NUM) --show-vectors
+
+delete: ## Delete a regulation (usage: make delete REG_ID=angui_2024)
+	@if [ -z "$(REG_ID)" ]; then \
+		echo "$(RED)Error: REG_ID is required. Usage: make delete REG_ID=angui_2024$(NC)"; \
+		exit 1; \
+	fi
+	$(REGREADER_CMD) delete $(REG_ID)
+
+delete-force: ## Delete a regulation without confirmation (usage: make delete-force REG_ID=angui_2024)
+	@if [ -z "$(REG_ID)" ]; then \
+		echo "$(RED)Error: REG_ID is required. Usage: make delete-force REG_ID=angui_2024$(NC)"; \
+		exit 1; \
+	fi
+	$(REGREADER_CMD) delete $(REG_ID) --force
 
 
 # Litellm Proxy

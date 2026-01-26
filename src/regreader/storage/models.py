@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
@@ -442,3 +445,95 @@ class RegulationMatch(BaseModel):
             return "medium"
         else:
             return "low"
+
+
+# ============================================================================
+# 导出功能模型（Markdown 导出）
+# ============================================================================
+
+
+@dataclass
+class ExportConfig:
+    """Markdown 导出配置
+
+    控制导出时的元数据包含、格式化和输出选项。
+    """
+
+    # 元数据包含标志
+    include_yaml_frontmatter: bool = True
+    include_toc: bool = True
+    include_page_markers: bool = True
+    include_annotations: bool = True
+
+    # TOC 配置
+    toc_max_depth: int = 3
+    toc_position: Literal["top", "bottom", "separate_file"] = "top"
+    toc_include_page_numbers: bool = True
+
+    # 内容处理
+    merge_cross_page_tables: bool = True
+    preserve_block_structure: bool = True
+
+    # 输出配置
+    output_path: Path | None = None
+    filename_template: str = "{reg_id}_{mode}.md"
+    encoding: str = "utf-8"
+
+    # 多文件导出选项
+    split_by_chapter_level: int = 1
+    create_chapter_subdirs: bool = True
+    max_file_size_mb: float | None = None
+
+
+@dataclass
+class ExportMetadata:
+    """导出元数据（用于 YAML frontmatter）
+
+    提供文档上下文和导出来源信息。
+    """
+
+    # 文档标识
+    reg_id: str
+    title: str
+
+    # 范围信息
+    chapter: str | None = None
+    section_number: str | None = None
+    pages: str | None = None
+
+    # 导出元数据
+    exported_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    export_mode: Literal["full", "chapter", "pages", "multi_file"] = "full"
+
+    # 统计信息
+    total_pages: int | None = None
+    chapter_count: int | None = None
+    table_count: int | None = None
+    annotation_count: int | None = None
+
+    # 可选字段
+    description: str | None = None
+    keywords: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ExportResult:
+    """导出操作结果
+
+    包含输出路径、内容和操作统计信息。
+    """
+
+    success: bool
+
+    # 输出信息
+    output_path: Path | None = None
+    output_paths: list[Path] | None = None
+    content: str | None = None
+
+    # 元数据和统计
+    metadata: ExportMetadata | None = None
+    stats: dict[str, int] = field(default_factory=dict)
+
+    # 错误处理
+    error: str | None = None
+    warnings: list[str] = field(default_factory=list)
