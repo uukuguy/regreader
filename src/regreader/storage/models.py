@@ -202,6 +202,7 @@ class DocumentStructure(BaseModel):
     """
 
     reg_id: str = Field(description="规程标识")
+    document_title: str | None = Field(default=None, description="文档标题（从第一页提取）")
     all_nodes: dict[str, ChapterNode] = Field(
         default_factory=dict, description="所有章节节点映射 {node_id: ChapterNode}"
     )

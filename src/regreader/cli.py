@@ -136,6 +136,7 @@ def ingest(
     file: Path = typer.Option(None, "--file", "-f", help="单个文档文件路径"),
     directory: Path = typer.Option(None, "--dir", "-d", help="文档目录路径"),
     reg_id: str = typer.Option(None, "--reg-id", "-r", help="规程标识"),
+    title: str = typer.Option(None, "--title", "-t", help="文档标题（优先级最高）"),
     file_format: str = typer.Option("docx", "--format", help="文件格式 (docx, pdf)"),
     no_ocr: bool = typer.Option(False, "--no-ocr", help="禁用 OCR（加快解析速度）"),
 ):
@@ -180,7 +181,10 @@ def ingest(
         with console.status("解析文档..."):
             result = parser.parse(doc_file)
 
-        extractor = PageExtractor(current_reg_id)
+        # 标题优先级：title参数 > 自动提取 > 文件名basename
+        # 只有在指定了 --title 参数时才传入 explicit_title
+        # 否则让 PageExtractor 自动提取，如果提取失败则在后续使用文件名
+        extractor = PageExtractor(current_reg_id, explicit_title=title)
 
         # 第一阶段：提取文档结构
         with console.status("提取章节结构..."):
@@ -192,6 +196,11 @@ def ingest(
             pages = extractor.extract_pages(result, doc_structure)
             # 从 DocumentStructure 构建 TocTree（确保与章节识别逻辑一致）
             toc = extractor.build_toc_from_structure(doc_structure, len(pages))
+
+            # 标题回退逻辑：如果 toc.title 等于 reg_id 或为空，说明没有提取到标题，使用文件名
+            if toc.title == current_reg_id or not toc.title or toc.title.strip() == "":
+                toc.title = doc_file.stem
+                console.print(f"[yellow]未提取到文档标题，使用文件名: {doc_file.stem}[/yellow]")
 
         console.print(f"提取完成: {len(pages)} 页")
 

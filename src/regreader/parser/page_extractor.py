@@ -27,14 +27,16 @@ from regreader.storage.models import (
 class PageExtractor:
     """从 Docling 结果提取页面级数据"""
 
-    def __init__(self, reg_id: str):
+    def __init__(self, reg_id: str, explicit_title: str | None = None):
         """
         初始化提取器
 
         Args:
             reg_id: 规程标识（如 'angui_2024'）
+            explicit_title: 显式指定的文档标题（优先级最高）
         """
         self.reg_id = reg_id
+        self.explicit_title = explicit_title
         self._current_chapter_path: list[str] = []
         self._current_chapter_node: ChapterNode | None = None
 
@@ -54,6 +56,33 @@ class PageExtractor:
         all_nodes: dict[str, ChapterNode] = {}
         root_node_ids: list[str] = []
         node_stack: list[tuple[int, str]] = []  # (level, node_id)
+
+        # 提取文档标题（优先级：explicit_title > 第一页自动提取 > reg_id）
+        document_title: str | None = None
+
+        if self.explicit_title:
+            # 优先级1：使用显式指定的标题
+            document_title = self.explicit_title
+            logger.info(f"使用显式指定的文档标题: {document_title}")
+        else:
+            # 优先级2：从第一页自动提取标题
+            for item in doc.texts:
+                # 获取页码
+                page_num = 1
+                if item.prov:
+                    for prov in item.prov:
+                        if hasattr(prov, 'page_no') and prov.page_no:
+                            page_num = prov.page_no
+                            break
+
+                # 只从第一页提取标题
+                if page_num == 1 and item.text.strip():
+                    # 检查是否为章节标题（避免把章节标题当作文档标题）
+                    is_section, _ = self._parse_section_info(item.text)
+                    if not is_section:
+                        document_title = item.text.strip()
+                        logger.info(f"从第一页自动提取文档标题: {document_title}")
+                        break
 
         # 跟踪上一个 numeric_single 类型的 level-1 章节编号
         # 用于验证编号是否连续，避免假阳性
@@ -121,6 +150,7 @@ class PageExtractor:
 
         return DocumentStructure(
             reg_id=self.reg_id,
+            document_title=document_title,
             all_nodes=all_nodes,
             root_node_ids=root_node_ids,
         )
@@ -1026,9 +1056,12 @@ class PageExtractor:
                 )
                 root_items.append(root_item)
 
+        # 使用 DocumentStructure 中提取的文档标题，如果没有则使用 reg_id
+        title = doc_structure.document_title or self.reg_id
+
         return TocTree(
             reg_id=self.reg_id,
-            title=self.reg_id,
+            title=title,
             total_pages=total_pages,
             items=root_items,
         )
